@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tree_sitter::Language;
 
 use crate::violation::Violation;
@@ -12,6 +14,26 @@ impl Context {
     }
 
     pub fn report(&self, violation: Violation) {
-        unimplemented!()
+        print_violation(&violation);
+    }
+}
+
+fn print_violation(violation: &Violation) {
+    eprintln!(
+        "{:?}:{}:{} {}",
+        violation.query_match_context.path,
+        violation.node.range().start_point.row + 1,
+        violation.node.range().start_point.column + 1,
+        violation.message
+    );
+}
+
+pub struct QueryMatchContext<'path> {
+    pub path: &'path Path,
+}
+
+impl<'path> QueryMatchContext<'path> {
+    pub fn new(path: &'path Path) -> Self {
+        Self { path }
     }
 }

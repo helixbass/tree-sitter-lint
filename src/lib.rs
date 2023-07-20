@@ -4,13 +4,15 @@ mod rule;
 mod violation;
 
 pub use args::Args;
+use clap::Parser;
+use context::QueryMatchContext;
 use rule::{ResolvedRule, Rule, RuleBuilder, RuleListenerBuilder};
 use tree_sitter::Query;
 use violation::ViolationBuilder;
 
 use crate::context::Context;
 
-pub fn run(args: Args) {
+pub fn run(_args: Args) {
     let language = tree_sitter_rust::language();
     let context = Context::new(language);
     let resolved_rules = get_rules()
@@ -18,6 +20,23 @@ pub fn run(args: Args) {
         .map(|rule| rule.resolve(&context))
         .collect::<Vec<_>>();
     let aggregated_queries = AggregatedQueries::new(&resolved_rules, &context);
+    let tree_sitter_grep_args = tree_sitter_grep::Args::parse_from([
+        "tree_sitter_grep",
+        "-q",
+        &aggregated_queries.query_text,
+        "-l",
+        "rust",
+    ]);
+    tree_sitter_grep::run_with_callback(
+        tree_sitter_grep_args,
+        |capture_info, file_contents, path| {
+            let (rule_index, rule_listener_index) =
+                aggregated_queries.pattern_index_lookup[capture_info.pattern_index];
+            let listener = &resolved_rules[rule_index].listeners[rule_listener_index];
+            (listener.on_query_match)(&capture_info.node, &QueryMatchContext::new(path));
+        },
+    )
+    .unwrap();
 }
 
 type RuleIndex = usize;
@@ -26,6 +45,7 @@ type RuleListenerIndex = usize;
 struct AggregatedQueries {
     pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)>,
     query: Query,
+    query_text: String,
 }
 
 impl AggregatedQueries {
@@ -46,6 +66,7 @@ impl AggregatedQueries {
         Self {
             pattern_index_lookup,
             query,
+            query_text: aggregated_query_text,
         }
     }
 }
@@ -73,11 +94,12 @@ fn no_default_default_rule() -> Rule {
                         )"#,
                 )
                 .capture_name("c")
-                .on_query_match(|node| {
+                .on_query_match(|node, query_match_context| {
                     context.report(
                         ViolationBuilder::default()
                             .message(r#"Use '_d()' instead of 'Default::default()'"#)
                             .node(node)
+                            .query_match_context(query_match_context)
                             .build()
                             .unwrap(),
                     );

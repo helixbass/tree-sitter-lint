@@ -1,16 +1,16 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use derive_builder::Builder;
 use tree_sitter::{Node, Query};
 
-use crate::context::Context;
+use crate::context::{Context, QueryMatchContext};
 
 #[derive(Builder)]
 #[builder(setter(into))]
 pub struct Rule {
     pub name: String,
     #[builder(setter(custom))]
-    pub create: Rc<dyn Fn(&Context) -> Vec<RuleListener>>,
+    pub create: Arc<dyn Fn(&Context) -> Vec<RuleListener>>,
 }
 
 impl Rule {
@@ -32,7 +32,7 @@ impl RuleBuilder {
         &mut self,
         callback: impl Fn(&Context) -> Vec<RuleListener> + 'static,
     ) -> &mut Self {
-        self.create = Some(Rc::new(callback));
+        self.create = Some(Arc::new(callback));
         self
     }
 }
@@ -54,7 +54,7 @@ pub struct RuleListener<'on_query_match> {
     pub query: String,
     pub capture_name: Option<String>,
     #[builder(setter(custom))]
-    pub on_query_match: Rc<dyn Fn(&Node) + 'on_query_match>,
+    pub on_query_match: Arc<dyn Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
 }
 
 impl<'on_query_match> RuleListener<'on_query_match> {
@@ -82,8 +82,11 @@ impl<'on_query_match> RuleListener<'on_query_match> {
 }
 
 impl<'on_query_match> RuleListenerBuilder<'on_query_match> {
-    pub fn on_query_match(&mut self, callback: impl Fn(&Node) + 'on_query_match) -> &mut Self {
-        self.on_query_match = Some(Rc::new(callback));
+    pub fn on_query_match(
+        &mut self,
+        callback: impl Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync,
+    ) -> &mut Self {
+        self.on_query_match = Some(Arc::new(callback));
         self
     }
 }
@@ -92,5 +95,5 @@ pub struct ResolvedRuleListener<'on_query_match> {
     pub query: Query,
     pub query_text: String,
     pub capture_index: u32,
-    pub on_query_match: Rc<dyn Fn(&Node) + 'on_query_match>,
+    pub on_query_match: Arc<dyn Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
 }
