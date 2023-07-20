@@ -3,6 +3,11 @@ mod context;
 mod rule;
 mod violation;
 
+use std::{
+    process,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
 pub use args::Args;
 use clap::Parser;
 use context::QueryMatchContext;
@@ -27,6 +32,7 @@ pub fn run(_args: Args) {
         "-l",
         "rust",
     ]);
+    let reported_any_violations = AtomicBool::new(false);
     tree_sitter_grep::run_with_callback(
         tree_sitter_grep_args,
         |capture_info, file_contents, path| {
@@ -36,11 +42,16 @@ pub fn run(_args: Args) {
             let listener = &rule.listeners[rule_listener_index];
             (listener.on_query_match)(
                 &capture_info.node,
-                &QueryMatchContext::new(path, file_contents, rule),
+                &QueryMatchContext::new(path, file_contents, rule, &reported_any_violations),
             );
         },
     )
     .unwrap();
+    if reported_any_violations.load(Ordering::Relaxed) {
+        process::exit(1);
+    } else {
+        process::exit(0);
+    }
 }
 
 type RuleIndex = usize;
