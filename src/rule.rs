@@ -52,6 +52,7 @@ impl<'context> ResolvedRule<'context> {
 #[builder(setter(into, strip_option))]
 pub struct RuleListener<'on_query_match> {
     pub query: String,
+    #[builder(default)]
     pub capture_name: Option<String>,
     #[builder(setter(custom))]
     pub on_query_match: Arc<dyn Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,

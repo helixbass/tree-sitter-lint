@@ -4,6 +4,7 @@ mod rule;
 mod violation;
 
 use std::{
+    borrow::Cow,
     process,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -16,6 +17,17 @@ use tree_sitter::Query;
 use violation::ViolationBuilder;
 
 use crate::context::Context;
+
+#[macro_export]
+macro_rules! regex {
+    ($re:expr $(,)?) => {{
+        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| regex::Regex::new($re).unwrap())
+    }};
+}
+
+const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
+const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
 pub fn run(_args: Args) {
     let language = tree_sitter_rust::language();
@@ -31,6 +43,8 @@ pub fn run(_args: Args) {
         &aggregated_queries.query_text,
         "-l",
         "rust",
+        "--capture",
+        CAPTURE_NAME_FOR_TREE_SITTER_GREP,
     ]);
     let reported_any_violations = AtomicBool::new(false);
     tree_sitter_grep::run_with_callback(
@@ -73,7 +87,18 @@ impl AggregatedQueries {
                 for _ in 0..rule_listener.query.pattern_count() {
                     pattern_index_lookup.push((rule_index, rule_listener_index));
                 }
-                aggregated_query_text.push_str(&rule_listener.query_text);
+                let use_capture_name =
+                    &rule_listener.query.capture_names()[rule_listener.capture_index as usize];
+                let query_text_with_unified_capture_name =
+                    regex!(&format!(r#"@{use_capture_name}\b"#)).replace_all(
+                        &rule_listener.query_text,
+                        CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,
+                    );
+                assert!(
+                    matches!(query_text_with_unified_capture_name, Cow::Owned(_),),
+                    "Didn't find any instances of the capture name to replace"
+                );
+                aggregated_query_text.push_str(&query_text_with_unified_capture_name);
                 aggregated_query_text.push_str("\n\n");
             }
         }
@@ -88,7 +113,7 @@ impl AggregatedQueries {
 }
 
 fn get_rules() -> Vec<Rule> {
-    vec![no_default_default_rule()]
+    vec![no_default_default_rule(), no_lazy_static_rule()]
 }
 
 fn no_default_default_rule() -> Rule {
@@ -98,22 +123,50 @@ fn no_default_default_rule() -> Rule {
             vec![RuleListenerBuilder::default()
                 .query(
                     r#"(
-                            (call_expression
-                              function:
-                                (scoped_identifier
-                                  path:
-                                    (identifier) @first (#eq? @first "Default")
-                                  name:
-                                    (identifier) @second (#eq? @second "default")
-                                )
-                            ) @c
-                        )"#,
+                      (call_expression
+                        function:
+                          (scoped_identifier
+                            path:
+                              (identifier) @first (#eq? @first "Default")
+                            name:
+                              (identifier) @second (#eq? @second "default")
+                          )
+                      ) @c
+                    )"#,
                 )
                 .capture_name("c")
                 .on_query_match(|node, query_match_context| {
                     query_match_context.report(
                         ViolationBuilder::default()
                             .message(r#"Use '_d()' instead of 'Default::default()'"#)
+                            .node(node)
+                            .build()
+                            .unwrap(),
+                    );
+                })
+                .build()
+                .unwrap()]
+        })
+        .build()
+        .unwrap()
+}
+
+fn no_lazy_static_rule() -> Rule {
+    RuleBuilder::default()
+        .name("no_lazy_static")
+        .create(|_context| {
+            vec![RuleListenerBuilder::default()
+                .query(
+                    r#"(
+                      (macro_invocation
+                         macro: (identifier) @c (#eq? @c "lazy_static")
+                      )
+                    )"#,
+                )
+                .on_query_match(|node, query_match_context| {
+                    query_match_context.report(
+                        ViolationBuilder::default()
+                            .message(r#"Prefer 'OnceCell::*::Lazy' to 'lazy_static!()'"#)
                             .node(node)
                             .build()
                             .unwrap(),
