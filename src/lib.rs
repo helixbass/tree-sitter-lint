@@ -242,37 +242,35 @@ macro_rules! return_if_none {
 }
 
 fn prefer_impl_param_rule() -> Rule {
-    RuleBuilder::default()
-        .name("prefer_impl_param")
-        .create(|_context| {
-            vec![RuleListenerBuilder::default()
-                .query(
-                    r#"(
+    rule! {
+        name => "prefer_impl_param",
+        create => |_context| {
+            vec![
+                rule_listener! {
+                    query => r#"(
                       (type_parameters
                           (constrained_type_parameter) @c
                       )
                     )"#,
-                )
-                .on_query_match(|node, query_match_context| {
-                    let type_parameter_name = query_match_context.get_node_text(get_constrained_type_parameter_name(node));
-                    let single_type_parameter_usage_node = return_if_none!(query_match_context.maybe_get_single_matching_node_for_query(
-                        &*format!(
-                          r#"(
-                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                        ),
-                        get_parameters_node_of_enclosing_function(node)
-                    ));
-                    query_match_context.report(
-                        ViolationBuilder::default()
-                            .message(r#"Prefer using 'param: impl Trait'"#)
-                            .node(single_type_parameter_usage_node)
-                            .build()
-                            .unwrap(),
-                    );
-                })
-                .build()
-                .unwrap()]
-        })
-        .build()
-        .unwrap()
+                    on_query_match => |node, query_match_context| {
+                        let type_parameter_name = query_match_context.get_node_text(get_constrained_type_parameter_name(node));
+                        let single_type_parameter_usage_node = return_if_none!(query_match_context.maybe_get_single_matching_node_for_query(
+                            &*format!(
+                              r#"(
+                                (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                            ),
+                            get_parameters_node_of_enclosing_function(node)
+                        ));
+                        query_match_context.report(
+                            ViolationBuilder::default()
+                                .message(r#"Prefer using 'param: impl Trait'"#)
+                                .node(single_type_parameter_usage_node)
+                                .build()
+                                .unwrap(),
+                        );
+                    }
+                }
+            ]
+        }
+    }
 }
