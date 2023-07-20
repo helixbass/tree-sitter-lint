@@ -32,8 +32,12 @@ pub fn run(_args: Args) {
         |capture_info, file_contents, path| {
             let (rule_index, rule_listener_index) =
                 aggregated_queries.pattern_index_lookup[capture_info.pattern_index];
-            let listener = &resolved_rules[rule_index].listeners[rule_listener_index];
-            (listener.on_query_match)(&capture_info.node, &QueryMatchContext::new(path));
+            let rule = &resolved_rules[rule_index];
+            let listener = &rule.listeners[rule_listener_index];
+            (listener.on_query_match)(
+                &capture_info.node,
+                &QueryMatchContext::new(path, file_contents, rule),
+            );
         },
     )
     .unwrap();
@@ -44,6 +48,7 @@ type RuleListenerIndex = usize;
 
 struct AggregatedQueries {
     pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)>,
+    #[allow(dead_code)]
     query: Query,
     query_text: String,
 }
@@ -78,7 +83,7 @@ fn get_rules() -> Vec<Rule> {
 fn no_default_default_rule() -> Rule {
     RuleBuilder::default()
         .name("no_default_default")
-        .create(|context| {
+        .create(|_context| {
             vec![RuleListenerBuilder::default()
                 .query(
                     r#"(
@@ -95,11 +100,10 @@ fn no_default_default_rule() -> Rule {
                 )
                 .capture_name("c")
                 .on_query_match(|node, query_match_context| {
-                    context.report(
+                    query_match_context.report(
                         ViolationBuilder::default()
                             .message(r#"Use '_d()' instead of 'Default::default()'"#)
                             .node(node)
-                            .query_match_context(query_match_context)
                             .build()
                             .unwrap(),
                     );
