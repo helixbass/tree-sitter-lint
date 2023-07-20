@@ -5,5 +5,5 @@ use tree_sitter::Node;
 #[builder(setter(into))]
 pub struct Violation<'a> {
     pub message: String,
-    pub node: &'a Node<'a>,
+    pub node: Node<'a>,
 }

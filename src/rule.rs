@@ -65,7 +65,7 @@ pub struct RuleListener<'on_query_match> {
     #[builder(default)]
     pub capture_name: Option<String>,
     #[builder(setter(custom))]
-    pub on_query_match: Arc<dyn Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
+    pub on_query_match: Arc<dyn Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
 }
 
 impl<'on_query_match> RuleListener<'on_query_match> {
@@ -95,7 +95,7 @@ impl<'on_query_match> RuleListener<'on_query_match> {
 impl<'on_query_match> RuleListenerBuilder<'on_query_match> {
     pub fn on_query_match(
         &mut self,
-        callback: impl Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync,
+        callback: impl Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync,
     ) -> &mut Self {
         self.on_query_match = Some(Arc::new(callback));
         self
@@ -116,5 +116,5 @@ pub struct ResolvedRuleListener<'on_query_match> {
     pub query: Query,
     pub query_text: String,
     pub capture_index: u32,
-    pub on_query_match: Arc<dyn Fn(&Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
+    pub on_query_match: Arc<dyn Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
 }

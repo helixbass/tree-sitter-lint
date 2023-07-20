@@ -13,7 +13,7 @@ pub use args::Args;
 use clap::Parser;
 use context::QueryMatchContext;
 use rule::{ResolvedRule, Rule, RuleBuilder, RuleListenerBuilder};
-use tree_sitter::Query;
+use tree_sitter::{Node, Query};
 use violation::ViolationBuilder;
 
 use crate::context::Context;
@@ -55,8 +55,14 @@ pub fn run(_args: Args) {
             let rule = &resolved_rules[rule_index];
             let listener = &rule.listeners[rule_listener_index];
             (listener.on_query_match)(
-                &capture_info.node,
-                &QueryMatchContext::new(path, file_contents, rule, &reported_any_violations),
+                capture_info.node,
+                &QueryMatchContext::new(
+                    path,
+                    file_contents,
+                    rule,
+                    &reported_any_violations,
+                    &context,
+                ),
             );
         },
     )
@@ -113,7 +119,11 @@ impl AggregatedQueries {
 }
 
 fn get_rules() -> Vec<Rule> {
-    vec![no_default_default_rule(), no_lazy_static_rule()]
+    vec![
+        no_default_default_rule(),
+        no_lazy_static_rule(),
+        prefer_impl_param_rule(),
+    ]
 }
 
 fn no_default_default_rule() -> Rule {
@@ -166,6 +176,96 @@ fn no_lazy_static_rule() -> Rule {
                         ViolationBuilder::default()
                             .message(r#"Prefer 'OnceCell::*::Lazy' to 'lazy_static!()'"#)
                             .node(node)
+                            .build()
+                            .unwrap(),
+                    );
+                })
+                .build()
+                .unwrap()]
+        })
+        .build()
+        .unwrap()
+}
+
+#[macro_export]
+macro_rules! assert_node_kind {
+    ($node:expr, $kind:literal $(,)?) => {
+        assert_eq!($node.kind(), $kind)
+    };
+}
+
+fn get_constrained_type_parameter_name(node: Node) -> Node {
+    assert_node_kind!(node, "constrained_type_parameter");
+    let name_node = node.child_by_field_name("left").unwrap();
+    assert_node_kind!(name_node, "type_identifier");
+    name_node
+}
+
+fn maybe_get_ancestor_node_of_kind<'node>(
+    mut node: Node<'node>,
+    kind: &str,
+) -> Option<Node<'node>> {
+    while node.kind() != kind {
+        match node.parent() {
+            None => return None,
+            Some(parent) => node = parent,
+        }
+    }
+    Some(node)
+}
+
+fn get_ancestor_node_of_kind<'node>(node: Node<'node>, kind: &str) -> Node<'node> {
+    maybe_get_ancestor_node_of_kind(node, kind).unwrap()
+}
+
+fn get_enclosing_function_node(node: Node) -> Node {
+    get_ancestor_node_of_kind(node, "function_item")
+}
+
+fn get_parameters_node_of_enclosing_function(node: Node) -> Node {
+    let enclosing_function_node = get_enclosing_function_node(node);
+    enclosing_function_node
+        .child_by_field_name("parameters")
+        .unwrap()
+}
+
+#[macro_export]
+macro_rules! return_if_none {
+    ($expr:expr $(,)?) => {
+        match $expr {
+            None => {
+                return;
+            }
+            Some(expr) => expr,
+        }
+    };
+}
+
+fn prefer_impl_param_rule() -> Rule {
+    RuleBuilder::default()
+        .name("prefer_impl_param")
+        .create(|_context| {
+            vec![RuleListenerBuilder::default()
+                .query(
+                    r#"(
+                      (type_parameters
+                          (constrained_type_parameter) @c
+                      )
+                    )"#,
+                )
+                .on_query_match(|node, query_match_context| {
+                    let type_parameter_name = query_match_context.get_node_text(get_constrained_type_parameter_name(node));
+                    let single_type_parameter_usage_node = return_if_none!(query_match_context.maybe_get_single_matching_node_for_query(
+                        &*format!(
+                          r#"(
+                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                        ),
+                        get_parameters_node_of_enclosing_function(node)
+                    ));
+                    query_match_context.report(
+                        ViolationBuilder::default()
+                            .message(r#"Prefer using 'param: impl Trait'"#)
+                            .node(single_type_parameter_usage_node)
                             .build()
                             .unwrap(),
                     );
