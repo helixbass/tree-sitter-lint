@@ -3,7 +3,7 @@ use tree_sitter::Language;
 use crate::violation::Violation;
 
 pub struct Context {
-    language: Language,
+    pub language: Language,
 }
 
 impl Context {
