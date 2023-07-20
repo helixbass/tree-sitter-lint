@@ -37,6 +37,16 @@ impl RuleBuilder {
     }
 }
 
+#[macro_export]
+macro_rules! rule {
+    ($($variant:ident => $value:expr),* $(,)?) => {
+        proc_macros::builder_args!(
+            $crate::rule::RuleBuilder,
+            $($variant => $value),*,
+        )
+    }
+}
+
 pub struct ResolvedRule<'context> {
     pub name: String,
     pub listeners: Vec<ResolvedRuleListener<'context>>,
@@ -89,6 +99,16 @@ impl<'on_query_match> RuleListenerBuilder<'on_query_match> {
     ) -> &mut Self {
         self.on_query_match = Some(Arc::new(callback));
         self
+    }
+}
+
+#[macro_export]
+macro_rules! rule_listener {
+    ($($variant:ident => $value:expr),* $(,)?) => {
+        proc_macros::builder_args!(
+            $crate::rule::RuleListenerBuilder,
+            $($variant => $value),*,
+        )
     }
 }
 
