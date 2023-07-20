@@ -4,7 +4,8 @@ mod rule;
 mod violation;
 
 pub use args::Args;
-use rule::{Rule, RuleBuilder, RuleListenerBuilder};
+use rule::{ResolvedRule, Rule, RuleBuilder, RuleListenerBuilder};
+use tree_sitter::Query;
 use violation::ViolationBuilder;
 
 use crate::context::Context;
@@ -16,7 +17,37 @@ pub fn run(args: Args) {
         .into_iter()
         .map(|rule| rule.resolve(&context))
         .collect::<Vec<_>>();
-    unimplemented!()
+    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &context);
+}
+
+type RuleIndex = usize;
+type RuleListenerIndex = usize;
+
+struct AggregatedQueries {
+    pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)>,
+    query: Query,
+}
+
+impl AggregatedQueries {
+    pub fn new(resolved_rules: &[ResolvedRule], context: &Context) -> Self {
+        let mut pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)> = Default::default();
+        let mut aggregated_query_text = String::new();
+        for (rule_index, resolved_rule) in resolved_rules.into_iter().enumerate() {
+            for (rule_listener_index, rule_listener) in resolved_rule.listeners.iter().enumerate() {
+                for _ in 0..rule_listener.query.pattern_count() {
+                    pattern_index_lookup.push((rule_index, rule_listener_index));
+                }
+                aggregated_query_text.push_str(&rule_listener.query_text);
+                aggregated_query_text.push_str("\n\n");
+            }
+        }
+        let query = Query::new(context.language, &aggregated_query_text).unwrap();
+        assert!(query.pattern_count() == pattern_index_lookup.len());
+        Self {
+            pattern_index_lookup,
+            query,
+        }
+    }
 }
 
 fn get_rules() -> Vec<Rule> {

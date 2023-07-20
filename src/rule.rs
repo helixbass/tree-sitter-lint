@@ -60,11 +60,11 @@ pub struct RuleListener<'on_query_match> {
 impl<'on_query_match> RuleListener<'on_query_match> {
     pub fn resolve(self, context: &Context) -> ResolvedRuleListener<'on_query_match> {
         let RuleListener {
-            query,
+            query: query_text,
             capture_name,
             on_query_match,
         } = self;
-        let query = Query::new(context.language, &query).unwrap();
+        let query = Query::new(context.language, &query_text).unwrap();
         let capture_index = match capture_name {
             None => match query.capture_names().len() {
                 0 => panic!("Expected capture"),
@@ -74,6 +74,7 @@ impl<'on_query_match> RuleListener<'on_query_match> {
         };
         ResolvedRuleListener {
             query,
+            query_text,
             capture_index,
             on_query_match,
         }
@@ -89,6 +90,7 @@ impl<'on_query_match> RuleListenerBuilder<'on_query_match> {
 
 pub struct ResolvedRuleListener<'on_query_match> {
     pub query: Query,
+    pub query_text: String,
     pub capture_index: u32,
     pub on_query_match: Rc<dyn Fn(&Node) + 'on_query_match>,
 }
