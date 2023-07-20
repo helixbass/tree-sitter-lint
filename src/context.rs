@@ -35,7 +35,7 @@ impl<'a> QueryMatchContext<'a> {
 }
 
 fn print_violation(violation: &Violation, query_match_context: &QueryMatchContext) {
-    eprintln!(
+    println!(
         "{:?}:{}:{} {} {}",
         query_match_context.path,
         violation.node.range().start_point.row + 1,
