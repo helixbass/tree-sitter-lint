@@ -1,6 +1,6 @@
 [package]
-name = "proc_macros"
-version = "0.1.0"
+name = "tree_sitter_lint_proc_macros"
+version = "0.0.1-dev.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
