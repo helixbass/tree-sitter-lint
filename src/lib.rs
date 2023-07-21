@@ -55,53 +55,54 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
         "--capture",
         CAPTURE_NAME_FOR_TREE_SITTER_GREP,
     ]);
-    if config.fix {
-        let files_with_fixes: AllPendingFixes = Default::default();
-        tree_sitter_grep::run_with_callback(
-            tree_sitter_grep_args,
-            |capture_info, file_contents, path| {
-                let (rule, rule_listener) =
-                    aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
-                let mut query_match_context =
-                    QueryMatchContext::new(path, file_contents, rule, &config);
-                (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
-                if let Some(fixes) = query_match_context.into_pending_fixes() {
-                    files_with_fixes
-                        .lock()
-                        .unwrap()
-                        .entry(path.to_owned())
-                        .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
-                        .pending_fixes
-                        .extend(fixes);
-                }
-            },
-        )
-        .unwrap();
-        // if files_with_fixes.has_any_
-        unimplemented!()
-    } else {
-        let all_violations: Mutex<Vec<ViolationWithContext>> = Default::default();
-        tree_sitter_grep::run_with_callback(
-            tree_sitter_grep_args,
-            |capture_info, file_contents, path| {
-                let (rule, rule_listener) =
-                    aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
-                let mut query_match_context =
-                    QueryMatchContext::new(path, file_contents, rule, &config);
-                (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
-                assert!(query_match_context.pending_fixes().is_none());
-                if let Some(violations) = query_match_context.violations.take() {
-                    all_violations.lock().unwrap().extend(violations);
-                }
-            },
-        )
-        .unwrap();
-        all_violations.into_inner().unwrap()
+    let all_violations: Mutex<Vec<ViolationWithContext>> = Default::default();
+    let files_with_fixes: AllPendingFixes = Default::default();
+    tree_sitter_grep::run_with_callback(
+        tree_sitter_grep_args,
+        |capture_info, file_contents, path| {
+            let (rule, rule_listener) =
+                aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
+            let mut query_match_context =
+                QueryMatchContext::new(path, file_contents, rule, &config);
+            (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
+            assert!(query_match_context.pending_fixes().is_none());
+            if let Some(violations) = query_match_context.violations.take() {
+                all_violations.lock().unwrap().extend(violations);
+            }
+            if let Some(fixes) = query_match_context.into_pending_fixes() {
+                assert!(config.fix);
+                files_with_fixes
+                    .lock()
+                    .unwrap()
+                    .entry(path.to_owned())
+                    .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
+                    .pending_fixes
+                    .extend(fixes);
+            }
+        },
+    )
+    .unwrap();
+    if !config.fix {
+        return all_violations.into_inner().unwrap();
     }
+    if !files_with_fixes.has_any_pending_fixes() {
+        return all_violations.into_inner().unwrap();
+    }
+    unimplemented!()
 }
 
 #[derive(Default)]
 struct AllPendingFixes(Mutex<HashMap<PathBuf, PerFilePendingFixes>>);
+
+impl AllPendingFixes {
+    pub fn has_any_pending_fixes(&self) -> bool {
+        !self
+            .lock()
+            .unwrap()
+            .values()
+            .any(|per_file_pending_fixes| !per_file_pending_fixes.pending_fixes.is_empty())
+    }
+}
 
 impl Deref for AllPendingFixes {
     type Target = Mutex<HashMap<PathBuf, PerFilePendingFixes>>;
