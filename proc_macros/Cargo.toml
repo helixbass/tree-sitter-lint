@@ -2,6 +2,16 @@
 name = "tree_sitter_lint_proc_macros"
 version = "0.0.1-dev.0"
 edition = "2021"
+license = "Unlicense OR MIT"
+authors = [
+  "Julian Rosse <julian@helixbass.net>",
+]
+description = """
+(proc-macros used internally by tree-sitter-lint)
+"""
+homepage = "https://github.com/helixbass/tree-sitter-lint"
+repository = "https://github.com/helixbass/tree-sitter-lint"
+rust-version = "1.70"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
