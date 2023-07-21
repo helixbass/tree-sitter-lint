@@ -1,7 +1,7 @@
+#![allow(clippy::into_iter_on_ref)]
 mod args;
 mod context;
 mod rule;
-#[cfg(test)]
 mod rule_tester;
 mod violation;
 
@@ -15,6 +15,7 @@ pub use args::Args;
 use clap::Parser;
 use context::QueryMatchContext;
 use rule::{ResolvedRule, Rule, RuleBuilder, RuleListenerBuilder};
+pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::{Node, Query};
 use violation::ViolationBuilder;
 
@@ -198,9 +199,10 @@ fn no_lazy_static_rule() -> Rule {
 
 #[macro_export]
 macro_rules! assert_node_kind {
-    ($node:expr, $kind:literal $(,)?) => {
-        assert_eq!($node.kind(), $kind)
-    };
+    ($node:expr, $kind:literal $(,)?) => {{
+        assert_eq!($node.kind(), $kind);
+        $node
+    }};
 }
 
 fn get_constrained_type_parameter_name(node: Node) -> Node {
@@ -223,12 +225,17 @@ fn maybe_get_ancestor_node_of_kind<'node>(
     Some(node)
 }
 
+#[allow(dead_code)]
 fn get_ancestor_node_of_kind<'node>(node: Node<'node>, kind: &str) -> Node<'node> {
     maybe_get_ancestor_node_of_kind(node, kind).unwrap()
 }
 
 fn get_enclosing_function_node(node: Node) -> Node {
-    get_ancestor_node_of_kind(node, "function_item")
+    maybe_get_enclosing_function_node(node).unwrap()
+}
+
+fn maybe_get_enclosing_function_node(node: Node) -> Option<Node> {
+    maybe_get_ancestor_node_of_kind(node, "function_item")
 }
 
 fn get_parameters_node_of_enclosing_function(node: Node) -> Node {
@@ -236,6 +243,24 @@ fn get_parameters_node_of_enclosing_function(node: Node) -> Node {
     enclosing_function_node
         .child_by_field_name("parameters")
         .unwrap()
+}
+
+fn maybe_get_return_type_node_of_enclosing_function(node: Node) -> Option<Node> {
+    let enclosing_function_node = maybe_get_enclosing_function_node(node)?;
+    enclosing_function_node.child_by_field_name("return_type")
+}
+
+fn maybe_first_child_of_kind<'node>(node: Node<'node>, kind: &str) -> Option<Node<'node>> {
+    let mut tree_cursor = node.walk();
+    let ret = node
+        .children(&mut tree_cursor)
+        .find(|child| child.kind() == kind);
+    ret
+}
+
+fn maybe_get_where_clause_node_of_enclosing_function(node: Node) -> Option<Node> {
+    let enclosing_function_node = maybe_get_enclosing_function_node(node)?;
+    maybe_first_child_of_kind(enclosing_function_node, "where_clause")
 }
 
 #[macro_export]
@@ -250,7 +275,7 @@ macro_rules! return_if_none {
     };
 }
 
-fn prefer_impl_param_rule() -> Rule {
+pub fn prefer_impl_param_rule() -> Rule {
     rule! {
         name => "prefer_impl_param",
         create => |_context| {
@@ -272,6 +297,39 @@ fn prefer_impl_param_rule() -> Rule {
                             ),
                             get_parameters_node_of_enclosing_function(node)
                         ));
+                        if let Some(return_type_node) = maybe_get_return_type_node_of_enclosing_function(node) {
+                            if query_match_context.get_number_of_query_matches(
+                                &*format!(
+                                  r#"(
+                                    (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                                ),
+                                return_type_node
+                            ) > 0 {
+                                return;
+                            }
+                        }
+                        let type_parameters_node = assert_node_kind!(node.parent().unwrap(), "type_parameters");
+                        let only_found_the_defining_usage_in_the_type_parameters = query_match_context.maybe_get_single_matching_node_for_query(
+                            &*format!(
+                              r#"(
+                                (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                            ),
+                            type_parameters_node
+                        ).is_some();
+                        if !only_found_the_defining_usage_in_the_type_parameters {
+                            return;
+                        }
+                        if let Some(where_clause_node) = maybe_get_where_clause_node_of_enclosing_function(node) {
+                            if query_match_context.get_number_of_query_matches(
+                                &*format!(
+                                  r#"(
+                                    (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                                ),
+                                where_clause_node
+                            ) > 0 {
+                                return;
+                            }
+                        }
                         query_match_context.report(
                             ViolationBuilder::default()
                                 .message(r#"Prefer using 'param: impl Trait'"#)
@@ -283,38 +341,5 @@ fn prefer_impl_param_rule() -> Rule {
                 }
             ]
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use proc_macros::rule_tests;
-
-    #[test]
-    fn test_prefer_impl_param_rule() {
-        use super::*;
-        use rule_tester::RuleTester;
-
-        const ERROR_MESSAGE: &str = "Prefer using 'param: impl Trait'";
-
-        RuleTester::run(
-            prefer_impl_param_rule(),
-            rule_tests! {
-                valid => [
-                    // no generic parameters
-                    r#"
-                        fn no_generics(foo: Foo) -> Bar {}
-                    "#,
-                ],
-                invalid => [
-                    {
-                        code => r#"
-                            fn whee<T: Foo>(t: T) -> Bar {}
-                        "#,
-                        errors => [ERROR_MESSAGE],
-                    }
-                ]
-            },
-        );
     }
 }

@@ -70,6 +70,18 @@ impl<'a> QueryMatchContext<'a> {
         }
         Some(first_node)
     }
+
+    pub fn get_number_of_query_matches<'query, 'enclosing_node>(
+        &self,
+        query: impl Into<ParsedOrUnparsedQuery<'query>>,
+        enclosing_node: Node<'enclosing_node>,
+    ) -> usize {
+        let query = query.into().into_parsed(self.context.language);
+        let mut query_cursor = QueryCursor::new();
+        query_cursor
+            .matches(&query, enclosing_node, self.file_contents)
+            .count()
+    }
 }
 
 pub enum ParsedOrUnparsedQuery<'query_text> {

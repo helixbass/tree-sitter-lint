@@ -4,7 +4,6 @@ use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use tempdir::TempDir;
 
-#[cfg(test)]
 use crate::rule::Rule;
 
 pub struct RuleTester {
