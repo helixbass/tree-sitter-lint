@@ -6,25 +6,14 @@ use std::{
 
 use tree_sitter::{Language, Node, Query, QueryCursor};
 
-use crate::{rule::ResolvedRule, violation::Violation};
-
-pub struct Context {
-    pub language: Language,
-    pub fix: bool,
-}
-
-impl Context {
-    pub fn new(language: Language, fix: bool) -> Self {
-        Self { language, fix }
-    }
-}
+use crate::{rule::ResolvedRule, violation::Violation, Args};
 
 pub struct QueryMatchContext<'a> {
     pub path: &'a Path,
     pub file_contents: &'a [u8],
     pub rule: &'a ResolvedRule<'a>,
     reported_any_violations: &'a AtomicBool,
-    context: &'a Context,
+    args: &'a Args,
     pending_fixes: Option<Vec<PendingFix>>,
 }
 
@@ -34,20 +23,20 @@ impl<'a> QueryMatchContext<'a> {
         file_contents: &'a [u8],
         rule: &'a ResolvedRule,
         reported_any_violations: &'a AtomicBool,
-        context: &'a Context,
+        args: &'a Args,
     ) -> Self {
         Self {
             path,
             file_contents,
             rule,
             reported_any_violations,
-            context,
+            args,
             pending_fixes: Default::default(),
         }
     }
 
     pub fn report(&mut self, violation: Violation) {
-        if self.context.fix {
+        if self.args.fix {
             if let Some(fix) = violation.fix.as_ref() {
                 if !self.rule.meta.fixable {
                     panic!("Rule {:?} isn't declared as fixable", self.rule.meta.name);
@@ -74,7 +63,7 @@ impl<'a> QueryMatchContext<'a> {
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> Option<Node<'enclosing_node>> {
-        let query = query.into().into_parsed(self.context.language);
+        let query = query.into().into_parsed(self.args.language.language());
         let mut query_cursor = QueryCursor::new();
         let mut matches = query_cursor.matches(&query, enclosing_node, self.file_contents);
         let first_match = matches.next()?;
@@ -94,7 +83,7 @@ impl<'a> QueryMatchContext<'a> {
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> usize {
-        let query = query.into().into_parsed(self.context.language);
+        let query = query.into().into_parsed(self.args.language.language());
         let mut query_cursor = QueryCursor::new();
         query_cursor
             .matches(&query, enclosing_node, self.file_contents)

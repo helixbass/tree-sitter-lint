@@ -36,7 +36,7 @@ impl RuleTester {
         fs::write(tmp_dir.path().join(test_filename), &valid_test.code).unwrap();
         Command::cargo_bin("tree-sitter-lint")
             .unwrap()
-            .args(["--rule", &self.rule.meta.name])
+            .args(["--rule", &self.rule.meta.name, "--language", "rust"])
             .current_dir(tmp_dir.path())
             .assert()
             .success()
@@ -50,7 +50,7 @@ impl RuleTester {
         fs::write(&*test_filename_path, &invalid_test.code).unwrap();
         Command::cargo_bin("tree-sitter-lint")
             .unwrap()
-            .args(["--rule", &self.rule.meta.name])
+            .args(["--rule", &self.rule.meta.name, "--language", "rust"])
             .current_dir(tmp_dir.path())
             .assert()
             .failure()

@@ -27,27 +27,24 @@ pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use violation::ViolationBuilder;
 
-use crate::context::Context;
 pub use crate::rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule};
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
 pub fn run(args: Args) {
-    let language = tree_sitter_rust::language();
-    let context = Context::new(language, args.fix);
     let resolved_rules = get_rules()
         .into_iter()
         .filter(|rule| match args.rule.as_ref() {
             Some(rule_arg) => &rule.meta.name == rule_arg,
             None => true,
         })
-        .map(|rule| rule.resolve(&context))
+        .map(|rule| rule.resolve(&args))
         .collect::<Vec<_>>();
     if resolved_rules.is_empty() {
         panic!("Invalid rule name: {:?}", args.rule.as_ref().unwrap());
     }
-    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &context);
+    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &args);
     let tree_sitter_grep_args = tree_sitter_grep::Args::parse_from([
         "tree_sitter_grep",
         "-q",
@@ -70,7 +67,7 @@ pub fn run(args: Args) {
                     file_contents,
                     rule,
                     &reported_any_violations,
-                    &context,
+                    &args,
                 );
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
                 if let Some(fixes) = query_match_context.into_pending_fixes() {
@@ -97,7 +94,7 @@ pub fn run(args: Args) {
                     file_contents,
                     rule,
                     &reported_any_violations,
-                    &context,
+                    &args,
                 );
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
                 assert!(query_match_context.into_pending_fixes().is_none());
@@ -151,7 +148,7 @@ struct AggregatedQueries<'resolved_rules> {
 impl<'resolved_rules> AggregatedQueries<'resolved_rules> {
     pub fn new(
         resolved_rules: &'resolved_rules [ResolvedRule<'resolved_rules>],
-        context: &Context,
+        args: &Args,
     ) -> Self {
         let mut pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)> = Default::default();
         let mut aggregated_query_text = String::new();
@@ -175,7 +172,7 @@ impl<'resolved_rules> AggregatedQueries<'resolved_rules> {
                 aggregated_query_text.push_str("\n\n");
             }
         }
-        let query = Query::new(context.language, &aggregated_query_text).unwrap();
+        let query = Query::new(args.language.language(), &aggregated_query_text).unwrap();
         assert!(query.pattern_count() == pattern_index_lookup.len());
         Self {
             pattern_index_lookup,
