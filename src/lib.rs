@@ -7,17 +7,7 @@ mod rule_tester;
 mod rules;
 mod violation;
 
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    ops::Deref,
-    path::PathBuf,
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-    },
-};
+use std::{borrow::Cow, collections::HashMap, ops::Deref, path::PathBuf, process, sync::Mutex};
 
 use clap::Parser;
 pub use config::Config;
@@ -25,14 +15,25 @@ use context::{PendingFix, QueryMatchContext};
 use rule::{ResolvedRule, ResolvedRuleListener, Rule};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
-use violation::ViolationBuilder;
+use violation::{ViolationBuilder, ViolationWithContext};
 
 pub use crate::rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule};
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
-pub fn run(config: Config) {
+pub fn run_and_output(config: Config) {
+    let violations = run(config);
+    if violations.is_empty() {
+        process::exit(0);
+    }
+    for violation in violations {
+        violation.print();
+    }
+    process::exit(1);
+}
+
+pub fn run(config: Config) -> Vec<ViolationWithContext> {
     let resolved_rules = get_rules()
         .into_iter()
         .filter(|rule| match config.rule.as_ref() {
@@ -54,7 +55,6 @@ pub fn run(config: Config) {
         "--capture",
         CAPTURE_NAME_FOR_TREE_SITTER_GREP,
     ]);
-    let reported_any_violations = AtomicBool::new(false);
     if config.fix {
         let files_with_fixes: AllPendingFixes = Default::default();
         tree_sitter_grep::run_with_callback(
@@ -62,13 +62,8 @@ pub fn run(config: Config) {
             |capture_info, file_contents, path| {
                 let (rule, rule_listener) =
                     aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
-                let mut query_match_context = QueryMatchContext::new(
-                    path,
-                    file_contents,
-                    rule,
-                    &reported_any_violations,
-                    &config,
-                );
+                let mut query_match_context =
+                    QueryMatchContext::new(path, file_contents, rule, &config);
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
                 if let Some(fixes) = query_match_context.into_pending_fixes() {
                     files_with_fixes
@@ -83,29 +78,25 @@ pub fn run(config: Config) {
         )
         .unwrap();
         // if files_with_fixes.has_any_
+        unimplemented!()
     } else {
+        let all_violations: Mutex<Vec<ViolationWithContext>> = Default::default();
         tree_sitter_grep::run_with_callback(
             tree_sitter_grep_args,
             |capture_info, file_contents, path| {
                 let (rule, rule_listener) =
                     aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
-                let mut query_match_context = QueryMatchContext::new(
-                    path,
-                    file_contents,
-                    rule,
-                    &reported_any_violations,
-                    &config,
-                );
+                let mut query_match_context =
+                    QueryMatchContext::new(path, file_contents, rule, &config);
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
-                assert!(query_match_context.into_pending_fixes().is_none());
+                assert!(query_match_context.pending_fixes().is_none());
+                if let Some(violations) = query_match_context.violations.take() {
+                    all_violations.lock().unwrap().extend(violations);
+                }
             },
         )
         .unwrap();
-    }
-    if reported_any_violations.load(Ordering::Relaxed) {
-        process::exit(1);
-    } else {
-        process::exit(0);
+        all_violations.into_inner().unwrap()
     }
 }
 

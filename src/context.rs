@@ -1,20 +1,20 @@
-use std::{
-    ops,
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::{ops, path::Path};
 
 use tree_sitter::{Language, Node, Query, QueryCursor};
 
-use crate::{rule::ResolvedRule, violation::Violation, Config};
+use crate::{
+    rule::ResolvedRule,
+    violation::{Violation, ViolationWithContext},
+    Config,
+};
 
 pub struct QueryMatchContext<'a> {
     pub path: &'a Path,
     pub file_contents: &'a [u8],
     pub rule: &'a ResolvedRule<'a>,
-    reported_any_violations: &'a AtomicBool,
     config: &'a Config,
     pending_fixes: Option<Vec<PendingFix>>,
+    pub violations: Option<Vec<ViolationWithContext>>,
 }
 
 impl<'a> QueryMatchContext<'a> {
@@ -22,16 +22,15 @@ impl<'a> QueryMatchContext<'a> {
         path: &'a Path,
         file_contents: &'a [u8],
         rule: &'a ResolvedRule,
-        reported_any_violations: &'a AtomicBool,
         config: &'a Config,
     ) -> Self {
         Self {
             path,
             file_contents,
             rule,
-            reported_any_violations,
             config,
             pending_fixes: Default::default(),
+            violations: Default::default(),
         }
     }
 
@@ -50,8 +49,10 @@ impl<'a> QueryMatchContext<'a> {
                 }
             }
         }
-        self.reported_any_violations.store(true, Ordering::Relaxed);
-        print_violation(&violation, self);
+        let violation = violation.contextualize(self);
+        self.violations
+            .get_or_insert_with(Default::default)
+            .push(violation);
     }
 
     pub fn get_node_text(&self, node: Node) -> &str {
@@ -88,6 +89,10 @@ impl<'a> QueryMatchContext<'a> {
         query_cursor
             .matches(&query, enclosing_node, self.file_contents)
             .count()
+    }
+
+    pub fn pending_fixes(&self) -> Option<&[PendingFix]> {
+        self.pending_fixes.as_deref()
     }
 
     pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
@@ -147,15 +152,4 @@ impl PendingFix {
     pub fn new(range: ops::Range<usize>, replacement: String) -> Self {
         Self { range, replacement }
     }
-}
-
-fn print_violation(violation: &Violation, query_match_context: &QueryMatchContext) {
-    println!(
-        "{:?}:{}:{} {} {}",
-        query_match_context.path,
-        violation.node.range().start_point.row + 1,
-        violation.node.range().start_point.column + 1,
-        violation.message,
-        query_match_context.rule.meta.name,
-    );
 }
