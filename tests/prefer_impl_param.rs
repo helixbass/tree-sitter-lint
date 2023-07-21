@@ -21,6 +21,10 @@ fn test_prefer_impl_param_rule() {
                 r#"
                     fn foo<T: Foo>(foo: T) -> Bar<T> {}
                 "#,
+                // generic param is return type
+                r#"
+                    fn foo<T: Foo>(foo: T) -> T {}
+                "#,
                 // unconstrained generic
                 r#"
                     fn foo<T>(foo: T) -> Bar {}

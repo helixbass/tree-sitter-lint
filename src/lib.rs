@@ -298,6 +298,9 @@ pub fn prefer_impl_param_rule() -> Rule {
                             get_parameters_node_of_enclosing_function(node)
                         ));
                         if let Some(return_type_node) = maybe_get_return_type_node_of_enclosing_function(node) {
+                            if return_type_node.kind() == "type_identifier" && query_match_context.get_node_text(return_type_node) == type_parameter_name {
+                                return;
+                            }
                             if query_match_context.get_number_of_query_matches(
                                 &*format!(
                                   r#"(
