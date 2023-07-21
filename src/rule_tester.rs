@@ -36,7 +36,7 @@ impl RuleTester {
         fs::write(tmp_dir.path().join(test_filename), &valid_test.code).unwrap();
         Command::cargo_bin("tree-sitter-lint")
             .unwrap()
-            .args(["--rule", &self.rule.name])
+            .args(["--rule", &self.rule.meta.name])
             .current_dir(tmp_dir.path())
             .assert()
             .success()
@@ -46,10 +46,11 @@ impl RuleTester {
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
         let tmp_dir = TempDir::new("invalid_test").unwrap();
         let test_filename = "tmp.rs";
-        fs::write(tmp_dir.path().join(test_filename), &invalid_test.code).unwrap();
+        let test_filename_path = tmp_dir.path().join(test_filename);
+        fs::write(&*test_filename_path, &invalid_test.code).unwrap();
         Command::cargo_bin("tree-sitter-lint")
             .unwrap()
-            .args(["--rule", &self.rule.name])
+            .args(["--rule", &self.rule.meta.name])
             .current_dir(tmp_dir.path())
             .assert()
             .failure()
@@ -118,16 +119,19 @@ impl From<&str> for RuleTestValid {
 pub struct RuleTestInvalid {
     code: String,
     errors: Vec<RuleTestExpectedError>,
+    output: Option<String>,
 }
 
 impl RuleTestInvalid {
     pub fn new(
         code: impl Into<String>,
         errors: impl IntoIterator<Item = impl Into<RuleTestExpectedError>>,
+        output: Option<impl Into<String>>,
     ) -> Self {
         Self {
             code: code.into(),
             errors: errors.into_iter().map(Into::into).collect(),
+            output: output.map(Into::into),
         }
     }
 }

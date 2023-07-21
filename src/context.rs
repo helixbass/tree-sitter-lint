@@ -1,4 +1,5 @@
 use std::{
+    ops,
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -9,11 +10,12 @@ use crate::{rule::ResolvedRule, violation::Violation};
 
 pub struct Context {
     pub language: Language,
+    pub fix: bool,
 }
 
 impl Context {
-    pub fn new(language: Language) -> Self {
-        Self { language }
+    pub fn new(language: Language, fix: bool) -> Self {
+        Self { language, fix }
     }
 }
 
@@ -23,6 +25,7 @@ pub struct QueryMatchContext<'a> {
     pub rule: &'a ResolvedRule<'a>,
     reported_any_violations: &'a AtomicBool,
     context: &'a Context,
+    pending_fixes: Option<Vec<PendingFix>>,
 }
 
 impl<'a> QueryMatchContext<'a> {
@@ -39,10 +42,25 @@ impl<'a> QueryMatchContext<'a> {
             rule,
             reported_any_violations,
             context,
+            pending_fixes: Default::default(),
         }
     }
 
-    pub fn report(&self, violation: Violation) {
+    pub fn report(&mut self, violation: Violation) {
+        if self.context.fix {
+            if let Some(fix) = violation.fix.as_ref() {
+                if !self.rule.meta.fixable {
+                    panic!("Rule {:?} isn't declared as fixable", self.rule.meta.name);
+                }
+                let mut fixer = Fixer::default();
+                fix(&mut fixer);
+                if let Some(pending_fixes) = fixer.into_pending_fixes() {
+                    self.pending_fixes
+                        .get_or_insert_with(Default::default)
+                        .extend(pending_fixes);
+                }
+            }
+        }
         self.reported_any_violations.store(true, Ordering::Relaxed);
         print_violation(&violation, self);
     }
@@ -82,6 +100,10 @@ impl<'a> QueryMatchContext<'a> {
             .matches(&query, enclosing_node, self.file_contents)
             .count()
     }
+
+    pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
+        self.pending_fixes
+    }
 }
 
 pub enum ParsedOrUnparsedQuery<'query_text> {
@@ -110,6 +132,34 @@ impl<'query_text> From<&'query_text str> for ParsedOrUnparsedQuery<'query_text> 
     }
 }
 
+#[derive(Default)]
+pub struct Fixer {
+    pending_fixes: Option<Vec<PendingFix>>,
+}
+
+impl Fixer {
+    pub fn replace_text(&mut self, node: Node, replacement: impl Into<String>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(node.byte_range(), replacement.into()));
+    }
+
+    pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
+        self.pending_fixes
+    }
+}
+
+pub struct PendingFix {
+    pub range: ops::Range<usize>,
+    pub replacement: String,
+}
+
+impl PendingFix {
+    pub fn new(range: ops::Range<usize>, replacement: String) -> Self {
+        Self { range, replacement }
+    }
+}
+
 fn print_violation(violation: &Violation, query_match_context: &QueryMatchContext) {
     println!(
         "{:?}:{}:{} {} {}",
@@ -117,6 +167,6 @@ fn print_violation(violation: &Violation, query_match_context: &QueryMatchContex
         violation.node.range().start_point.row + 1,
         violation.node.range().start_point.column + 1,
         violation.message,
-        query_match_context.rule.name,
+        query_match_context.rule.meta.name,
     );
 }

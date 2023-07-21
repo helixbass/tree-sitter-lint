@@ -3,6 +3,7 @@ use crate::{rule, rule::Rule, rule_listener, ViolationBuilder};
 pub fn no_default_default_rule() -> Rule {
     rule! {
         name => "no_default_default",
+        fixable => true,
         create => |_context| {
             vec![
                 rule_listener! {

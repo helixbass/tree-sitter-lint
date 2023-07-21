@@ -5,21 +5,24 @@ use tree_sitter::{Node, Query};
 
 use crate::context::{Context, QueryMatchContext};
 
-#[derive(Builder)]
-#[builder(setter(into))]
-pub struct Rule {
+#[derive(Clone)]
+pub struct RuleMeta {
     pub name: String,
+    pub fixable: bool,
+}
+
+pub struct Rule {
+    pub meta: RuleMeta,
     #[allow(clippy::type_complexity)]
-    #[builder(setter(custom))]
     pub create: Arc<dyn Fn(&Context) -> Vec<RuleListener>>,
 }
 
 impl Rule {
     pub fn resolve(self, context: &Context) -> ResolvedRule<'_> {
-        let Rule { name, create } = self;
+        let Rule { meta, create } = self;
 
         ResolvedRule::new(
-            name,
+            meta,
             create(context)
                 .into_iter()
                 .map(|rule_listener| rule_listener.resolve(context))
@@ -28,13 +31,40 @@ impl Rule {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct RuleBuilder {
+    name: Option<String>,
+    fixable: bool,
+    create: Option<Arc<dyn Fn(&Context) -> Vec<RuleListener>>>,
+}
+
 impl RuleBuilder {
+    pub fn name(&mut self, name: impl Into<String>) -> &mut Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn fixable(&mut self, fixable: bool) -> &mut Self {
+        self.fixable = fixable;
+        self
+    }
+
     pub fn create(
         &mut self,
         callback: impl Fn(&Context) -> Vec<RuleListener> + 'static,
     ) -> &mut Self {
         self.create = Some(Arc::new(callback));
         self
+    }
+
+    pub fn build(&self) -> Result<Rule, ()> {
+        Ok(Rule {
+            meta: RuleMeta {
+                name: self.name.clone().ok_or(())?,
+                fixable: self.fixable,
+            },
+            create: self.create.clone().ok_or(())?,
+        })
     }
 }
 
@@ -49,17 +79,17 @@ macro_rules! rule {
 }
 
 pub struct ResolvedRule<'context> {
-    pub name: String,
+    pub meta: RuleMeta,
     pub listeners: Vec<ResolvedRuleListener<'context>>,
 }
 
 impl<'context> ResolvedRule<'context> {
-    pub fn new(name: String, listeners: Vec<ResolvedRuleListener<'context>>) -> Self {
-        Self { name, listeners }
+    pub fn new(meta: RuleMeta, listeners: Vec<ResolvedRuleListener<'context>>) -> Self {
+        Self { meta, listeners }
     }
 }
 
-type OnQueryMatchCallback<'a> = Arc<dyn Fn(Node, &QueryMatchContext) + 'a + Send + Sync>;
+type OnQueryMatchCallback<'a> = Arc<dyn Fn(Node, &mut QueryMatchContext) + 'a + Send + Sync>;
 
 #[derive(Builder)]
 #[builder(setter(into, strip_option))]
@@ -98,7 +128,7 @@ impl<'on_query_match> RuleListener<'on_query_match> {
 impl<'on_query_match> RuleListenerBuilder<'on_query_match> {
     pub fn on_query_match(
         &mut self,
-        callback: impl Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync,
+        callback: impl Fn(Node, &mut QueryMatchContext) + 'on_query_match + Send + Sync,
     ) -> &mut Self {
         self.on_query_match = Some(Arc::new(callback));
         self

@@ -49,12 +49,14 @@ pub fn builder_args(input: TokenStream) -> TokenStream {
 struct InvalidRuleTestSpec {
     code: Expr,
     errors: ExprArray,
+    output: Option<Expr>,
 }
 
 impl Parse for InvalidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut errors: Option<ExprArray> = Default::default();
+        let mut output: Option<Expr> = Default::default();
         let content;
         braced!(content in input);
         while !content.is_empty() {
@@ -67,7 +69,10 @@ impl Parse for InvalidRuleTestSpec {
                 "errors" => {
                     errors = Some(content.parse()?);
                 }
-                _ => panic!("didn't expect key {}", key),
+                "output" => {
+                    output = Some(content.parse()?);
+                }
+                _ => panic!("didn't expect key '{}'", key),
             }
             if !content.is_empty() {
                 content.parse::<Token![,]>()?;
@@ -76,6 +81,7 @@ impl Parse for InvalidRuleTestSpec {
         Ok(Self {
             code: code.expect("Expected 'code'"),
             errors: errors.expect("Expected 'errors'"),
+            output,
         })
     }
 }
@@ -84,10 +90,19 @@ impl ToTokens for InvalidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
         let errors = &self.errors;
+        let output = match self.output.as_ref() {
+            Some(output) => quote! {
+                Some(#output)
+            },
+            None => quote! {
+                Option::<String>::None
+            },
+        };
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
-                #errors
+                #errors,
+                #output
             )
         }
         .to_tokens(tokens)
@@ -125,7 +140,7 @@ impl Parse for RuleTests {
                         }
                     }
                 }
-                _ => panic!("didn't expect key {}", key),
+                _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
