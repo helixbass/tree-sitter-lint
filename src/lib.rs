@@ -7,7 +7,14 @@ mod rule_tester;
 mod rules;
 mod violation;
 
-use std::{borrow::Cow, collections::HashMap, ops::Deref, path::PathBuf, process, sync::Mutex};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    ops::Deref,
+    path::{Path, PathBuf},
+    process,
+    sync::Mutex,
+};
 
 use clap::Parser;
 pub use config::Config;
@@ -73,13 +80,7 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
             }
             if let Some(fixes) = query_match_context.into_pending_fixes() {
                 assert!(config.fix);
-                files_with_fixes
-                    .lock()
-                    .unwrap()
-                    .entry(path.to_owned())
-                    .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
-                    .pending_fixes
-                    .extend(fixes);
+                files_with_fixes.append(path, file_contents, fixes);
             }
         },
     )
@@ -87,19 +88,45 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
     if !config.fix {
         return all_violations.into_inner().unwrap();
     }
+    // we're effectively "serial" from here forward currently
+    let mut files_with_fixes = files_with_fixes.into_inner().unwrap();
+    let mut all_violations = all_violations.into_inner().unwrap();
     for _ in 0..MAX_FIX_ITERATIONS {
-        let current_files_with_fixes: HashMap<_, _> =
-            files_with_fixes.lock().unwrap().drain().collect();
-        if !has_any_pending_fixes(&current_files_with_fixes) {
+        if !has_any_pending_fixes(&files_with_fixes) {
             break;
         }
-        all_violations.lock().unwrap().clear();
+        let current_files_with_fixes: HashMap<_, _> = files_with_fixes.drain().collect();
+        all_violations.clear();
+        for (file_path, pending_fixes) in current_files_with_fixes {
+            // tree_sitter_grep::
+            unimplemented!()
+        }
     }
-    all_violations.into_inner().unwrap()
+    all_violations
 }
 
 #[derive(Default)]
 struct AllPendingFixes(Mutex<HashMap<PathBuf, PerFilePendingFixes>>);
+
+impl AllPendingFixes {
+    pub fn append(&self, path: &Path, file_contents: &[u8], fixes: Vec<PendingFix>) {
+        self.lock()
+            .unwrap()
+            .entry(path.to_owned())
+            .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
+            .pending_fixes
+            .extend(fixes);
+    }
+
+    pub fn into_inner(
+        self,
+    ) -> Result<
+        HashMap<PathBuf, PerFilePendingFixes>,
+        std::sync::PoisonError<HashMap<PathBuf, PerFilePendingFixes>>,
+    > {
+        self.0.into_inner()
+    }
+}
 
 fn has_any_pending_fixes(files_with_fixes: &HashMap<PathBuf, PerFilePendingFixes>) -> bool {
     !files_with_fixes
