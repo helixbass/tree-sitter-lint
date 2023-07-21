@@ -33,6 +33,8 @@ pub fn run_and_output(config: Config) {
     process::exit(1);
 }
 
+const MAX_FIX_ITERATIONS: usize = 10;
+
 pub fn run(config: Config) -> Vec<ViolationWithContext> {
     let resolved_rules = get_rules()
         .into_iter()
@@ -85,23 +87,24 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
     if !config.fix {
         return all_violations.into_inner().unwrap();
     }
-    if !files_with_fixes.has_any_pending_fixes() {
-        return all_violations.into_inner().unwrap();
+    for _ in 0..MAX_FIX_ITERATIONS {
+        let current_files_with_fixes: HashMap<_, _> =
+            files_with_fixes.lock().unwrap().drain().collect();
+        if !has_any_pending_fixes(&current_files_with_fixes) {
+            break;
+        }
+        all_violations.lock().unwrap().clear();
     }
-    unimplemented!()
+    all_violations.into_inner().unwrap()
 }
 
 #[derive(Default)]
 struct AllPendingFixes(Mutex<HashMap<PathBuf, PerFilePendingFixes>>);
 
-impl AllPendingFixes {
-    pub fn has_any_pending_fixes(&self) -> bool {
-        !self
-            .lock()
-            .unwrap()
-            .values()
-            .any(|per_file_pending_fixes| !per_file_pending_fixes.pending_fixes.is_empty())
-    }
+fn has_any_pending_fixes(files_with_fixes: &HashMap<PathBuf, PerFilePendingFixes>) -> bool {
+    !files_with_fixes
+        .values()
+        .any(|per_file_pending_fixes| !per_file_pending_fixes.pending_fixes.is_empty())
 }
 
 impl Deref for AllPendingFixes {
