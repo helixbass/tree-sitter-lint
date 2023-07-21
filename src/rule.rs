@@ -9,6 +9,7 @@ use crate::context::{Context, QueryMatchContext};
 #[builder(setter(into))]
 pub struct Rule {
     pub name: String,
+    #[allow(clippy::type_complexity)]
     #[builder(setter(custom))]
     pub create: Arc<dyn Fn(&Context) -> Vec<RuleListener>>,
 }
@@ -58,6 +59,8 @@ impl<'context> ResolvedRule<'context> {
     }
 }
 
+type OnQueryMatchCallback<'a> = Arc<dyn Fn(Node, &QueryMatchContext) + 'a + Send + Sync>;
+
 #[derive(Builder)]
 #[builder(setter(into, strip_option))]
 pub struct RuleListener<'on_query_match> {
@@ -65,7 +68,7 @@ pub struct RuleListener<'on_query_match> {
     #[builder(default)]
     pub capture_name: Option<String>,
     #[builder(setter(custom))]
-    pub on_query_match: Arc<dyn Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
+    pub on_query_match: OnQueryMatchCallback<'on_query_match>,
 }
 
 impl<'on_query_match> RuleListener<'on_query_match> {
@@ -116,5 +119,5 @@ pub struct ResolvedRuleListener<'on_query_match> {
     pub query: Query,
     pub query_text: String,
     pub capture_index: u32,
-    pub on_query_match: Arc<dyn Fn(Node, &QueryMatchContext) + 'on_query_match + Send + Sync>,
+    pub on_query_match: OnQueryMatchCallback<'on_query_match>,
 }
