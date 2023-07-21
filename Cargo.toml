@@ -1,7 +1,20 @@
 [package]
 name = "tree-sitter-lint"
-version = "0.1.0"
+version = "0.0.1-dev.0"
 edition = "2021"
+license = "Unlicense OR MIT"
+authors = [
+  "Julian Rosse <julian@helixbass.net>",
+]
+description = """
+tree-sitter-lint is (intended to be) a multi-language
+linter supporting custom lint rules based on tree-sitter.
+"""
+homepage = "https://github.com/helixbass/tree-sitter-lint"
+repository = "https://github.com/helixbass/tree-sitter-lint"
+keywords = ["tree-sitter", "lint", "linter"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.70"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,7 +24,7 @@ derive_builder = "0.12.0"
 proc_macros = { path = "proc_macros" }
 regex = "1.9.1"
 tree-sitter = "0.20.10"
-tree-sitter-grep = { git = "https://github.com/helixbass/tree-sitter-grep", rev = "3d4682c" }
+tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", git = "https://github.com/helixbass/tree-sitter-grep", rev = "422058d", version = "0.1.0" }
 tree-sitter-rust = "0.20.3"
 assert_cmd = "2.0.12"
 predicates = "3.0.3"
