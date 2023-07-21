@@ -3,7 +3,7 @@ use std::sync::Arc;
 use derive_builder::Builder;
 use tree_sitter::{Node, Query};
 
-use crate::{context::QueryMatchContext, Args};
+use crate::{context::QueryMatchContext, Config};
 
 #[derive(Clone)]
 pub struct RuleMeta {
@@ -14,18 +14,18 @@ pub struct RuleMeta {
 pub struct Rule {
     pub meta: RuleMeta,
     #[allow(clippy::type_complexity)]
-    pub create: Arc<dyn Fn(&Args) -> Vec<RuleListener>>,
+    pub create: Arc<dyn Fn(&Config) -> Vec<RuleListener>>,
 }
 
 impl Rule {
-    pub fn resolve(self, args: &Args) -> ResolvedRule<'_> {
+    pub fn resolve(self, config: &Config) -> ResolvedRule<'_> {
         let Rule { meta, create } = self;
 
         ResolvedRule::new(
             meta,
-            create(args)
+            create(config)
                 .into_iter()
-                .map(|rule_listener| rule_listener.resolve(args))
+                .map(|rule_listener| rule_listener.resolve(config))
                 .collect(),
         )
     }
@@ -35,7 +35,7 @@ impl Rule {
 pub struct RuleBuilder {
     name: Option<String>,
     fixable: bool,
-    create: Option<Arc<dyn Fn(&Args) -> Vec<RuleListener>>>,
+    create: Option<Arc<dyn Fn(&Config) -> Vec<RuleListener>>>,
 }
 
 impl RuleBuilder {
@@ -49,7 +49,10 @@ impl RuleBuilder {
         self
     }
 
-    pub fn create(&mut self, callback: impl Fn(&Args) -> Vec<RuleListener> + 'static) -> &mut Self {
+    pub fn create(
+        &mut self,
+        callback: impl Fn(&Config) -> Vec<RuleListener> + 'static,
+    ) -> &mut Self {
         self.create = Some(Arc::new(callback));
         self
     }
@@ -99,13 +102,13 @@ pub struct RuleListener<'a> {
 }
 
 impl<'a> RuleListener<'a> {
-    pub fn resolve(self, args: &Args) -> ResolvedRuleListener<'a> {
+    pub fn resolve(self, config: &Config) -> ResolvedRuleListener<'a> {
         let RuleListener {
             query: query_text,
             capture_name,
             on_query_match,
         } = self;
-        let query = Query::new(args.language.language(), &query_text).unwrap();
+        let query = Query::new(config.language.language(), &query_text).unwrap();
         let capture_index = match capture_name {
             None => match query.capture_names().len() {
                 0 => panic!("Expected capture"),

@@ -1,5 +1,5 @@
 #![allow(clippy::into_iter_on_ref)]
-mod args;
+mod config;
 mod context;
 mod macros;
 mod rule;
@@ -19,8 +19,8 @@ use std::{
     },
 };
 
-pub use args::Args;
 use clap::Parser;
+pub use config::Config;
 use context::{PendingFix, QueryMatchContext};
 use rule::{ResolvedRule, ResolvedRuleListener, Rule};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
@@ -32,19 +32,19 @@ pub use crate::rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
-pub fn run(args: Args) {
+pub fn run(config: Config) {
     let resolved_rules = get_rules()
         .into_iter()
-        .filter(|rule| match args.rule.as_ref() {
+        .filter(|rule| match config.rule.as_ref() {
             Some(rule_arg) => &rule.meta.name == rule_arg,
             None => true,
         })
-        .map(|rule| rule.resolve(&args))
+        .map(|rule| rule.resolve(&config))
         .collect::<Vec<_>>();
     if resolved_rules.is_empty() {
-        panic!("Invalid rule name: {:?}", args.rule.as_ref().unwrap());
+        panic!("Invalid rule name: {:?}", config.rule.as_ref().unwrap());
     }
-    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &args);
+    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &config);
     let tree_sitter_grep_args = tree_sitter_grep::Args::parse_from([
         "tree_sitter_grep",
         "-q",
@@ -55,7 +55,7 @@ pub fn run(args: Args) {
         CAPTURE_NAME_FOR_TREE_SITTER_GREP,
     ]);
     let reported_any_violations = AtomicBool::new(false);
-    if args.fix {
+    if config.fix {
         let files_with_fixes: AllPendingFixes = Default::default();
         tree_sitter_grep::run_with_callback(
             tree_sitter_grep_args,
@@ -67,7 +67,7 @@ pub fn run(args: Args) {
                     file_contents,
                     rule,
                     &reported_any_violations,
-                    &args,
+                    &config,
                 );
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
                 if let Some(fixes) = query_match_context.into_pending_fixes() {
@@ -94,7 +94,7 @@ pub fn run(args: Args) {
                     file_contents,
                     rule,
                     &reported_any_violations,
-                    &args,
+                    &config,
                 );
                 (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
                 assert!(query_match_context.into_pending_fixes().is_none());
@@ -148,7 +148,7 @@ struct AggregatedQueries<'resolved_rules> {
 impl<'resolved_rules> AggregatedQueries<'resolved_rules> {
     pub fn new(
         resolved_rules: &'resolved_rules [ResolvedRule<'resolved_rules>],
-        args: &Args,
+        config: &Config,
     ) -> Self {
         let mut pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)> = Default::default();
         let mut aggregated_query_text = String::new();
@@ -172,7 +172,7 @@ impl<'resolved_rules> AggregatedQueries<'resolved_rules> {
                 aggregated_query_text.push_str("\n\n");
             }
         }
-        let query = Query::new(args.language.language(), &aggregated_query_text).unwrap();
+        let query = Query::new(config.language.language(), &aggregated_query_text).unwrap();
         assert!(query.pattern_count() == pattern_index_lookup.len());
         Self {
             pattern_index_lookup,

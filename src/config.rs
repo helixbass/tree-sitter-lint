@@ -2,7 +2,7 @@ use clap::Parser;
 use tree_sitter_grep::SupportedLanguage;
 
 #[derive(Parser)]
-pub struct Args {
+pub struct Config {
     #[arg(short, long)]
     pub language: SupportedLanguage,
 
