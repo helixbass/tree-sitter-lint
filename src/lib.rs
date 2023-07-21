@@ -1,6 +1,8 @@
 mod args;
 mod context;
 mod rule;
+#[cfg(test)]
+mod rule_tester;
 mod violation;
 
 use std::{
@@ -29,13 +31,20 @@ macro_rules! regex {
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
-pub fn run(_args: Args) {
+pub fn run(args: Args) {
     let language = tree_sitter_rust::language();
     let context = Context::new(language);
     let resolved_rules = get_rules()
         .into_iter()
+        .filter(|rule| match args.rule.as_ref() {
+            Some(rule_arg) => &rule.name == rule_arg,
+            None => true,
+        })
         .map(|rule| rule.resolve(&context))
         .collect::<Vec<_>>();
+    if resolved_rules.is_empty() {
+        panic!("Invalid rule name: {:?}", args.rule.as_ref().unwrap());
+    }
     let aggregated_queries = AggregatedQueries::new(&resolved_rules, &context);
     let tree_sitter_grep_args = tree_sitter_grep::Args::parse_from([
         "tree_sitter_grep",
@@ -248,8 +257,10 @@ fn prefer_impl_param_rule() -> Rule {
             vec![
                 rule_listener! {
                     query => r#"(
-                      (type_parameters
+                      (function_item
+                        type_parameters: (type_parameters
                           (constrained_type_parameter) @c
+                        )
                       )
                     )"#,
                     on_query_match => |node, query_match_context| {
@@ -272,5 +283,38 @@ fn prefer_impl_param_rule() -> Rule {
                 }
             ]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proc_macros::rule_tests;
+
+    #[test]
+    fn test_prefer_impl_param_rule() {
+        use super::*;
+        use rule_tester::RuleTester;
+
+        const ERROR_MESSAGE: &str = "Prefer using 'param: impl Trait'";
+
+        RuleTester::run(
+            prefer_impl_param_rule(),
+            rule_tests! {
+                valid => [
+                    // no generic parameters
+                    r#"
+                        fn no_generics(foo: Foo) -> Bar {}
+                    "#,
+                ],
+                invalid => [
+                    {
+                        code => r#"
+                            fn whee<T: Foo>(t: T) -> Bar {}
+                        "#,
+                        errors => [ERROR_MESSAGE],
+                    }
+                ]
+            },
+        );
     }
 }

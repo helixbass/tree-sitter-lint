@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{
+    braced, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, Expr, ExprPath, Ident, Token,
+    parse_macro_input, Expr, ExprArray, ExprPath, Ident, Token,
 };
 
 struct BuilderArgs {
@@ -41,6 +42,111 @@ pub fn builder_args(input: TokenStream) -> TokenStream {
             #(.#keys(#values))*
             .build()
             .unwrap()
+    }
+    .into()
+}
+
+struct InvalidRuleTestSpec {
+    code: Expr,
+    errors: ExprArray,
+}
+
+impl Parse for InvalidRuleTestSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut code: Option<Expr> = Default::default();
+        let mut errors: Option<ExprArray> = Default::default();
+        let content;
+        braced!(content in input);
+        while !content.is_empty() {
+            let key: Ident = content.parse()?;
+            content.parse::<Token![=>]>()?;
+            match &*key.to_string() {
+                "code" => {
+                    code = Some(content.parse()?);
+                }
+                "errors" => {
+                    errors = Some(content.parse()?);
+                }
+                _ => panic!("didn't expect key {}", key),
+            }
+            if !content.is_empty() {
+                content.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            code: code.expect("Expected 'code'"),
+            errors: errors.expect("Expected 'errors'"),
+        })
+    }
+}
+
+impl ToTokens for InvalidRuleTestSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let code = &self.code;
+        let errors = &self.errors;
+        quote! {
+            crate::rule_tester::RuleTestInvalid::new(
+                #code,
+                #errors
+            )
+        }
+        .to_tokens(tokens)
+    }
+}
+
+struct RuleTests {
+    valid: ExprArray,
+    invalid: Vec<InvalidRuleTestSpec>,
+}
+
+impl Parse for RuleTests {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut valid: Option<ExprArray> = Default::default();
+        let mut invalid: Option<Vec<InvalidRuleTestSpec>> = Default::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=>]>()?;
+            match &*key.to_string() {
+                "valid" => {
+                    assert!(valid.is_none(), "Already saw 'valid' key");
+                    valid = Some(input.parse()?);
+                }
+                "invalid" => {
+                    assert!(invalid.is_none(), "Already saw 'invalid' key");
+                    let invalid_content;
+                    bracketed!(invalid_content in input);
+                    let invalid = invalid.get_or_insert_with(|| Default::default());
+                    while !invalid_content.is_empty() {
+                        let invalid_rule_test_spec: InvalidRuleTestSpec =
+                            invalid_content.parse()?;
+                        invalid.push(invalid_rule_test_spec);
+                        if !invalid_content.is_empty() {
+                            invalid_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                _ => panic!("didn't expect key {}", key),
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            valid: valid.expect("Expected 'valid'"),
+            invalid: invalid.expect("Expected 'invalid'"),
+        })
+    }
+}
+
+#[proc_macro]
+pub fn rule_tests(input: TokenStream) -> TokenStream {
+    let RuleTests { valid, invalid } = parse_macro_input!(input);
+
+    quote! {
+        crate::rule_tester::RuleTests::new(
+            #valid,
+            vec![#(#invalid),*],
+        )
     }
     .into()
 }
