@@ -30,6 +30,7 @@ tree-sitter-rust = "0.20.3"
 assert_cmd = "2.0.12"
 predicates = "3.0.3"
 tempdir = "0.3.7"
+rayon = "1.7.0"
 
 [[bin]]
 name = "tree-sitter-lint"

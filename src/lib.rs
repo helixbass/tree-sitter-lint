@@ -9,16 +9,18 @@ mod violation;
 
 use std::{
     borrow::Cow,
+    cmp::Ordering,
     collections::HashMap,
     ops::Deref,
     path::{Path, PathBuf},
     process,
-    sync::Mutex,
+    sync::{Mutex, PoisonError},
 };
 
 use clap::Parser;
 pub use config::Config;
 use context::{PendingFix, QueryMatchContext};
+use rayon::prelude::*;
 use rule::{ResolvedRule, ResolvedRuleListener, Rule};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
@@ -64,57 +66,171 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
         "--capture",
         CAPTURE_NAME_FOR_TREE_SITTER_GREP,
     ]);
-    let all_violations: Mutex<Vec<ViolationWithContext>> = Default::default();
+    let all_violations: Mutex<HashMap<PathBuf, Vec<ViolationWithContext>>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
     tree_sitter_grep::run_with_callback(
-        tree_sitter_grep_args,
+        tree_sitter_grep_args.clone(),
         |capture_info, file_contents, path| {
             let (rule, rule_listener) =
                 aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
             let mut query_match_context =
                 QueryMatchContext::new(path, file_contents, rule, &config);
             (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
-            assert!(query_match_context.pending_fixes().is_none());
             if let Some(violations) = query_match_context.violations.take() {
-                all_violations.lock().unwrap().extend(violations);
+                all_violations
+                    .lock()
+                    .unwrap()
+                    .entry(path.to_owned())
+                    .or_default()
+                    .extend(violations);
             }
             if let Some(fixes) = query_match_context.into_pending_fixes() {
                 assert!(config.fix);
-                files_with_fixes.append(path, file_contents, fixes);
+                files_with_fixes.append(path, file_contents, &rule.meta.name, fixes);
             }
         },
     )
     .unwrap();
-    if !config.fix {
-        return all_violations.into_inner().unwrap();
-    }
-    // we're effectively "serial" from here forward currently
-    let mut files_with_fixes = files_with_fixes.into_inner().unwrap();
     let mut all_violations = all_violations.into_inner().unwrap();
-    for _ in 0..MAX_FIX_ITERATIONS {
-        if !has_any_pending_fixes(&files_with_fixes) {
-            break;
-        }
-        let current_files_with_fixes: HashMap<_, _> = files_with_fixes.drain().collect();
-        all_violations.clear();
-        for (file_path, pending_fixes) in current_files_with_fixes {
-            // tree_sitter_grep::
-            unimplemented!()
-        }
+    if !config.fix {
+        return all_violations.into_values().flatten().collect();
     }
-    all_violations
+    let files_with_fixes = files_with_fixes.into_inner().unwrap();
+    let aggregated_results_from_files_with_fixes: HashMap<
+        PathBuf,
+        (Vec<u8>, Vec<ViolationWithContext>),
+    > = files_with_fixes
+        .into_par_iter()
+        .map(
+            |(
+                path,
+                PerFilePendingFixes {
+                    file_contents,
+                    pending_fixes,
+                },
+            )| {
+                let mut violations: Vec<ViolationWithContext> = Default::default();
+                for _ in 0..MAX_FIX_ITERATIONS {
+                    apply_fixes(&mut file_contents, pending_fixes);
+                    pending_fixes = Default::default();
+                    violations.clear();
+                    tree_sitter_grep::run_for_slice_with_callback(
+                        &file_contents,
+                        tree_sitter_grep_args,
+                        |capture_info| {
+                            let (rule, rule_listener) = aggregated_queries
+                                .get_rule_and_listener(capture_info.pattern_index);
+                            let mut query_match_context =
+                                QueryMatchContext::new(&path, &file_contents, rule, &config);
+                            (rule_listener.on_query_match)(
+                                capture_info.node,
+                                &mut query_match_context,
+                            );
+                            if let Some(reported_violations) = query_match_context.violations.take()
+                            {
+                                violations.extend(reported_violations);
+                            }
+                            if let Some(fixes) = query_match_context.into_pending_fixes() {
+                                pending_fixes
+                                    .entry(rule.meta.name.clone())
+                                    .or_default()
+                                    .extend(fixes);
+                            }
+                        },
+                    )
+                    .unwrap();
+                    if pending_fixes.is_empty() {
+                        break;
+                    }
+                }
+                (path, (file_contents, violations))
+            },
+        )
+        .collect();
+    write_modified_files();
+    replace_violations_from_fixed_files_in_all_violations();
+    all_violations.into_values().flatten().collect()
+}
+
+type RuleName = String;
+
+fn apply_fixes(file_contents: &mut Vec<u8>, pending_fixes: HashMap<RuleName, Vec<PendingFix>>) {
+    let non_conflicting_sorted_pending_fixes =
+        get_sorted_non_conflicting_pending_fixes(pending_fixes);
+    for PendingFix { range, replacement } in non_conflicting_sorted_pending_fixes.into_iter().rev()
+    {
+        file_contents.splice(range, replacement.into_bytes());
+    }
+}
+
+fn compare_pending_fixes(a: &PendingFix, b: &PendingFix) -> Ordering {
+    if a.range.start < b.range.start {
+        return Ordering::Less;
+    }
+    if a.range.start > b.range.start {
+        return Ordering::Greater;
+    }
+    if a.range.end < b.range.end {
+        return Ordering::Less;
+    }
+    if a.range.end > b.range.end {
+        return Ordering::Greater;
+    }
+    Ordering::Equal
+}
+
+fn has_overlapping_ranges(sorted_pending_fixes: &[PendingFix]) -> bool {
+    let mut prev_end = None;
+    for pending_fix in sorted_pending_fixes {
+        if let Some(prev_end) = prev_end {
+            if pending_fix.range.start < prev_end {
+                return true;
+            }
+        }
+        prev_end = Some(pending_fix.range.end);
+    }
+    false
+}
+
+fn get_sorted_non_conflicting_pending_fixes(
+    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+) -> Vec<PendingFix> {
+    pending_fixes.into_iter().fold(
+        Default::default(),
+        |accumulated_fixes, (rule_name, mut pending_fixes_for_rule)| {
+            pending_fixes_for_rule.sort_by(compare_pending_fixes);
+            if has_overlapping_ranges(&pending_fixes_for_rule) {
+                panic!("Rule {:?} tried to apply self-conflicting fixes", rule_name);
+            }
+            let mut tentative = accumulated_fixes.clone();
+            tentative.extend(pending_fixes_for_rule);
+            if has_overlapping_ranges(&tentative) {
+                accumulated_fixes
+            } else {
+                tentative
+            }
+        },
+    )
 }
 
 #[derive(Default)]
 struct AllPendingFixes(Mutex<HashMap<PathBuf, PerFilePendingFixes>>);
 
 impl AllPendingFixes {
-    pub fn append(&self, path: &Path, file_contents: &[u8], fixes: Vec<PendingFix>) {
+    pub fn append(
+        &self,
+        path: &Path,
+        file_contents: &[u8],
+        rule_name: &str,
+        fixes: Vec<PendingFix>,
+    ) {
         self.lock()
             .unwrap()
             .entry(path.to_owned())
             .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
             .pending_fixes
+            .entry(rule_name.to_owned())
+            .or_default()
             .extend(fixes);
     }
 
@@ -122,16 +238,10 @@ impl AllPendingFixes {
         self,
     ) -> Result<
         HashMap<PathBuf, PerFilePendingFixes>,
-        std::sync::PoisonError<HashMap<PathBuf, PerFilePendingFixes>>,
+        PoisonError<HashMap<PathBuf, PerFilePendingFixes>>,
     > {
         self.0.into_inner()
     }
-}
-
-fn has_any_pending_fixes(files_with_fixes: &HashMap<PathBuf, PerFilePendingFixes>) -> bool {
-    !files_with_fixes
-        .values()
-        .any(|per_file_pending_fixes| !per_file_pending_fixes.pending_fixes.is_empty())
 }
 
 impl Deref for AllPendingFixes {
@@ -144,7 +254,7 @@ impl Deref for AllPendingFixes {
 
 struct PerFilePendingFixes {
     file_contents: Vec<u8>,
-    pending_fixes: Vec<PendingFix>,
+    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
 }
 
 impl PerFilePendingFixes {

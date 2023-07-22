@@ -143,6 +143,7 @@ impl Fixer {
     }
 }
 
+#[derive(Clone)]
 pub struct PendingFix {
     pub range: ops::Range<usize>,
     pub replacement: String,
