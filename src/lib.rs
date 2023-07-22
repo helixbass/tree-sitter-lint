@@ -11,6 +11,7 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     collections::HashMap,
+    fs,
     ops::Deref,
     path::{Path, PathBuf},
     process,
@@ -147,9 +148,21 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
             },
         )
         .collect();
-    write_modified_files();
-    replace_violations_from_fixed_files_in_all_violations();
+    write_files(
+        aggregated_results_from_files_with_fixes
+            .iter()
+            .map(|(path, (file_contents, _))| (&**path, &**file_contents)),
+    );
+    for (path, (_, violations)) in aggregated_results_from_files_with_fixes {
+        all_violations.insert(path, violations);
+    }
     all_violations.into_values().flatten().collect()
+}
+
+fn write_files<'a>(files_to_write: impl Iterator<Item = (&'a Path, &'a [u8])>) {
+    for (path, file_contents) in files_to_write {
+        fs::write(path, file_contents).unwrap();
+    }
 }
 
 type RuleName = String;
