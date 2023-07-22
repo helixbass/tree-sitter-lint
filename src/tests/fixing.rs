@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use proc_macros::rule;
 use tree_sitter::Node;
 use tree_sitter_grep::SupportedLanguage;
 
@@ -144,16 +145,35 @@ fn create_identifier_replacing_rule(
     Arc::new(IdentifierReplacingRule::new(name, replacement))
 }
 
-// fn create_identifier_replacing_rule(
-//     name: impl Into<String>,
-//     replacement: impl Into<String>,
-// ) -> Rule { let name = name.into(); let replacement = replacement.into(); let
-//   rule_name = format!("replace_{name}_with_{replacement}"); rule! { name =>
-//   rule_name, fixable => true, state_per_run => { name: String = name,
-//   replacement: String = replacement, }, listeners => [ format!(r#"(
-//   (identifier) @c (#eq? @c "{}") )"#, name) => |node, context| {
-//   context.report( ViolationBuilder::default() .message(format!(r#"Use
-//   '{self.replacement}' instead of '{self.name}'"#)) .node(node) .fix(|fixer|
-//   { fixer.replace_text(node, &self.replacement); }) .build() .unwrap(), ); }
-//   ] }
-// }
+fn create_identifier_replacing_rulez(
+    name: impl Into<String>,
+    replacement: impl Into<String>,
+) -> Arc<dyn Rule> {
+    rule! {
+        name => rule_name,
+        fixable => true,
+        state => {
+            [rule-static]
+            name: String = name.into(),
+            replacement: String = replacement.into(),
+        },
+        listeners => [
+            format!(r#"(
+              (identifier) @c (#eq? @c "{}")
+            )"#, self.name) => |node, context| {
+                context.report(
+                    ViolationBuilder::default()
+                        .message(
+                            format!(r#"Use '{}' instead of '{}'"#, self.replacement, self.name)
+                        )
+                        .node(node)
+                        .fix(|fixer| {
+                            fixer.replace_text(node, &self.replacement);
+                        })
+                        .build()
+                        .unwrap(),
+                );
+            }
+        ]
+    }
+}

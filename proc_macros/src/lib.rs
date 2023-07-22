@@ -5,7 +5,7 @@ use quote::{quote, ToTokens};
 use syn::{
     braced, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, Expr, ExprArray, ExprPath, Ident, Token,
+    parse_macro_input, token, Expr, ExprArray, ExprClosure, ExprPath, Ident, Token, Type,
 };
 
 struct BuilderArgs {
@@ -164,4 +164,187 @@ pub fn rule_tests(input: TokenStream) -> TokenStream {
         )
     }
     .into()
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum RuleStateScope {
+    RuleStatic,
+    PerRun,
+    PerFileRun,
+}
+
+impl Parse for RuleStateScope {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        bracketed!(content in input);
+        let found = match &*content.parse::<Ident>()?.to_string() {
+            "rule" => {
+                content.parse::<Token![-]>()?;
+                content.parse::<Token![static]>()?;
+                Self::RuleStatic
+            }
+            "per" => {
+                content.parse::<Token![-]>()?;
+                match &*content.parse::<Ident>()?.to_string() {
+                    "run" => Self::PerRun,
+                    "file" => {
+                        content.parse::<Token![-]>()?;
+                        match &*content.parse::<Ident>()?.to_string() {
+                            "run" => Self::PerFileRun,
+                            _ => {
+                                return Err(
+                                    content.error("Expected rule-static, per-run or per-file-run")
+                                )
+                            }
+                        }
+                    }
+                    _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+                }
+            }
+            _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+        };
+        if !content.is_empty() {
+            return Err(content.error("Expected rule-static, per-run or per-file-run"));
+        }
+        Ok(found)
+    }
+}
+
+struct RuleStateFieldSpec {
+    name: Ident,
+    type_: Type,
+    initializer: Option<Expr>,
+}
+
+impl Parse for RuleStateFieldSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name: Ident = input.parse()?;
+        input.parse::<Token![:]>()?;
+        let type_: Type = input.parse()?;
+        let mut initializer: Option<Expr> = Default::default();
+        if input.peek(Token![=]) {
+            input.parse::<Token![=]>()?;
+            initializer = Some(input.parse()?);
+        }
+        Ok(Self {
+            name,
+            type_,
+            initializer,
+        })
+    }
+}
+
+struct RuleStateScopeSection {
+    scope: RuleStateScope,
+    fields: Vec<RuleStateFieldSpec>,
+}
+
+impl Parse for RuleStateScopeSection {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let scope: RuleStateScope = input.parse()?;
+        let mut fields: Vec<RuleStateFieldSpec> = Default::default();
+        while !input.is_empty() && !input.peek(token::Bracket) {
+            fields.push(input.parse()?);
+            if !input.is_empty() {
+                let _ = input.parse::<Token![,]>();
+            }
+        }
+        Ok(Self { scope, fields })
+    }
+}
+
+struct RuleStateSpec {
+    scope_sections: Vec<RuleStateScopeSection>,
+}
+
+impl Parse for RuleStateSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut scope_sections: Vec<RuleStateScopeSection> = Default::default();
+        let rule_state_spec_content;
+        braced!(rule_state_spec_content in input);
+        while !rule_state_spec_content.is_empty() {
+            scope_sections.push(rule_state_spec_content.parse()?);
+            if !rule_state_spec_content.is_empty() {
+                let _ = rule_state_spec_content.parse::<Token![,]>();
+            }
+        }
+        Ok(Self { scope_sections })
+    }
+}
+
+struct RuleListenerSpec {
+    query: Expr,
+    callback: ExprClosure,
+}
+
+impl Parse for RuleListenerSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let query: Expr = input.parse()?;
+        input.parse::<Token![=>]>()?;
+        let callback: ExprClosure = input.parse()?;
+        Ok(Self { query, callback })
+    }
+}
+
+struct Rule {
+    name: Expr,
+    fixable: Option<Expr>,
+    state: Option<RuleStateSpec>,
+    listeners: Vec<RuleListenerSpec>,
+}
+
+impl Parse for Rule {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut name: Option<Expr> = Default::default();
+        let mut fixable: Option<Expr> = Default::default();
+        let mut state: Option<RuleStateSpec> = Default::default();
+        let mut listeners: Option<Vec<RuleListenerSpec>> = Default::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=>]>()?;
+            match &*key.to_string() {
+                "name" => {
+                    assert!(name.is_none(), "Already saw 'name' key");
+                    name = Some(input.parse()?);
+                }
+                "fixable" => {
+                    assert!(fixable.is_none(), "Already saw 'fixable' key");
+                    fixable = Some(input.parse()?);
+                }
+                "state" => {
+                    assert!(state.is_none(), "Already saw 'state' key");
+                    state = Some(input.parse()?);
+                }
+                "listeners" => {
+                    assert!(listeners.is_none(), "Already saw 'listeners' key");
+                    let listeners_content;
+                    bracketed!(listeners_content in input);
+                    let listeners = listeners.get_or_insert_with(|| Default::default());
+                    while !listeners_content.is_empty() {
+                        let rule_listener_spec: RuleListenerSpec = listeners_content.parse()?;
+                        listeners.push(rule_listener_spec);
+                        if !listeners_content.is_empty() {
+                            listeners_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                _ => panic!("didn't expect key '{}'", key),
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            name: name.expect("Expected 'name'"),
+            fixable,
+            state,
+            listeners: listeners.expect("Expected 'listeners'"),
+        })
+    }
+}
+
+#[proc_macro]
+pub fn rule(input: TokenStream) -> TokenStream {
+    let rule: Rule = parse_macro_input!(input);
+    unimplemented!()
 }
