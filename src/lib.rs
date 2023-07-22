@@ -106,8 +106,8 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
             |(
                 path,
                 PerFilePendingFixes {
-                    file_contents,
-                    pending_fixes,
+                    mut file_contents,
+                    mut pending_fixes,
                 },
             )| {
                 let mut violations: Vec<ViolationWithContext> = Default::default();
@@ -117,7 +117,7 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
                     violations.clear();
                     tree_sitter_grep::run_for_slice_with_callback(
                         &file_contents,
-                        tree_sitter_grep_args,
+                        tree_sitter_grep_args.clone(),
                         |capture_info| {
                             let (rule, rule_listener) = aggregated_queries
                                 .get_rule_and_listener(capture_info.pattern_index);
