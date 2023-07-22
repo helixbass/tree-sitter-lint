@@ -99,7 +99,7 @@ impl ToTokens for InvalidRuleTestSpec {
             },
         };
         quote! {
-            tree_sitter_lint::RuleTestInvalid::new(
+            crate::RuleTestInvalid::new(
                 #code,
                 #errors,
                 #output
@@ -158,7 +158,7 @@ pub fn rule_tests(input: TokenStream) -> TokenStream {
     let RuleTests { valid, invalid } = parse_macro_input!(input);
 
     quote! {
-        tree_sitter_lint::RuleTests::new(
+        crate::RuleTests::new(
             #valid,
             vec![#(#invalid),*],
         )
