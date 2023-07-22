@@ -27,8 +27,6 @@ pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use violation::{ViolationBuilder, ViolationWithContext};
 
-pub use crate::rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule};
-
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 

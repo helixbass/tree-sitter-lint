@@ -3,8 +3,8 @@ use derive_builder::Builder;
 use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
-    no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule,
     rule::{ResolvedRule, Rule},
+    rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule},
 };
 
 #[derive(Builder, Parser)]
