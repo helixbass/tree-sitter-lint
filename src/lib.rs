@@ -129,7 +129,15 @@ fn run_fixing_loop(
     for _ in 0..MAX_FIX_ITERATIONS {
         apply_fixes(file_contents, pending_fixes);
         pending_fixes = Default::default();
-        violations.clear();
+        if config.report_fixed_violations {
+            *violations = violations
+                .iter()
+                .filter(|violation| violation.was_fix)
+                .cloned()
+                .collect();
+        } else {
+            violations.clear();
+        }
         tree_sitter_grep::run_for_slice_with_callback(
             file_contents,
             tree_sitter_grep_args.clone(),

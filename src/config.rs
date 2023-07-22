@@ -20,6 +20,10 @@ pub struct Config {
     #[arg(long)]
     #[builder(default)]
     pub fix: bool,
+
+    #[arg(long)]
+    #[builder(default)]
+    pub report_fixed_violations: bool,
 }
 
 impl Config {

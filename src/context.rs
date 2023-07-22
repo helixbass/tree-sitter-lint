@@ -47,6 +47,9 @@ impl<'a> QueryMatchContext<'a> {
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
+                if !self.config.report_fixed_violations {
+                    return;
+                }
             }
         }
         let violation = violation.contextualize(self);

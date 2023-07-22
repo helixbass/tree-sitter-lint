@@ -23,12 +23,13 @@ impl<'a> Violation<'a> {
         self,
         query_match_context: &QueryMatchContext<'a>,
     ) -> ViolationWithContext {
-        let Violation { message, node, .. } = self;
+        let Violation { message, node, fix } = self;
         ViolationWithContext {
             message,
             range: node.range(),
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
+            was_fix: fix.is_some(),
         }
     }
 }
@@ -40,11 +41,13 @@ impl<'a> ViolationBuilder<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct ViolationWithContext {
     pub message: String,
     pub range: tree_sitter::Range,
     pub path: PathBuf,
     pub rule: RuleMeta,
+    pub was_fix: bool,
 }
 
 impl ViolationWithContext {

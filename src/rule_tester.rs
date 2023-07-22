@@ -1,11 +1,8 @@
-use std::{fs, process::Command};
+use std::iter;
 
-use assert_cmd::prelude::*;
-use predicates::prelude::*;
-use tempdir::TempDir;
 use tree_sitter_grep::SupportedLanguage;
 
-use crate::{config::ConfigBuilder, rule::Rule};
+use crate::{config::ConfigBuilder, rule::Rule, violation::ViolationWithContext};
 
 pub struct RuleTester {
     rule: Rule,
@@ -14,6 +11,14 @@ pub struct RuleTester {
 
 impl RuleTester {
     fn new(rule: Rule, rule_tests: RuleTests) -> Self {
+        if !rule.meta.fixable
+            && rule_tests
+                .invalid_tests
+                .iter()
+                .any(|invalid_test| invalid_test.output.is_some())
+        {
+            panic!("Specified 'output' for a non-fixable rule");
+        }
         Self { rule, rule_tests }
     }
 
@@ -45,43 +50,42 @@ impl RuleTester {
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
-        let tmp_dir = TempDir::new("invalid_test").unwrap();
-        let test_filename = "tmp.rs";
-        let test_filename_path = tmp_dir.path().join(test_filename);
-        fs::write(&*test_filename_path, &invalid_test.code).unwrap();
-        Command::cargo_bin("tree-sitter-lint")
-            .unwrap()
-            .args(["--rule", &self.rule.meta.name, "--language", "rust"])
-            .current_dir(tmp_dir.path())
-            .assert()
-            .failure()
-            .code(1)
-            .stdout(predicate::function(|stdout: &str| {
-                does_invalid_output_match_expected(stdout, &invalid_test.errors)
-            }));
+        let mut file_contents = invalid_test.code.clone().into_bytes();
+        let violations = crate::run_fixing_for_slice(
+            &mut file_contents,
+            "tmp.rs",
+            ConfigBuilder::default()
+                .rule(&self.rule.meta.name)
+                .language(SupportedLanguage::Rust)
+                .fix(true)
+                .report_fixed_violations(true)
+                .build()
+                .unwrap(),
+        );
+        if let Some(expected_file_contents) = invalid_test.output.as_ref() {
+            assert_eq!(&file_contents, expected_file_contents.as_bytes());
+        }
+        assert_that_violations_match_expected(&violations, invalid_test);
     }
 }
 
-fn does_invalid_output_match_expected(
-    stdout: &str,
-    expected_errors: &[RuleTestExpectedError],
-) -> bool {
-    let mut lines: Vec<_> = stdout.split('\n').filter(|line| !line.is_empty()).collect();
-    if lines.len() != expected_errors.len() {
-        return false;
+fn assert_that_violations_match_expected(
+    violations: &[ViolationWithContext],
+    invalid_test: &RuleTestInvalid,
+) {
+    assert_eq!(violations.len(), invalid_test.errors.len());
+    let mut violations = violations.to_owned();
+    violations.sort_by_key(|violation| violation.range);
+    for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
+        assert_that_violation_matches_expected(&violation, expected_violation);
     }
-    for expected_error in expected_errors {
-        match lines
-            .iter()
-            .position(|&line| line.contains(&expected_error.message))
-        {
-            None => return false,
-            Some(line_index) => {
-                lines.remove(line_index);
-            }
-        }
-    }
-    true
+}
+
+fn assert_that_violation_matches_expected(
+    violation: &ViolationWithContext,
+    expected_violation: &RuleTestExpectedError,
+) {
+    assert_eq!(violation.message, expected_violation.message);
 }
 
 pub struct RuleTests {
