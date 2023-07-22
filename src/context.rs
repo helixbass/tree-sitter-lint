@@ -1,9 +1,10 @@
 use std::{ops, path::Path};
 
 use tree_sitter::{Language, Node, Query, QueryCursor};
+use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
-    rule::ResolvedRule,
+    rule::InstantiatedRule,
     violation::{Violation, ViolationWithContext},
     Config,
 };
@@ -11,8 +12,9 @@ use crate::{
 pub struct QueryMatchContext<'a> {
     pub path: &'a Path,
     pub file_contents: &'a [u8],
-    pub rule: &'a ResolvedRule<'a>,
+    pub rule: &'a InstantiatedRule,
     config: &'a Config,
+    language: SupportedLanguage,
     pending_fixes: Option<Vec<PendingFix>>,
     pub violations: Option<Vec<ViolationWithContext>>,
 }
@@ -21,14 +23,16 @@ impl<'a> QueryMatchContext<'a> {
     pub fn new(
         path: &'a Path,
         file_contents: &'a [u8],
-        rule: &'a ResolvedRule,
+        rule: &'a InstantiatedRule,
         config: &'a Config,
+        language: SupportedLanguage,
     ) -> Self {
         Self {
             path,
             file_contents,
             rule,
             config,
+            language,
             pending_fixes: Default::default(),
             violations: Default::default(),
         }
@@ -67,7 +71,7 @@ impl<'a> QueryMatchContext<'a> {
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> Option<Node<'enclosing_node>> {
-        let query = query.into().into_parsed(self.config.language.language());
+        let query = query.into().into_parsed(self.language.language());
         let mut query_cursor = QueryCursor::new();
         let mut matches = query_cursor.matches(&query, enclosing_node, self.file_contents);
         let first_match = matches.next()?;
@@ -87,7 +91,7 @@ impl<'a> QueryMatchContext<'a> {
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> usize {
-        let query = query.into().into_parsed(self.config.language.language());
+        let query = query.into().into_parsed(self.language.language());
         let mut query_cursor = QueryCursor::new();
         query_cursor
             .matches(&query, enclosing_node, self.file_contents)
