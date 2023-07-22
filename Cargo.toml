@@ -26,7 +26,6 @@ regex = "1.9.1"
 tree-sitter = "0.20.10"
 # tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", git = "https://github.com/helixbass/tree-sitter-grep", rev = "422058d", version = "0.1.0" }
 tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", path = "../tree-sitter-grep" }
-tree-sitter-rust = "0.20.3"
 assert_cmd = "2.0.12"
 predicates = "3.0.3"
 tempdir = "0.3.7"

@@ -3,8 +3,9 @@ use std::{fs, process::Command};
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use tempdir::TempDir;
+use tree_sitter_grep::SupportedLanguage;
 
-use crate::rule::Rule;
+use crate::{config::ConfigBuilder, rule::Rule};
 
 pub struct RuleTester {
     rule: Rule,
@@ -31,16 +32,16 @@ impl RuleTester {
     }
 
     fn run_valid_test(&self, valid_test: &RuleTestValid) {
-        let tmp_dir = TempDir::new("valid_test").unwrap();
-        let test_filename = "tmp.rs";
-        fs::write(tmp_dir.path().join(test_filename), &valid_test.code).unwrap();
-        Command::cargo_bin("tree-sitter-lint")
-            .unwrap()
-            .args(["--rule", &self.rule.meta.name, "--language", "rust"])
-            .current_dir(tmp_dir.path())
-            .assert()
-            .success()
-            .stdout(predicate::str::is_empty());
+        let violations = crate::run_for_slice(
+            valid_test.code.as_bytes(),
+            "tmp.rs",
+            ConfigBuilder::default()
+                .rule(&self.rule.meta.name)
+                .language(SupportedLanguage::Rust)
+                .build()
+                .unwrap(),
+        );
+        assert!(violations.is_empty());
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {

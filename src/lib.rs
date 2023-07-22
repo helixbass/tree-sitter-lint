@@ -22,7 +22,7 @@ use clap::Parser;
 pub use config::Config;
 use context::{PendingFix, QueryMatchContext};
 use rayon::prelude::*;
-use rule::{ResolvedRule, ResolvedRuleListener, Rule};
+use rule::{ResolvedRule, ResolvedRuleListener};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use violation::{ViolationBuilder, ViolationWithContext};
@@ -46,27 +46,9 @@ pub fn run_and_output(config: Config) {
 const MAX_FIX_ITERATIONS: usize = 10;
 
 pub fn run(config: Config) -> Vec<ViolationWithContext> {
-    let resolved_rules = get_rules()
-        .into_iter()
-        .filter(|rule| match config.rule.as_ref() {
-            Some(rule_arg) => &rule.meta.name == rule_arg,
-            None => true,
-        })
-        .map(|rule| rule.resolve(&config))
-        .collect::<Vec<_>>();
-    if resolved_rules.is_empty() {
-        panic!("Invalid rule name: {:?}", config.rule.as_ref().unwrap());
-    }
+    let resolved_rules = config.get_resolved_rules();
     let aggregated_queries = AggregatedQueries::new(&resolved_rules, &config);
-    let tree_sitter_grep_args = tree_sitter_grep::Args::parse_from([
-        "tree_sitter_grep",
-        "-q",
-        &aggregated_queries.query_text,
-        "-l",
-        "rust",
-        "--capture",
-        CAPTURE_NAME_FOR_TREE_SITTER_GREP,
-    ]);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
     let all_violations: Mutex<HashMap<PathBuf, Vec<ViolationWithContext>>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
     tree_sitter_grep::run_with_callback(
@@ -157,6 +139,146 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
         all_violations.insert(path, violations);
     }
     all_violations.into_values().flatten().collect()
+}
+
+pub fn run_for_slice(
+    file_contents: &[u8],
+    path: impl AsRef<Path>,
+    config: Config,
+) -> Vec<ViolationWithContext> {
+    let path = path.as_ref();
+    if config.fix {
+        panic!("Use run_fixing_for_slice()");
+    }
+    let resolved_rules = config.get_resolved_rules();
+    let aggregated_queries = AggregatedQueries::new(&resolved_rules, &config);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
+    let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
+    tree_sitter_grep::run_for_slice_with_callback(
+        file_contents,
+        tree_sitter_grep_args,
+        |capture_info| {
+            let (rule, rule_listener) =
+                aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
+            let mut query_match_context =
+                QueryMatchContext::new(path, file_contents, rule, &config);
+            (rule_listener.on_query_match)(capture_info.node, &mut query_match_context);
+            if let Some(reported_violations) = query_match_context.violations.take() {
+                violations.lock().unwrap().extend(reported_violations);
+            }
+            assert!(query_match_context.pending_fixes().is_none());
+        },
+    )
+    .unwrap();
+    violations.into_inner().unwrap()
+}
+
+// pub fn run_fixing_for_slice(file_contents: &mut Vec<u8>, path: &Path, config:
+// Config) -> Vec<ViolationWithContext> {     if !config.fix {
+//         panic!("Use run_for_slice()");
+//     }
+//     let resolved_rules = config.get_resolved_rules();
+//     let aggregated_queries = AggregatedQueries::new(&resolved_rules,
+// &config);     let tree_sitter_grep_args =
+// get_tree_sitter_grep_args(&aggregated_queries);     let violations:
+// Mutex<Vec<ViolationWithContext>> = Default::default();     let pending_fixes:
+// Mutex<Vec<PendingFixes>> = Default::default();
+//     tree_sitter_grep::run_for_slice_with_callback(
+//         file_contents,
+//         tree_sitter_grep_args.clone(),
+//         |capture_info| {
+//             let (rule, rule_listener) = aggregated_queries
+//                 .get_rule_and_listener(capture_info.pattern_index);
+//             let mut query_match_context =
+//                 QueryMatchContext::new(&path, file_contents, rule, &config);
+//             (rule_listener.on_query_match)(
+//                 capture_info.node,
+//                 &mut query_match_context,
+//             );
+//             if let Some(reported_violations) =
+// query_match_context.violations.take()             {
+//                 violations.extend(reported_violations);
+//             }
+//             if let Some(fixes) = query_match_context.into_pending_fixes() {
+//                 pending_fixes
+//                     .entry(rule.meta.name.clone())
+//                     .or_default()
+//                     .extend(fixes);
+//             }
+//         },
+//     )
+//     .unwrap();
+//     tree_sitter_grep::run_with_callback(
+//         tree_sitter_grep_args.clone(),
+//         |capture_info, file_contents, path| {
+//             let (rule, rule_listener) =
+//
+// aggregated_queries.get_rule_and_listener(capture_info.pattern_index);
+//             let mut query_match_context =
+//                 QueryMatchContext::new(path, file_contents, rule, &config);
+//             (rule_listener.on_query_match)(capture_info.node, &mut
+// query_match_context);             if let Some(violations) =
+// query_match_context.violations.take() {                 all_violations
+//                     .lock()
+//                     .unwrap()
+//                     .entry(path.to_owned())
+//                     .or_default()
+//                     .extend(violations);
+//             }
+//             if let Some(fixes) = query_match_context.into_pending_fixes() {
+//                 assert!(config.fix);
+//                 files_with_fixes.append(path, file_contents, &rule.meta.name,
+// fixes);             }
+//         },
+//     )
+//     .unwrap();
+//     let mut all_violations = all_violations.into_inner().unwrap();
+//     if !config.fix {
+//         return all_violations.into_values().flatten().collect();
+//     }
+//     let files_with_fixes = files_with_fixes.into_inner().unwrap();
+//     let aggregated_results_from_files_with_fixes: HashMap<
+//         PathBuf,
+//         (Vec<u8>, Vec<ViolationWithContext>),
+//     > = files_with_fixes .into_par_iter() .map( |( path, PerFilePendingFixes
+//     > { mut file_contents, mut pending_fixes, }, )| { let mut violations:
+//     > Vec<ViolationWithContext> = Default::default(); for _ in
+//     > 0..MAX_FIX_ITERATIONS { apply_fixes(&mut file_contents, pending_fixes);
+//     > pending_fixes = Default::default(); violations.clear();
+//     > tree_sitter_grep::run_for_slice_with_callback( &file_contents,
+//     > tree_sitter_grep_args.clone(), |capture_info| { let (rule,
+//     > rule_listener) = aggregated_queries
+//     > .get_rule_and_listener(capture_info.pattern_index); let mut
+//     > query_match_context = QueryMatchContext::new(&path, &file_contents,
+//     > rule, &config); (rule_listener.on_query_match)( capture_info.node, &mut
+//     > query_match_context, ); if let Some(reported_violations) =
+//     > query_match_context.violations.take() {
+//     > violations.extend(reported_violations); } if let Some(fixes) =
+//     > query_match_context.into_pending_fixes() { pending_fixes
+//     > .entry(rule.meta.name.clone()) .or_default() .extend(fixes); } }, )
+//     > .unwrap(); if pending_fixes.is_empty() { break; } } (path,
+//     > (file_contents, violations)) }, ) .collect();
+//     write_files(
+//         aggregated_results_from_files_with_fixes
+//             .iter()
+//             .map(|(path, (file_contents, _))| (&**path, &**file_contents)),
+//     );
+//     for (path, (_, violations)) in aggregated_results_from_files_with_fixes {
+//         all_violations.insert(path, violations);
+//     }
+//     all_violations.into_values().flatten().collect()
+// }
+
+fn get_tree_sitter_grep_args(aggregated_queries: &AggregatedQueries) -> tree_sitter_grep::Args {
+    tree_sitter_grep::Args::parse_from([
+        "tree_sitter_grep",
+        "-q",
+        &aggregated_queries.query_text,
+        "-l",
+        "rust",
+        "--capture",
+        CAPTURE_NAME_FOR_TREE_SITTER_GREP,
+    ])
 }
 
 fn write_files<'a>(files_to_write: impl Iterator<Item = (&'a Path, &'a [u8])>) {
@@ -338,12 +460,4 @@ impl<'resolved_rules> AggregatedQueries<'resolved_rules> {
         let rule = &self.resolved_rules[rule_index];
         (rule, &rule.listeners[rule_listener_index])
     }
-}
-
-fn get_rules() -> Vec<Rule> {
-    vec![
-        no_default_default_rule(),
-        no_lazy_static_rule(),
-        prefer_impl_param_rule(),
-    ]
 }

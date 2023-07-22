@@ -35,6 +35,7 @@ impl Rule {
 pub struct RuleBuilder {
     name: Option<String>,
     fixable: bool,
+    #[allow(clippy::type_complexity)]
     create: Option<Arc<dyn Fn(&Config) -> Vec<RuleListener>>>,
 }
 

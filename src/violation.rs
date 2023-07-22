@@ -13,6 +13,7 @@ use crate::{
 pub struct Violation<'a> {
     pub message: String,
     pub node: Node<'a>,
+    #[allow(clippy::type_complexity)]
     #[builder(default, setter(custom))]
     pub fix: Option<Rc<dyn Fn(&mut Fixer) + 'a>>,
 }
