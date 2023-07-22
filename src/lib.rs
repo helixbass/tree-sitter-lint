@@ -77,6 +77,9 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
         return all_violations.into_values().flatten().collect();
     }
     let files_with_fixes = files_with_fixes.into_inner().unwrap();
+    if files_with_fixes.is_empty() {
+        return all_violations.into_values().flatten().collect();
+    }
     let aggregated_results_from_files_with_fixes: HashMap<
         PathBuf,
         (Vec<u8>, Vec<ViolationWithContext>),
