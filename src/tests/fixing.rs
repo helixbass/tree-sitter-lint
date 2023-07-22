@@ -74,42 +74,41 @@ impl Rule for IdentifierReplacingRule {
         &self.listener_queries
     }
 
-    fn instantiate(&self, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(IdentifierReplacingRuleInstance::new(
-            self.name.clone(),
-            self.replacement.clone(),
-        ))
+    fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
+        Arc::new(IdentifierReplacingRuleInstance::new(self))
     }
 }
 
 struct IdentifierReplacingRuleInstance {
-    name: String,
-    replacement: String,
+    rule: Arc<IdentifierReplacingRule>,
 }
 
 impl IdentifierReplacingRuleInstance {
-    fn new(name: String, replacement: String) -> Self {
-        Self { name, replacement }
+    fn new(rule: Arc<IdentifierReplacingRule>) -> Self {
+        Self { rule }
     }
 }
 
 impl RuleInstance for IdentifierReplacingRuleInstance {
-    fn instantiate_per_file(&self, _file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(IdentifierReplacingRuleInstancePerFile::new(
-            self.name.clone(),
-            self.replacement.clone(),
-        ))
+    fn instantiate_per_file(
+        self: Arc<Self>,
+        _file_run_info: &FileRunInfo,
+    ) -> Arc<dyn RuleInstancePerFile> {
+        Arc::new(IdentifierReplacingRuleInstancePerFile::new(self))
+    }
+
+    fn rule(&self) -> Arc<dyn Rule> {
+        self.rule.clone()
     }
 }
 
 struct IdentifierReplacingRuleInstancePerFile {
-    name: String,
-    replacement: String,
+    rule_instance: Arc<IdentifierReplacingRuleInstance>,
 }
 
 impl IdentifierReplacingRuleInstancePerFile {
-    fn new(name: String, replacement: String) -> Self {
-        Self { name, replacement }
+    fn new(rule_instance: Arc<IdentifierReplacingRuleInstance>) -> Self {
+        Self { rule_instance }
     }
 }
 
@@ -121,11 +120,11 @@ impl RuleInstancePerFile for IdentifierReplacingRuleInstancePerFile {
                     ViolationBuilder::default()
                         .message(format!(
                             r#"Use '{}' instead of '{}'"#,
-                            self.replacement, self.name,
+                            self.rule_instance.rule.replacement, self.rule_instance.rule.name,
                         ))
                         .node(node)
                         .fix(|fixer| {
-                            fixer.replace_text(node, &self.replacement);
+                            fixer.replace_text(node, &self.rule_instance.rule.replacement);
                         })
                         .build()
                         .unwrap(),
@@ -133,6 +132,10 @@ impl RuleInstancePerFile for IdentifierReplacingRuleInstancePerFile {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn rule_instance(&self) -> Arc<dyn RuleInstance> {
+        self.rule_instance.clone()
     }
 }
 
@@ -145,35 +148,15 @@ fn create_identifier_replacing_rule(
     Arc::new(IdentifierReplacingRule::new(name, replacement))
 }
 
-fn create_identifier_replacing_rulez(
-    name: impl Into<String>,
-    replacement: impl Into<String>,
-) -> Arc<dyn Rule> {
-    rule! {
-        name => rule_name,
-        fixable => true,
-        state => {
-            [rule-static]
-            name: String = name.into(),
-            replacement: String = replacement.into(),
-        },
-        listeners => [
-            format!(r#"(
-              (identifier) @c (#eq? @c "{}")
-            )"#, self.name) => |node, context| {
-                context.report(
-                    ViolationBuilder::default()
-                        .message(
-                            format!(r#"Use '{}' instead of '{}'"#, self.replacement, self.name)
-                        )
-                        .node(node)
-                        .fix(|fixer| {
-                            fixer.replace_text(node, &self.replacement);
-                        })
-                        .build()
-                        .unwrap(),
-                );
-            }
-        ]
-    }
-}
+// fn create_identifier_replacing_rulez(
+//     name: impl Into<String>,
+//     replacement: impl Into<String>,
+// ) -> Arc<dyn Rule> { rule! { name => rule_name, fixable => true, state => {
+//   [rule-static] name: String = name.into(), replacement: String =
+//   replacement.into(), }, listeners => [ format!(r#"( (identifier) @c (#eq? @c
+//   "{}") )"#, self.name) => |node, context| { context.report(
+//   ViolationBuilder::default() .message( format!(r#"Use '{}' instead of
+//   '{}'"#, self.replacement, self.name) ) .node(node) .fix(|fixer| {
+//   fixer.replace_text(node, &self.replacement); }) .build() .unwrap(), ); } ]
+//   }
+// }

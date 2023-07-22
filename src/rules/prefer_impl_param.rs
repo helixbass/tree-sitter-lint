@@ -104,20 +104,43 @@ impl Rule for PreferImplParamRule {
         &self.listener_queries
     }
 
-    fn instantiate(&self, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(PreferImplParamRuleInstance)
+    fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
+        Arc::new(PreferImplParamRuleInstance::new(self))
     }
 }
 
-struct PreferImplParamRuleInstance;
+struct PreferImplParamRuleInstance {
+    rule: Arc<PreferImplParamRule>,
+}
+
+impl PreferImplParamRuleInstance {
+    fn new(rule: Arc<PreferImplParamRule>) -> Self {
+        Self { rule }
+    }
+}
 
 impl RuleInstance for PreferImplParamRuleInstance {
-    fn instantiate_per_file(&self, _file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(PreferImplParamRuleInstancePerFile)
+    fn instantiate_per_file(
+        self: Arc<Self>,
+        _file_run_info: &FileRunInfo,
+    ) -> Arc<dyn RuleInstancePerFile> {
+        Arc::new(PreferImplParamRuleInstancePerFile::new(self))
+    }
+
+    fn rule(&self) -> Arc<dyn Rule> {
+        self.rule.clone()
     }
 }
 
-struct PreferImplParamRuleInstancePerFile;
+struct PreferImplParamRuleInstancePerFile {
+    rule_instance: Arc<PreferImplParamRuleInstance>,
+}
+
+impl PreferImplParamRuleInstancePerFile {
+    fn new(rule_instance: Arc<PreferImplParamRuleInstance>) -> Self {
+        Self { rule_instance }
+    }
+}
 
 impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
     fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
@@ -185,6 +208,10 @@ impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn rule_instance(&self) -> Arc<dyn RuleInstance> {
+        self.rule_instance.clone()
     }
 }
 

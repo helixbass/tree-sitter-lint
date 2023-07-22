@@ -26,20 +26,43 @@ impl Rule for NoDefaultDefaultRule {
         &self.listener_queries
     }
 
-    fn instantiate(&self, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(NoDefaultDefaultRuleInstance)
+    fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
+        Arc::new(NoDefaultDefaultRuleInstance::new(self))
     }
 }
 
-struct NoDefaultDefaultRuleInstance;
+struct NoDefaultDefaultRuleInstance {
+    rule: Arc<NoDefaultDefaultRule>,
+}
+
+impl NoDefaultDefaultRuleInstance {
+    fn new(rule: Arc<NoDefaultDefaultRule>) -> Self {
+        Self { rule }
+    }
+}
 
 impl RuleInstance for NoDefaultDefaultRuleInstance {
-    fn instantiate_per_file(&self, _file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(NoDefaultDefaultRuleInstancePerFile)
+    fn instantiate_per_file(
+        self: Arc<Self>,
+        _file_run_info: &FileRunInfo,
+    ) -> Arc<dyn RuleInstancePerFile> {
+        Arc::new(NoDefaultDefaultRuleInstancePerFile::new(self))
+    }
+
+    fn rule(&self) -> Arc<dyn Rule> {
+        self.rule.clone()
     }
 }
 
-struct NoDefaultDefaultRuleInstancePerFile;
+struct NoDefaultDefaultRuleInstancePerFile {
+    rule_instance: Arc<NoDefaultDefaultRuleInstance>,
+}
+
+impl NoDefaultDefaultRuleInstancePerFile {
+    fn new(rule_instance: Arc<NoDefaultDefaultRuleInstance>) -> Self {
+        Self { rule_instance }
+    }
+}
 
 impl RuleInstancePerFile for NoDefaultDefaultRuleInstancePerFile {
     fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
@@ -58,6 +81,10 @@ impl RuleInstancePerFile for NoDefaultDefaultRuleInstancePerFile {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn rule_instance(&self) -> Arc<dyn RuleInstance> {
+        self.rule_instance.clone()
     }
 }
 

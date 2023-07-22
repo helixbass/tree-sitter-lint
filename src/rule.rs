@@ -15,11 +15,15 @@ pub struct RuleMeta {
 pub trait Rule: Send + Sync {
     fn meta(&self) -> RuleMeta;
     fn listener_queries(&self) -> &[RuleListenerQuery];
-    fn instantiate(&self, config: &Config) -> Arc<dyn RuleInstance>;
+    fn instantiate(self: Arc<Self>, config: &Config) -> Arc<dyn RuleInstance>;
 }
 
 pub trait RuleInstance: Send + Sync {
-    fn instantiate_per_file(&self, file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile>;
+    fn instantiate_per_file(
+        self: Arc<Self>,
+        file_run_info: &FileRunInfo,
+    ) -> Arc<dyn RuleInstancePerFile>;
+    fn rule(&self) -> Arc<dyn Rule>;
 }
 
 pub struct InstantiatedRule {
@@ -32,7 +36,7 @@ impl InstantiatedRule {
     pub fn new(rule: Arc<dyn Rule>, config: &Config) -> Self {
         Self {
             meta: rule.meta(),
-            rule_instance: rule.instantiate(config),
+            rule_instance: rule.clone().instantiate(config),
             rule,
         }
     }
@@ -40,6 +44,7 @@ impl InstantiatedRule {
 
 pub trait RuleInstancePerFile: Send + Sync {
     fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext);
+    fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
 
 pub struct FileRunInfo {}

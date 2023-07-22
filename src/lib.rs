@@ -168,6 +168,7 @@ impl AllInstantiatedPerFileRules {
             .or_insert_with(|| {
                 instantiated_rule
                     .rule_instance
+                    .clone()
                     .instantiate_per_file(&FileRunInfo {})
             })
             .clone()
@@ -217,6 +218,7 @@ fn run_fixing_loop(
                     .or_insert_with(|| {
                         instantiated_rule
                             .rule_instance
+                            .clone()
                             .instantiate_per_file(&FileRunInfo {})
                     })
                     .on_query_match(
@@ -271,6 +273,7 @@ pub fn run_for_slice(
                 .or_insert_with(|| {
                     instantiated_rule
                         .rule_instance
+                        .clone()
                         .instantiate_per_file(&FileRunInfo {})
                 })
                 .on_query_match(
@@ -318,6 +321,7 @@ pub fn run_fixing_for_slice(
                 .or_insert_with(|| {
                     instantiated_rule
                         .rule_instance
+                        .clone()
                         .instantiate_per_file(&FileRunInfo {})
                 })
                 .on_query_match(

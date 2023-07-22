@@ -26,20 +26,43 @@ impl Rule for NoLazyStaticRule {
         &self.listener_queries
     }
 
-    fn instantiate(&self, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(NoLazyStaticRuleInstance)
+    fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
+        Arc::new(NoLazyStaticRuleInstance::new(self))
     }
 }
 
-struct NoLazyStaticRuleInstance;
+struct NoLazyStaticRuleInstance {
+    rule: Arc<NoLazyStaticRule>,
+}
+
+impl NoLazyStaticRuleInstance {
+    fn new(rule: Arc<NoLazyStaticRule>) -> Self {
+        Self { rule }
+    }
+}
 
 impl RuleInstance for NoLazyStaticRuleInstance {
-    fn instantiate_per_file(&self, _file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(NoLazyStaticRuleInstancePerFile)
+    fn instantiate_per_file(
+        self: Arc<Self>,
+        _file_run_info: &FileRunInfo,
+    ) -> Arc<dyn RuleInstancePerFile> {
+        Arc::new(NoLazyStaticRuleInstancePerFile::new(self))
+    }
+
+    fn rule(&self) -> Arc<dyn Rule> {
+        self.rule.clone()
     }
 }
 
-struct NoLazyStaticRuleInstancePerFile;
+struct NoLazyStaticRuleInstancePerFile {
+    rule_instance: Arc<NoLazyStaticRuleInstance>,
+}
+
+impl NoLazyStaticRuleInstancePerFile {
+    fn new(rule_instance: Arc<NoLazyStaticRuleInstance>) -> Self {
+        Self { rule_instance }
+    }
+}
 
 impl RuleInstancePerFile for NoLazyStaticRuleInstancePerFile {
     fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
@@ -55,6 +78,10 @@ impl RuleInstancePerFile for NoLazyStaticRuleInstancePerFile {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn rule_instance(&self) -> Arc<dyn RuleInstance> {
+        self.rule_instance.clone()
     }
 }
 
