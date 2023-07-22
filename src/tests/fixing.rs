@@ -45,15 +45,17 @@ struct IdentifierReplacingRule {
 impl IdentifierReplacingRule {
     pub fn new(name: String, replacement: String) -> Self {
         Self {
-            name,
-            replacement,
             listener_queries: vec![RuleListenerQuery {
-                query: r#"(
-                    (identifier) @c (#eq? @c "{}")
-                  )"#
-                .to_owned(),
+                query: format!(
+                    r#"(
+                      (identifier) @c (#eq? @c "{}")
+                    )"#,
+                    name
+                ),
                 capture_name: None,
             }],
+            name,
+            replacement,
         }
     }
 }
