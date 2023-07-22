@@ -24,6 +24,9 @@ pub fn no_default_default_rule() -> Rule {
                             ViolationBuilder::default()
                                 .message(r#"Use '_d()' instead of 'Default::default()'"#)
                                 .node(node)
+                                .fix(|fixer| {
+                                    fixer.replace_text(node, "_d()");
+                                })
                                 .build()
                                 .unwrap(),
                         );

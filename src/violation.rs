@@ -22,8 +22,7 @@ impl<'a> Violation<'a> {
         self,
         query_match_context: &QueryMatchContext<'a>,
     ) -> ViolationWithContext {
-        let Violation { message, node, fix } = self;
-        assert!(fix.is_none());
+        let Violation { message, node, .. } = self;
         ViolationWithContext {
             message,
             range: node.range(),
