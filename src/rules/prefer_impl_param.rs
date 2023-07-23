@@ -3,7 +3,7 @@ use std::sync::Arc;
 use proc_macros::rule;
 use tree_sitter::Node;
 
-use crate::{context::QueryMatchContext, rule::Rule, violation};
+use crate::{rule::Rule, violation};
 
 #[macro_export]
 macro_rules! assert_node_kind {

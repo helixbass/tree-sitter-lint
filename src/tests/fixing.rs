@@ -3,11 +3,8 @@
 use std::sync::Arc;
 
 use proc_macros::rule;
-use tree_sitter::Node;
 
-use crate::{
-    context::QueryMatchContext, rule::Rule, run_fixing_for_slice, violation, ConfigBuilder,
-};
+use crate::{rule::Rule, run_fixing_for_slice, violation, ConfigBuilder};
 
 #[test]
 fn test_single_fix() {

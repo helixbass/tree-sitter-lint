@@ -320,12 +320,35 @@ impl Parse for RuleListenerSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let query: Expr = input.parse()?;
         input.parse::<Token![=>]>()?;
-        let callback: ExprClosure = input.parse()?;
+        let mut callback: Option<ExprClosure> = Default::default();
+        let mut capture_name: Option<Expr> = Default::default();
+        match input.parse::<ExprClosure>() {
+            Ok(parsed) => callback = Some(parsed),
+            _ => {
+                let content;
+                braced!(content in input);
+                while !content.is_empty() {
+                    let key: Ident = content.parse()?;
+                    content.parse::<Token![=>]>()?;
+                    match &*key.to_string() {
+                        "callback" => {
+                            callback = Some(content.parse()?);
+                        }
+                        "capture_name" => {
+                            capture_name = Some(content.parse()?);
+                        }
+                        key => panic!("Unexpected key: '{}'", key),
+                    }
+                    if !content.is_empty() {
+                        content.parse::<Token![,]>()?;
+                    }
+                }
+            }
+        }
         Ok(Self {
             query,
-            callback,
-            // TODO: figure out a syntax for this
-            capture_name: None,
+            callback: callback.expect("Expected 'callback'"),
+            capture_name,
         })
     }
 }
@@ -551,7 +574,7 @@ fn get_rule_rule_impl(
         rule.listeners
             .iter()
             .map(|listener| match listener.capture_name.as_ref() {
-                Some(capture_name) => quote!(Some(#capture_name)),
+                Some(capture_name) => quote!(Some(#capture_name.into())),
                 None => quote!(None),
             });
     quote! {
@@ -742,7 +765,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl crate::rule::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
+            fn on_query_match(&self, listener_index: usize, node: tree_sitter::Node, context: &mut crate::context::QueryMatchContext) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks
