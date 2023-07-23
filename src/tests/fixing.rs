@@ -4,12 +4,9 @@ use std::sync::Arc;
 
 use proc_macros::rule;
 use tree_sitter::Node;
-use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
-    context::QueryMatchContext,
-    rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta},
-    run_fixing_for_slice, Config, ConfigBuilder, ViolationBuilder,
+    context::QueryMatchContext, rule::Rule, run_fixing_for_slice, ConfigBuilder, ViolationBuilder,
 };
 
 #[test]
@@ -37,122 +34,12 @@ fn test_single_fix() {
     );
 }
 
-struct IdentifierReplacingRule {
-    name: String,
-    replacement: String,
-}
-
-impl IdentifierReplacingRule {
-    pub fn new(name: String, replacement: String) -> Self {
-        Self { name, replacement }
-    }
-}
-
-impl Rule for IdentifierReplacingRule {
-    fn meta(&self) -> RuleMeta {
-        RuleMeta {
-            name: format!("replace_{}_with_{}", self.name, self.replacement),
-            fixable: true,
-            languages: vec![SupportedLanguage::Rust],
-        }
-    }
-
-    fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(IdentifierReplacingRuleInstance::new(self))
-    }
-}
-
-struct IdentifierReplacingRuleInstance {
-    rule: Arc<IdentifierReplacingRule>,
-    listener_queries: Vec<RuleListenerQuery>,
-}
-
-impl IdentifierReplacingRuleInstance {
-    fn new(rule: Arc<IdentifierReplacingRule>) -> Self {
-        Self {
-            listener_queries: vec![RuleListenerQuery {
-                query: format!(
-                    r#"(
-                      (identifier) @c (#eq? @c "{}")
-                    )"#,
-                    rule.name
-                ),
-                capture_name: None,
-            }],
-            rule,
-        }
-    }
-}
-
-impl RuleInstance for IdentifierReplacingRuleInstance {
-    fn instantiate_per_file(
-        self: Arc<Self>,
-        _file_run_info: &FileRunInfo,
-    ) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(IdentifierReplacingRuleInstancePerFile::new(self))
-    }
-
-    fn rule(&self) -> Arc<dyn Rule> {
-        self.rule.clone()
-    }
-
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-}
-
-struct IdentifierReplacingRuleInstancePerFile {
-    rule_instance: Arc<IdentifierReplacingRuleInstance>,
-}
-
-impl IdentifierReplacingRuleInstancePerFile {
-    fn new(rule_instance: Arc<IdentifierReplacingRuleInstance>) -> Self {
-        Self { rule_instance }
-    }
-}
-
-impl RuleInstancePerFile for IdentifierReplacingRuleInstancePerFile {
-    fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
-        match listener_index {
-            0 => {
-                context.report(
-                    ViolationBuilder::default()
-                        .message(format!(
-                            r#"Use '{}' instead of '{}'"#,
-                            self.rule_instance.rule.replacement, self.rule_instance.rule.name,
-                        ))
-                        .node(node)
-                        .fix(|fixer| {
-                            fixer.replace_text(node, &self.rule_instance.rule.replacement);
-                        })
-                        .build()
-                        .unwrap(),
-                );
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn rule_instance(&self) -> Arc<dyn RuleInstance> {
-        self.rule_instance.clone()
-    }
-}
-
 fn create_identifier_replacing_rule(
     name: impl Into<String>,
     replacement: impl Into<String>,
 ) -> Arc<dyn Rule> {
-    let name = name.into();
-    let replacement = replacement.into();
-    Arc::new(IdentifierReplacingRule::new(name, replacement))
-}
-
-fn create_identifier_replacing_rulez(
-    name: impl Into<String>,
-    replacement: impl Into<String>,
-) -> Arc<dyn Rule> {
-    rule! {
-        name => rule_name,
+    Arc::new(rule! {
+        name => format!("replace_{}_with_{}", self.name, self.replacement),
         fixable => true,
         state => {
             [rule-static]
@@ -177,5 +64,5 @@ fn create_identifier_replacing_rulez(
                 );
             }
         ]
-    }
+    })
 }

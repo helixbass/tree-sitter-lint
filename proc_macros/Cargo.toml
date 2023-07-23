@@ -19,7 +19,7 @@ rust-version = "1.70"
 Inflector = "0.11.4"
 proc-macro2 = "1.0.66"
 quote = "1.0.31"
-syn = { version = "2.0.26", features = ["full"] }
+syn = { version = "2.0.26", features = ["full", "visit-mut"] }
 
 [lib]
 proc-macro = true
