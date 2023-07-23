@@ -4,30 +4,38 @@ use std::sync::Arc;
 
 use proc_macros::rule;
 
-use crate::{rule::Rule, run_fixing_for_slice, violation, ConfigBuilder};
+use crate::{rule::Rule, violation};
+
+#[macro_export]
+macro_rules! assert_fixed_content {
+    ($content:literal, $rules:expr, $output:literal $(,)?) => {{
+        let mut file_contents = $content.to_owned().into_bytes();
+        $crate::run_fixing_for_slice(
+            &mut file_contents,
+            "tmp.rs",
+            $crate::ConfigBuilder::default()
+                .rules($rules)
+                .fix(true)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            std::str::from_utf8(&file_contents).unwrap().trim(),
+            $output.trim()
+        );
+    }};
+}
 
 #[test]
 fn test_single_fix() {
-    let mut file_contents = r#"
-        fn foo() {}
-    "#
-    .to_owned()
-    .into_bytes();
-    run_fixing_for_slice(
-        &mut file_contents,
-        "tmp.rs",
-        ConfigBuilder::default()
-            .rules([create_identifier_replacing_rule("foo", "bar")])
-            .fix(true)
-            .build()
-            .unwrap(),
-    );
-    assert_eq!(
-        std::str::from_utf8(&file_contents).unwrap().trim(),
+    assert_fixed_content!(
+        r#"
+            fn foo() {}
+        "#,
+        [create_identifier_replacing_rule("foo", "bar")],
         r#"
             fn bar() {}
         "#
-        .trim()
     );
 }
 
