@@ -1,4 +1,6 @@
 #![allow(clippy::into_iter_on_ref)]
+
+mod cli;
 mod config;
 mod context;
 mod macros;
@@ -20,6 +22,7 @@ use std::{
 };
 
 use clap::Parser;
+pub use cli::bootstrap_cli;
 pub use config::{Args, Config, ConfigBuilder};
 use context::PendingFix;
 pub use context::QueryMatchContext;

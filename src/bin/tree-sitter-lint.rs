@@ -1,7 +1,5 @@
-use clap::Parser;
-use tree_sitter_lint::{run_and_output, Config};
+use tree_sitter_lint::bootstrap_cli;
 
 fn main() {
-    let config = Config::parse();
-    run_and_output(config);
+    bootstrap_cli();
 }
