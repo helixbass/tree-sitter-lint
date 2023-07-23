@@ -66,8 +66,8 @@ impl ViolationWithContext {
 #[macro_export]
 macro_rules! violation {
     ($($variant:ident => $value:expr),* $(,)?) => {
-        proc_macros::builder_args!(
-            $crate::violation::ViolationBuilder,
+        $crate::builder_args!(
+            $crate::ViolationBuilder,
             $($variant => $value),*,
         )
     }

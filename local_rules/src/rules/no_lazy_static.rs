@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use proc_macros::rule;
-
-use crate::{rule::Rule, violation};
+use tree_sitter_lint::{rule, violation, Rule};
 
 pub fn no_lazy_static_rule() -> Arc<dyn Rule> {
     rule! {

@@ -3,41 +3,61 @@ use std::sync::Arc;
 use clap::Parser;
 use derive_builder::Builder;
 
-use crate::{
-    rule::{InstantiatedRule, Rule},
-    rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule},
-};
+use crate::rule::{InstantiatedRule, Rule};
 
-#[derive(Builder, Parser)]
-#[builder(setter(strip_option, into))]
-pub struct Config {
+#[derive(Parser)]
+pub struct Args {
     #[arg(long)]
-    #[builder(default)]
     pub rule: Option<String>,
 
-    #[arg(skip)]
-    #[builder(default)]
-    rules: Option<Vec<Arc<dyn Rule>>>,
-
     #[arg(long)]
-    #[builder(default)]
     pub fix: bool,
 
     #[arg(long)]
+    pub report_fixed_violations: bool,
+}
+
+impl Args {
+    pub fn into_config(self, rules: Vec<Arc<dyn Rule>>) -> Config {
+        let Args {
+            rule,
+            fix,
+            report_fixed_violations,
+        } = self;
+        Config {
+            rule,
+            rules,
+            fix,
+            report_fixed_violations,
+        }
+    }
+}
+
+#[derive(Builder)]
+#[builder(setter(strip_option, into))]
+pub struct Config {
+    #[builder(default)]
+    pub rule: Option<String>,
+
+    rules: Vec<Arc<dyn Rule>>,
+
+    #[builder(default)]
+    pub fix: bool,
+
     #[builder(default)]
     pub report_fixed_violations: bool,
 }
 
 impl Config {
-    fn rules(&self) -> Vec<Arc<dyn Rule>> {
-        self.rules.clone().unwrap_or_else(get_dummy_rules)
+    fn rules(&self) -> &[Arc<dyn Rule>] {
+        &self.rules
     }
 
     pub fn get_instantiated_rules(&self) -> Vec<InstantiatedRule> {
         let instantiated_rules = self
             .rules()
             .into_iter()
-            .map(|rule| InstantiatedRule::new(rule, self))
+            .map(|rule| InstantiatedRule::new(rule.clone(), self))
             .filter(|rule| match self.rule.as_ref() {
                 Some(rule_arg) => &rule.meta.name == rule_arg,
                 None => true,
@@ -48,12 +68,4 @@ impl Config {
         }
         instantiated_rules
     }
-}
-
-fn get_dummy_rules() -> Vec<Arc<dyn Rule>> {
-    vec![
-        no_default_default_rule(),
-        no_lazy_static_rule(),
-        prefer_impl_param_rule(),
-    ]
 }

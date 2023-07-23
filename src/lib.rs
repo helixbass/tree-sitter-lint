@@ -4,7 +4,6 @@ mod context;
 mod macros;
 mod rule;
 mod rule_tester;
-mod rules;
 #[cfg(test)]
 mod tests;
 mod violation;
@@ -22,12 +21,16 @@ use std::{
 
 use clap::Parser;
 pub use config::{Config, ConfigBuilder};
-use context::{PendingFix, QueryMatchContext};
+use context::PendingFix;
+pub use context::QueryMatchContext;
+pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
-use rule::{FileRunInfo, InstantiatedRule, RuleInstancePerFile};
+use rule::InstantiatedRule;
+pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
+pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
