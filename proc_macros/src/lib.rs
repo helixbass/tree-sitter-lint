@@ -13,6 +13,46 @@ use syn::{
     Expr, ExprArray, ExprClosure, ExprField, ExprMacro, ExprPath, Ident, Member, Token, Type,
 };
 
+struct ArrowSeparatedKeyValuePair<TKey = Ident, TValue = Expr> {
+    key: TKey,
+    value: TValue,
+}
+
+impl<TKey, TValue> Parse for ArrowSeparatedKeyValuePair<TKey, TValue>
+where
+    TKey: Parse,
+    TValue: Parse,
+{
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let key: TKey = input.parse()?;
+        input.parse::<Token![=>]>()?;
+        let value: TValue = input.parse()?;
+        Ok(Self { key, value })
+    }
+}
+
+struct ArrowSeparatedKeyValuePairs<TKey = Ident, TValue = Expr> {
+    keys_and_values: HashMap<TKey, TValue>,
+}
+
+impl<TKey, TValue> Parse for ArrowSeparatedKeyValuePairs<TKey, TValue>
+where
+    TKey: Parse + Eq + std::hash::Hash,
+    TValue: Parse,
+{
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut keys_and_values: HashMap<TKey, TValue> = Default::default();
+        while !input.is_empty() {
+            let ArrowSeparatedKeyValuePair { key, value } = input.parse()?;
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+            keys_and_values.insert(key, value);
+        }
+        Ok(Self { keys_and_values })
+    }
+}
+
 struct BuilderArgs {
     builder_name: ExprPath,
     args: HashMap<Ident, Expr>,
@@ -22,16 +62,9 @@ impl Parse for BuilderArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let builder_name: ExprPath = input.parse()?;
         input.parse::<Token![,]>()?;
-        let mut args: HashMap<Ident, Expr> = Default::default();
-        while !input.is_empty() {
-            let key: Ident = input.parse()?;
-            input.parse::<Token![=>]>()?;
-            let value: Expr = input.parse()?;
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
-            }
-            args.insert(key, value);
-        }
+        let ArrowSeparatedKeyValuePairs {
+            keys_and_values: args,
+        } = input.parse()?;
         Ok(BuilderArgs { builder_name, args })
     }
 }
@@ -646,19 +679,37 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
     fn visit_expr_macro_mut(&mut self, node: &mut ExprMacro) {
         let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
         let rewritten_macro_args = match parser.parse2(node.mac.tokens.clone()) {
-            Ok(macro_args) => macro_args,
-            _ => return,
-        }
-        .into_iter()
-        .map(|mut macro_arg| {
-            SelfAccessRewriter { rule: self.rule }.visit_expr_mut(&mut macro_arg);
-            macro_arg
-        })
-        .collect::<Vec<_>>();
-        node.mac.tokens = quote! {
-            #(#rewritten_macro_args),*
-        }
-        .into();
+            Ok(macro_args) => {
+                let rewritten_macro_args = macro_args
+                    .into_iter()
+                    .map(|mut macro_arg| {
+                        SelfAccessRewriter { rule: self.rule }.visit_expr_mut(&mut macro_arg);
+                        macro_arg
+                    })
+                    .collect::<Vec<_>>();
+                quote! {
+                    #(#rewritten_macro_args),*
+                }
+            }
+            _ => match syn::parse2::<ArrowSeparatedKeyValuePairs>(node.mac.tokens.clone()) {
+                Ok(ArrowSeparatedKeyValuePairs { keys_and_values }) => {
+                    let rewritten_macro_args = keys_and_values
+                        .into_iter()
+                        .map(|(key, mut value)| {
+                            SelfAccessRewriter { rule: self.rule }.visit_expr_mut(&mut value);
+                            (key, value)
+                        })
+                        .collect::<HashMap<_, _>>();
+                    let keys = rewritten_macro_args.keys();
+                    let values = rewritten_macro_args.values();
+                    quote! {
+                        #(#keys => #values),*
+                    }
+                }
+                _ => return,
+            },
+        };
+        node.mac.tokens = rewritten_macro_args;
         visit_mut::visit_expr_macro_mut(self, node);
     }
 }
@@ -720,8 +771,8 @@ fn get_rule_struct_creation(
                 None => quote!(Default::default()),
             });
     quote! {
-        #rule_struct_name {
+        std::sync::Arc::new(#rule_struct_name {
             #(#rule_state_field_names: #rule_state_field_initializers),*
-        }
+        })
     }
 }
