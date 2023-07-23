@@ -9,9 +9,7 @@ use crate::{
     Config, ViolationBuilder,
 };
 
-pub struct NoDefaultDefaultRule {
-    listener_queries: Vec<RuleListenerQuery>,
-}
+pub struct NoDefaultDefaultRule {}
 
 impl Rule for NoDefaultDefaultRule {
     fn meta(&self) -> RuleMeta {
@@ -22,10 +20,6 @@ impl Rule for NoDefaultDefaultRule {
         }
     }
 
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-
     fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
         Arc::new(NoDefaultDefaultRuleInstance::new(self))
     }
@@ -33,11 +27,29 @@ impl Rule for NoDefaultDefaultRule {
 
 struct NoDefaultDefaultRuleInstance {
     rule: Arc<NoDefaultDefaultRule>,
+    listener_queries: Vec<RuleListenerQuery>,
 }
 
 impl NoDefaultDefaultRuleInstance {
     fn new(rule: Arc<NoDefaultDefaultRule>) -> Self {
-        Self { rule }
+        Self {
+            rule,
+            listener_queries: vec![RuleListenerQuery {
+                query: r#"(
+                  (call_expression
+                    function:
+                      (scoped_identifier
+                        path:
+                          (identifier) @first (#eq? @first "Default")
+                        name:
+                          (identifier) @second (#eq? @second "default")
+                      )
+                  ) @c
+                )"#
+                .to_owned(),
+                capture_name: Some("c".to_owned()),
+            }],
+        }
     }
 }
 
@@ -51,6 +63,10 @@ impl RuleInstance for NoDefaultDefaultRuleInstance {
 
     fn rule(&self) -> Arc<dyn Rule> {
         self.rule.clone()
+    }
+
+    fn listener_queries(&self) -> &[RuleListenerQuery] {
+        &self.listener_queries
     }
 }
 
@@ -89,23 +105,7 @@ impl RuleInstancePerFile for NoDefaultDefaultRuleInstancePerFile {
 }
 
 pub fn no_default_default_rule() -> NoDefaultDefaultRule {
-    NoDefaultDefaultRule {
-        listener_queries: vec![RuleListenerQuery {
-            query: r#"(
-              (call_expression
-                function:
-                  (scoped_identifier
-                    path:
-                      (identifier) @first (#eq? @first "Default")
-                    name:
-                      (identifier) @second (#eq? @second "default")
-                  )
-              ) @c
-            )"#
-            .to_owned(),
-            capture_name: Some("c".to_owned()),
-        }],
-    }
+    NoDefaultDefaultRule {}
 }
 
 #[cfg(test)]

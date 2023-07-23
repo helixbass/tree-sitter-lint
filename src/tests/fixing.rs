@@ -40,24 +40,11 @@ fn test_single_fix() {
 struct IdentifierReplacingRule {
     name: String,
     replacement: String,
-    listener_queries: Vec<RuleListenerQuery>,
 }
 
 impl IdentifierReplacingRule {
     pub fn new(name: String, replacement: String) -> Self {
-        Self {
-            listener_queries: vec![RuleListenerQuery {
-                query: format!(
-                    r#"(
-                      (identifier) @c (#eq? @c "{}")
-                    )"#,
-                    name
-                ),
-                capture_name: None,
-            }],
-            name,
-            replacement,
-        }
+        Self { name, replacement }
     }
 }
 
@@ -70,10 +57,6 @@ impl Rule for IdentifierReplacingRule {
         }
     }
 
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-
     fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
         Arc::new(IdentifierReplacingRuleInstance::new(self))
     }
@@ -81,11 +64,23 @@ impl Rule for IdentifierReplacingRule {
 
 struct IdentifierReplacingRuleInstance {
     rule: Arc<IdentifierReplacingRule>,
+    listener_queries: Vec<RuleListenerQuery>,
 }
 
 impl IdentifierReplacingRuleInstance {
     fn new(rule: Arc<IdentifierReplacingRule>) -> Self {
-        Self { rule }
+        Self {
+            listener_queries: vec![RuleListenerQuery {
+                query: format!(
+                    r#"(
+                      (identifier) @c (#eq? @c "{}")
+                    )"#,
+                    rule.name
+                ),
+                capture_name: None,
+            }],
+            rule,
+        }
     }
 }
 
@@ -99,6 +94,10 @@ impl RuleInstance for IdentifierReplacingRuleInstance {
 
     fn rule(&self) -> Arc<dyn Rule> {
         self.rule.clone()
+    }
+
+    fn listener_queries(&self) -> &[RuleListenerQuery] {
+        &self.listener_queries
     }
 }
 
@@ -148,15 +147,35 @@ fn create_identifier_replacing_rule(
     Arc::new(IdentifierReplacingRule::new(name, replacement))
 }
 
-// fn create_identifier_replacing_rulez(
-//     name: impl Into<String>,
-//     replacement: impl Into<String>,
-// ) -> Arc<dyn Rule> { rule! { name => rule_name, fixable => true, state => {
-//   [rule-static] name: String = name.into(), replacement: String =
-//   replacement.into(), }, listeners => [ format!(r#"( (identifier) @c (#eq? @c
-//   "{}") )"#, self.name) => |node, context| { context.report(
-//   ViolationBuilder::default() .message( format!(r#"Use '{}' instead of
-//   '{}'"#, self.replacement, self.name) ) .node(node) .fix(|fixer| {
-//   fixer.replace_text(node, &self.replacement); }) .build() .unwrap(), ); } ]
-//   }
-// }
+fn create_identifier_replacing_rulez(
+    name: impl Into<String>,
+    replacement: impl Into<String>,
+) -> Arc<dyn Rule> {
+    rule! {
+        name => rule_name,
+        fixable => true,
+        state => {
+            [rule-static]
+            name: String = name.into(),
+            replacement: String = replacement.into(),
+        },
+        listeners => [
+            format!(r#"(
+              (identifier) @c (#eq? @c "{}")
+            )"#, self.name) => |node, context| {
+                context.report(
+                    ViolationBuilder::default()
+                        .message(
+                            format!(r#"Use '{}' instead of '{}'"#, self.replacement, self.name)
+                        )
+                        .node(node)
+                        .fix(|fixer| {
+                            fixer.replace_text(node, &self.replacement);
+                        })
+                        .build()
+                        .unwrap(),
+                );
+            }
+        ]
+    }
+}

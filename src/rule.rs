@@ -14,7 +14,6 @@ pub struct RuleMeta {
 
 pub trait Rule: Send + Sync {
     fn meta(&self) -> RuleMeta;
-    fn listener_queries(&self) -> &[RuleListenerQuery];
     fn instantiate(self: Arc<Self>, config: &Config) -> Arc<dyn RuleInstance>;
 }
 
@@ -24,6 +23,7 @@ pub trait RuleInstance: Send + Sync {
         file_run_info: &FileRunInfo,
     ) -> Arc<dyn RuleInstancePerFile>;
     fn rule(&self) -> Arc<dyn Rule>;
+    fn listener_queries(&self) -> &[RuleListenerQuery];
 }
 
 pub struct InstantiatedRule {

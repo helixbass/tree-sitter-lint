@@ -9,9 +9,7 @@ use crate::{
     Config, ViolationBuilder,
 };
 
-pub struct NoLazyStaticRule {
-    listener_queries: Vec<RuleListenerQuery>,
-}
+pub struct NoLazyStaticRule {}
 
 impl Rule for NoLazyStaticRule {
     fn meta(&self) -> RuleMeta {
@@ -22,10 +20,6 @@ impl Rule for NoLazyStaticRule {
         }
     }
 
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-
     fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
         Arc::new(NoLazyStaticRuleInstance::new(self))
     }
@@ -33,11 +27,23 @@ impl Rule for NoLazyStaticRule {
 
 struct NoLazyStaticRuleInstance {
     rule: Arc<NoLazyStaticRule>,
+    listener_queries: Vec<RuleListenerQuery>,
 }
 
 impl NoLazyStaticRuleInstance {
     fn new(rule: Arc<NoLazyStaticRule>) -> Self {
-        Self { rule }
+        Self {
+            rule,
+            listener_queries: vec![RuleListenerQuery {
+                query: r#"(
+                  (macro_invocation
+                     macro: (identifier) @c (#eq? @c "lazy_static")
+                  )
+                )"#
+                .to_owned(),
+                capture_name: None,
+            }],
+        }
     }
 }
 
@@ -51,6 +57,10 @@ impl RuleInstance for NoLazyStaticRuleInstance {
 
     fn rule(&self) -> Arc<dyn Rule> {
         self.rule.clone()
+    }
+
+    fn listener_queries(&self) -> &[RuleListenerQuery] {
+        &self.listener_queries
     }
 }
 
@@ -86,15 +96,5 @@ impl RuleInstancePerFile for NoLazyStaticRuleInstancePerFile {
 }
 
 pub fn no_lazy_static_rule() -> NoLazyStaticRule {
-    NoLazyStaticRule {
-        listener_queries: vec![RuleListenerQuery {
-            query: r#"(
-              (macro_invocation
-                 macro: (identifier) @c (#eq? @c "lazy_static")
-              )
-            )"#
-            .to_owned(),
-            capture_name: None,
-        }],
-    }
+    NoLazyStaticRule {}
 }

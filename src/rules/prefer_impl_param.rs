@@ -87,9 +87,7 @@ macro_rules! return_if_none {
     };
 }
 
-pub struct PreferImplParamRule {
-    listener_queries: Vec<RuleListenerQuery>,
-}
+pub struct PreferImplParamRule {}
 
 impl Rule for PreferImplParamRule {
     fn meta(&self) -> RuleMeta {
@@ -100,10 +98,6 @@ impl Rule for PreferImplParamRule {
         }
     }
 
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-
     fn instantiate(self: Arc<Self>, _config: &Config) -> Arc<dyn RuleInstance> {
         Arc::new(PreferImplParamRuleInstance::new(self))
     }
@@ -111,11 +105,25 @@ impl Rule for PreferImplParamRule {
 
 struct PreferImplParamRuleInstance {
     rule: Arc<PreferImplParamRule>,
+    listener_queries: Vec<RuleListenerQuery>,
 }
 
 impl PreferImplParamRuleInstance {
     fn new(rule: Arc<PreferImplParamRule>) -> Self {
-        Self { rule }
+        Self {
+            rule,
+            listener_queries: vec![RuleListenerQuery {
+                query: r#"(
+                  (function_item
+                    type_parameters: (type_parameters
+                      (constrained_type_parameter) @c
+                    )
+                  )
+                )"#
+                .to_owned(),
+                capture_name: None,
+            }],
+        }
     }
 }
 
@@ -129,6 +137,10 @@ impl RuleInstance for PreferImplParamRuleInstance {
 
     fn rule(&self) -> Arc<dyn Rule> {
         self.rule.clone()
+    }
+
+    fn listener_queries(&self) -> &[RuleListenerQuery] {
+        &self.listener_queries
     }
 }
 
@@ -216,19 +228,7 @@ impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
 }
 
 pub fn prefer_impl_param_rule() -> PreferImplParamRule {
-    PreferImplParamRule {
-        listener_queries: vec![RuleListenerQuery {
-            query: r#"(
-                  (function_item
-                    type_parameters: (type_parameters
-                      (constrained_type_parameter) @c
-                    )
-                  )
-                )"#
-            .to_owned(),
-            capture_name: None,
-        }],
-    }
+    PreferImplParamRule {}
 }
 
 #[cfg(test)]

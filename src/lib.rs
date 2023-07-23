@@ -511,7 +511,7 @@ impl<'a> AggregatedQueries<'a> {
         let language = language.language();
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for (rule_listener_index, rule_listener_query) in instantiated_rule
-                .rule
+                .rule_instance
                 .listener_queries()
                 .iter()
                 .map(|rule_listener_query| rule_listener_query.resolve(language))
