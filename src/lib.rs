@@ -20,7 +20,7 @@ use std::{
 };
 
 use clap::Parser;
-pub use config::{Config, ConfigBuilder};
+pub use config::{Args, Config, ConfigBuilder};
 use context::PendingFix;
 pub use context::QueryMatchContext;
 pub use proc_macros::{builder_args, rule, rule_tests};
@@ -33,6 +33,7 @@ use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
 pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
+pub extern crate clap;
 pub extern crate tree_sitter;
 pub extern crate tree_sitter_grep;
 
