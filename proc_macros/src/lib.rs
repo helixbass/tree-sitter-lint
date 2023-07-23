@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use inflector::Inflector;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
@@ -274,6 +275,7 @@ impl Parse for RuleStateSpec {
 
 struct RuleListenerSpec {
     query: Expr,
+    capture_name: Option<Expr>,
     callback: ExprClosure,
 }
 
@@ -282,7 +284,12 @@ impl Parse for RuleListenerSpec {
         let query: Expr = input.parse()?;
         input.parse::<Token![=>]>()?;
         let callback: ExprClosure = input.parse()?;
-        Ok(Self { query, callback })
+        Ok(Self {
+            query,
+            callback,
+            // TODO: figure out a syntax for this
+            capture_name: None,
+        })
     }
 }
 
@@ -291,6 +298,16 @@ struct Rule {
     fixable: Option<Expr>,
     state: Option<RuleStateSpec>,
     listeners: Vec<RuleListenerSpec>,
+}
+
+impl Rule {
+    pub fn name_string(&self) -> String {
+        match &self.name {
+            Expr::Path(value) => value.path.get_ident(),
+            _ => None,
+        }
+        .map_or_else(|| "GeneratedRule".to_owned(), |ident| ident.to_string())
+    }
 }
 
 impl Parse for Rule {
@@ -346,5 +363,250 @@ impl Parse for Rule {
 #[proc_macro]
 pub fn rule(input: TokenStream) -> TokenStream {
     let rule: Rule = parse_macro_input!(input);
-    unimplemented!()
+
+    let rule_struct_name = rule.name_string().to_class_case();
+
+    let rule_struct_definition = get_rule_struct_definition(&rule, &rule_struct_name);
+
+    let rule_instance_struct_name = format!("{}Instance", rule_struct_name);
+
+    let rule_instance_state_fields = rule.state.as_ref().map_or_else(
+        || Default::default(),
+        |state| {
+            state
+                .scope_sections
+                .iter()
+                .filter(|scope_section| scope_section.scope == RuleStateScope::PerRun)
+                .flat_map(|scope_section| scope_section.fields.iter())
+                .collect::<Vec<_>>()
+        },
+    );
+
+    let rule_rule_impl = get_rule_rule_impl(
+        &rule,
+        &rule_struct_name,
+        &rule_instance_struct_name,
+        &rule_instance_state_fields,
+    );
+
+    let rule_instance_struct_definition = get_rule_instance_struct_definition(
+        &rule_struct_name,
+        &rule_instance_struct_name,
+        &rule_instance_state_fields,
+    );
+
+    let rule_instance_per_file_struct_name = format!("{}PerFile", rule_instance_struct_name);
+
+    let rule_instance_per_file_state_fields = rule.state.as_ref().map_or_else(
+        || Default::default(),
+        |state| {
+            state
+                .scope_sections
+                .iter()
+                .filter(|scope_section| scope_section.scope == RuleStateScope::PerFileRun)
+                .flat_map(|scope_section| scope_section.fields.iter())
+                .collect::<Vec<_>>()
+        },
+    );
+
+    let rule_instance_rule_instance_impl = get_rule_instance_rule_instance_impl(
+        &rule_instance_struct_name,
+        &rule_instance_per_file_struct_name,
+        &rule_instance_per_file_state_fields,
+    );
+
+    let rule_instance_per_file_struct_definition = get_rule_instance_per_file_struct_definition(
+        &rule_instance_struct_name,
+        &rule_instance_per_file_struct_name,
+        &rule_instance_per_file_state_fields,
+    );
+
+    let rule_instance_per_file_rule_instance_per_file_impl =
+        get_rule_instance_per_file_rule_instance_per_file_impl(
+            &rule,
+            &rule_instance_per_file_struct_name,
+        );
+
+    quote! {
+        #rule_struct_definition
+
+        #rule_rule_impl
+
+        #rule_instance_struct_definition
+
+        #rule_instance_rule_instance_impl
+
+        #rule_instance_per_file_struct_definition
+
+        #rule_instance_per_file_rule_instance_per_file_impl
+    }
+    .into()
+}
+
+fn get_rule_struct_definition(rule: &Rule, rule_struct_name: &str) -> proc_macro2::TokenStream {
+    let fields = rule.state.as_ref().map_or_else(
+        || Default::default(),
+        |state| {
+            state
+                .scope_sections
+                .iter()
+                .filter(|scope_section| scope_section.scope == RuleStateScope::RuleStatic)
+                .flat_map(|scope_section| scope_section.fields.iter())
+                .collect::<Vec<_>>()
+        },
+    );
+    let field_names = fields.iter().map(|field| &field.name);
+    let field_types = fields.iter().map(|field| &field.type_);
+    quote! {
+        struct #rule_struct_name {
+            #(#field_names: #field_types),*
+        }
+    }
+}
+
+fn get_rule_rule_impl(
+    rule: &Rule,
+    rule_struct_name: &str,
+    rule_instance_struct_name: &str,
+    rule_instance_state_fields: &[&RuleStateFieldSpec],
+) -> proc_macro2::TokenStream {
+    let name = &rule.name;
+    let fixable = match rule.fixable.as_ref() {
+        Some(fixable) => quote!(#fixable),
+        None => quote!(false),
+    };
+    let rule_instance_state_field_names =
+        rule_instance_state_fields.iter().map(|field| &field.name);
+    let rule_instance_state_field_initializers =
+        rule_instance_state_fields
+            .iter()
+            .map(|field| match field.initializer.as_ref() {
+                Some(initializer) => quote!(#initializer),
+                None => quote!(Default::default()),
+            });
+    let rule_listener_queries = rule.listeners.iter().map(|listener| &listener.query);
+    let rule_listener_capture_names = rule
+        .listeners
+        .iter()
+        .map(|listener| listener.capture_name.as_ref());
+    quote! {
+        impl crate::rule::Rule for #rule_struct_name {
+            fn meta(&self) -> crate::rule::RuleMeta {
+                crate::rule::RuleMeta {
+                    name: #name,
+                    fixable: #fixable,
+                    languages: vec![tree_sitter_grep::SupportedLanguage::Rust],
+                }
+            }
+
+            fn instantiate(self: std::sync::Arc<Self>, _config: &crate::config::Config) -> std::sync::Arc<dyn crate::rule::RuleInstance> {
+                std::sync::Arc::new(#rule_instance_struct_name {
+                    rule: self,
+                    listener_queries: vec![
+                        #(crate::rule::RuleListenerQuery {
+                            query: #rule_listener_queries,
+                            capture_name: #rule_listener_capture_names,
+                        }),*
+                    ],
+                    #(#rule_instance_state_field_names: #rule_instance_state_field_initializers),*
+                })
+            }
+        }
+    }
+}
+
+fn get_rule_instance_struct_definition(
+    rule_struct_name: &str,
+    rule_instance_struct_name: &str,
+    rule_instance_state_fields: &[&RuleStateFieldSpec],
+) -> proc_macro2::TokenStream {
+    let state_field_names = rule_instance_state_fields.iter().map(|field| &field.name);
+    let state_field_types = rule_instance_state_fields.iter().map(|field| &field.type_);
+    quote! {
+        struct #rule_instance_struct_name {
+            rule: std::sync::Arc<#rule_struct_name>,
+            listener_queries: Vec<crate::rule::RuleListenerQuery>,
+            #(#state_field_names: #state_field_types),*
+        }
+    }
+}
+
+fn get_rule_instance_rule_instance_impl(
+    rule_instance_struct_name: &str,
+    rule_instance_per_file_struct_name: &str,
+    rule_instance_per_file_state_fields: &[&RuleStateFieldSpec],
+) -> proc_macro2::TokenStream {
+    let rule_instance_per_file_state_field_names = rule_instance_per_file_state_fields
+        .iter()
+        .map(|field| &field.name);
+    let rule_instance_per_file_state_field_initializers = rule_instance_per_file_state_fields
+        .iter()
+        .map(|field| match field.initializer.as_ref() {
+            Some(initializer) => quote!(#initializer),
+            None => quote!(Default::default()),
+        });
+    quote! {
+        impl crate::rule::RuleInstance for #rule_instance_struct_name {
+            fn instantiate_per_file(
+                self: std::sync::Arc<Self>,
+                _file_run_info: &crate::rule::FileRunInfo,
+            ) -> Arc<dyn crate::rule::RuleInstancePerFile> {
+                std::sync::Arc::new(#rule_instance_per_file_struct_name {
+                    rule_instance: self,
+                    #(#rule_instance_per_file_state_field_names: #rule_instance_per_file_state_field_initializers),*
+                })
+            }
+
+            fn rule(&self) -> Arc<dyn crate::rule::Rule> {
+                self.rule.clone()
+            }
+
+            fn listener_queries(&self) -> &[crate::rule::RuleListenerQuery] {
+                &self.listener_queries
+            }
+        }
+    }
+}
+
+fn get_rule_instance_per_file_struct_definition(
+    rule_instance_struct_name: &str,
+    rule_instance_per_file_struct_name: &str,
+    rule_instance_per_file_state_fields: &[&RuleStateFieldSpec],
+) -> proc_macro2::TokenStream {
+    let state_field_names = rule_instance_per_file_state_fields
+        .iter()
+        .map(|field| &field.name);
+    let state_field_types = rule_instance_per_file_state_fields
+        .iter()
+        .map(|field| &field.type_);
+    quote! {
+        struct #rule_instance_per_file_struct_name {
+            rule_instance: std::sync::Arc<#rule_instance_struct_name>,
+            #(#state_field_names: #state_field_types),*
+        }
+    }
+}
+
+fn get_rule_instance_per_file_rule_instance_per_file_impl(
+    rule: &Rule,
+    rule_instance_per_file_struct_name: &str,
+) -> proc_macro2::TokenStream {
+    let listener_indices = 0..rule.listeners.len();
+    let listener_callbacks = rule.listeners.iter().map(|listener| &listener.callback);
+    quote! {
+        impl crate::rule::RuleInstancePerFile for #rule_instance_per_file_struct_name {
+            fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
+                match listener_index {
+                    #(#listener_indices => {
+                        (#listener_callbacks)(node, context)
+                    })*
+                    _ => unreachable!(),
+                }
+            }
+
+            fn rule_instance(&self) -> std::sync::Arc<dyn crate::rule::RuleInstance> {
+                self.rule_instance.clone()
+            }
+        }
+    }
 }
