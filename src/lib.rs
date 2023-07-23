@@ -33,6 +33,9 @@ use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
 pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
+pub extern crate tree_sitter;
+pub extern crate tree_sitter_grep;
+
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 

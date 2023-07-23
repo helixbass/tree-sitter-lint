@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use tree_sitter::Node;
-use tree_sitter_lint::{rule, violation, Rule};
+use tree_sitter_lint::{rule, tree_sitter::Node, violation, Rule};
 
 #[macro_export]
 macro_rules! assert_node_kind {

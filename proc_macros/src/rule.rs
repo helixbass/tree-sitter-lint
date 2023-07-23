@@ -399,7 +399,7 @@ fn get_rule_rule_impl(
                 #crate_name::RuleMeta {
                     name: #name.into(),
                     fixable: #fixable,
-                    languages: vec![tree_sitter_grep::SupportedLanguage::Rust],
+                    languages: vec![#crate_name::tree_sitter_grep::SupportedLanguage::Rust],
                 }
             }
 
@@ -584,7 +584,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&mut self, listener_index: usize, node: tree_sitter::Node, context: &mut #crate_name::QueryMatchContext) {
+            fn on_query_match(&mut self, listener_index: usize, node: #crate_name::tree_sitter::Node, context: &mut #crate_name::QueryMatchContext) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks
