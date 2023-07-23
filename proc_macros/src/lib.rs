@@ -638,14 +638,14 @@ fn get_rule_instance_rule_instance_impl(
             fn instantiate_per_file(
                 self: std::sync::Arc<Self>,
                 _file_run_info: &crate::rule::FileRunInfo,
-            ) -> Arc<dyn crate::rule::RuleInstancePerFile> {
-                std::sync::Arc::new(#rule_instance_per_file_struct_name {
+            ) -> Box<dyn crate::rule::RuleInstancePerFile> {
+                Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,
                     #(#rule_instance_per_file_state_field_names: #rule_instance_per_file_state_field_initializers),*
                 })
             }
 
-            fn rule(&self) -> Arc<dyn crate::rule::Rule> {
+            fn rule(&self) -> std::sync::Arc<dyn crate::rule::Rule> {
                 self.rule.clone()
             }
 
@@ -765,7 +765,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl crate::rule::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&self, listener_index: usize, node: tree_sitter::Node, context: &mut crate::context::QueryMatchContext) {
+            fn on_query_match(&mut self, listener_index: usize, node: tree_sitter::Node, context: &mut crate::context::QueryMatchContext) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks

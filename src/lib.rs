@@ -10,16 +10,14 @@ mod tests;
 mod violation;
 
 use std::{
-    array,
     borrow::Cow,
     cmp::Ordering,
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::HashMap,
     fs,
-    hash::{Hash, Hasher},
     ops::Deref,
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Mutex, PoisonError},
 };
 
 use clap::Parser;
@@ -29,7 +27,7 @@ use rayon::prelude::*;
 use rule::{FileRunInfo, InstantiatedRule, RuleInstancePerFile};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
-use tree_sitter_grep::SupportedLanguage;
+use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
 use violation::ViolationWithContext;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
@@ -55,33 +53,54 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
     let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
     let all_violations: Mutex<HashMap<PathBuf, Vec<ViolationWithContext>>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
-    let instantiated_per_file_rules: AllInstantiatedPerFileRules = Default::default();
-    tree_sitter_grep::run_with_callback(
+    tree_sitter_grep::run_with_per_file_callback(
         tree_sitter_grep_args.clone(),
-        |capture_info, file_contents, path| {
-            let (instantiated_rule, rule_listener_index) =
-                aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
-            let mut query_match_context =
-                QueryMatchContext::new(path, file_contents, instantiated_rule, &config, language);
-            instantiated_per_file_rules
-                .get(path, instantiated_rule)
-                .on_query_match(
-                    rule_listener_index,
-                    capture_info.node,
-                    &mut query_match_context,
-                );
-            if let Some(violations) = query_match_context.violations.take() {
-                all_violations
-                    .lock()
-                    .unwrap()
-                    .entry(path.to_owned())
-                    .or_default()
-                    .extend(violations);
-            }
-            if let Some(fixes) = query_match_context.into_pending_fixes() {
-                assert!(config.fix);
-                files_with_fixes.append(path, file_contents, &instantiated_rule.meta.name, fixes);
-            }
+        |_dir_entry, mut perform_search| {
+            let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
+                Default::default();
+            perform_search(Box::new(
+                |capture_info: CaptureInfo, file_contents, path| {
+                    let (instantiated_rule, rule_listener_index) =
+                        aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
+                    let mut query_match_context = QueryMatchContext::new(
+                        path,
+                        file_contents,
+                        instantiated_rule,
+                        &config,
+                        language,
+                    );
+                    instantiated_per_file_rules
+                        .entry(instantiated_rule.meta.name.clone())
+                        .or_insert_with(|| {
+                            instantiated_rule
+                                .rule_instance
+                                .clone()
+                                .instantiate_per_file(&FileRunInfo {})
+                        })
+                        .on_query_match(
+                            rule_listener_index,
+                            capture_info.node,
+                            &mut query_match_context,
+                        );
+                    if let Some(violations) = query_match_context.violations.take() {
+                        all_violations
+                            .lock()
+                            .unwrap()
+                            .entry(path.to_owned())
+                            .or_default()
+                            .extend(violations);
+                    }
+                    if let Some(fixes) = query_match_context.into_pending_fixes() {
+                        assert!(config.fix);
+                        files_with_fixes.append(
+                            path,
+                            file_contents,
+                            &instantiated_rule.meta.name,
+                            fixes,
+                        );
+                    }
+                },
+            ));
         },
     )
     .unwrap();
@@ -132,49 +151,6 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
     all_violations.into_values().flatten().collect()
 }
 
-const NUM_INSTANTIATED_PER_FILE_RULES_HASH_BUCKETS: usize = 256;
-
-#[allow(clippy::type_complexity)]
-struct AllInstantiatedPerFileRules(
-    [Mutex<Option<HashMap<PathBuf, HashMap<RuleName, Arc<dyn RuleInstancePerFile>>>>>;
-        NUM_INSTANTIATED_PER_FILE_RULES_HASH_BUCKETS],
-);
-
-impl Default for AllInstantiatedPerFileRules {
-    fn default() -> Self {
-        Self(array::from_fn(|_| Default::default()))
-    }
-}
-
-impl AllInstantiatedPerFileRules {
-    fn get_hash_bucket(path: &Path) -> usize {
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        (hasher.finish() as usize) % NUM_INSTANTIATED_PER_FILE_RULES_HASH_BUCKETS
-    }
-
-    pub fn get(
-        &self,
-        path: &Path,
-        instantiated_rule: &InstantiatedRule,
-    ) -> Arc<dyn RuleInstancePerFile> {
-        self.0[Self::get_hash_bucket(path)]
-            .lock()
-            .unwrap()
-            .get_or_insert_with(Default::default)
-            .entry(path.to_owned())
-            .or_default()
-            .entry(instantiated_rule.meta.name.clone())
-            .or_insert_with(|| {
-                instantiated_rule
-                    .rule_instance
-                    .clone()
-                    .instantiate_per_file(&FileRunInfo {})
-            })
-            .clone()
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run_fixing_loop(
     violations: &mut Vec<ViolationWithContext>,
@@ -198,7 +174,7 @@ fn run_fixing_loop(
         } else {
             violations.clear();
         }
-        let mut instantiated_per_file_rules: HashMap<RuleName, Arc<dyn RuleInstancePerFile>> =
+        let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
             Default::default();
         tree_sitter_grep::run_for_slice_with_callback(
             file_contents,
@@ -258,7 +234,7 @@ pub fn run_for_slice(
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules, language);
     let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
-    let mut instantiated_per_file_rules: HashMap<RuleName, Arc<dyn RuleInstancePerFile>> =
+    let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
         file_contents,
@@ -306,7 +282,7 @@ pub fn run_fixing_for_slice(
     let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
-    let mut instantiated_per_file_rules: HashMap<RuleName, Arc<dyn RuleInstancePerFile>> =
+    let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
         file_contents,
