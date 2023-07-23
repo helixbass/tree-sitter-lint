@@ -30,7 +30,7 @@ use rule::{FileRunInfo, InstantiatedRule, RuleInstancePerFile};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use tree_sitter_grep::SupportedLanguage;
-use violation::{ViolationBuilder, ViolationWithContext};
+use violation::ViolationWithContext;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
