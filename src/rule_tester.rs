@@ -20,8 +20,8 @@ impl RuleTester {
         Self { rule, rule_tests }
     }
 
-    pub fn run(rule: impl Rule + 'static, rule_tests: RuleTests) {
-        Self::new(Arc::new(rule), rule_tests).run_tests()
+    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
+        Self::new(rule, rule_tests).run_tests()
     }
 
     fn run_tests(&self) {

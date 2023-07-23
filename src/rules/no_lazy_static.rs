@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use proc_macros::rule;
 use tree_sitter::Node;
 use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
     context::QueryMatchContext,
     rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta},
-    Config, ViolationBuilder,
+    violation, Config, ViolationBuilder,
 };
 
 pub struct NoLazyStaticRule {}
@@ -95,6 +96,22 @@ impl RuleInstancePerFile for NoLazyStaticRuleInstancePerFile {
     }
 }
 
-pub fn no_lazy_static_rule() -> NoLazyStaticRule {
-    NoLazyStaticRule {}
+pub fn no_lazy_static_rule() -> Arc<dyn Rule> {
+    rule! {
+        name => "no_lazy_static",
+        listeners => [
+            r#"(
+              (macro_invocation
+                 macro: (identifier) @c (#eq? @c "lazy_static")
+              )
+            )"# => |node, context| {
+                context.report(
+                    violation! {
+                        message => r#"Prefer 'OnceCell::*::Lazy' to 'lazy_static!()'"#,
+                        node => node,
+                    }
+                );
+            }
+        ]
+    }
 }

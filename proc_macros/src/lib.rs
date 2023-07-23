@@ -558,7 +558,7 @@ fn get_rule_rule_impl(
         impl crate::rule::Rule for #rule_struct_name {
             fn meta(&self) -> crate::rule::RuleMeta {
                 crate::rule::RuleMeta {
-                    name: #name,
+                    name: #name.into(),
                     fixable: #fixable,
                     languages: vec![tree_sitter_grep::SupportedLanguage::Rust],
                 }
@@ -569,7 +569,7 @@ fn get_rule_rule_impl(
                     rule: self.clone(),
                     listener_queries: vec![
                         #(crate::rule::RuleListenerQuery {
-                            query: #rule_listener_queries,
+                            query: #rule_listener_queries.into(),
                             capture_name: #rule_listener_capture_names,
                         }),*
                     ],

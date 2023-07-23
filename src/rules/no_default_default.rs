@@ -104,8 +104,8 @@ impl RuleInstancePerFile for NoDefaultDefaultRuleInstancePerFile {
     }
 }
 
-pub fn no_default_default_rule() -> NoDefaultDefaultRule {
-    NoDefaultDefaultRule {}
+pub fn no_default_default_rule() -> Arc<dyn Rule> {
+    Arc::new(NoDefaultDefaultRule {})
 }
 
 #[cfg(test)]

@@ -52,8 +52,8 @@ impl Config {
 
 fn get_dummy_rules() -> Vec<Arc<dyn Rule>> {
     vec![
-        Arc::new(no_default_default_rule()),
-        Arc::new(no_lazy_static_rule()),
-        Arc::new(prefer_impl_param_rule()),
+        no_default_default_rule(),
+        no_lazy_static_rule(),
+        prefer_impl_param_rule(),
     ]
 }
