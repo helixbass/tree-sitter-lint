@@ -1,9 +1,10 @@
 use std::{iter, sync::Arc};
 
 use crate::{
-    config::ConfigBuilder,
+    config::{ConfigBuilder, ErrorLevel},
     rule::{Rule, RuleOptions},
     violation::ViolationWithContext,
+    RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -45,7 +46,11 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
-                .default_rule_configurations()
+                .rule_configurations([RuleConfiguration {
+                    name: self.rule.meta().name,
+                    level: ErrorLevel::Error,
+                    options: valid_test.options.clone(),
+                }])
                 .build()
                 .unwrap(),
         );
@@ -60,7 +65,11 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
-                .default_rule_configurations()
+                .rule_configurations([RuleConfiguration {
+                    name: self.rule.meta().name,
+                    level: ErrorLevel::Error,
+                    options: invalid_test.options.clone(),
+                }])
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()
