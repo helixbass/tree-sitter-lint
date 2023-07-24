@@ -1,5 +1,5 @@
 [package]
-name = "tree-sitter-lint-plugin-replace-foo-with-bar"
+name = "tree-sitter-lint-plugin-replace-foo-with"
 version = "0.1.0"
 edition = "2021"
 

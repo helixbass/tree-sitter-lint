@@ -405,7 +405,7 @@ fn get_rule_rule_impl(
         Some(options_type) => {
             quote! {
                 let options: #options_type = options.map(|options| {
-                    serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                    #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
                 }).unwrap();
             }
         }

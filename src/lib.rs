@@ -39,6 +39,7 @@ pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
 pub extern crate clap;
+pub extern crate serde_json;
 pub extern crate tree_sitter;
 pub extern crate tree_sitter_grep;
 
