@@ -30,7 +30,7 @@ pub struct InstantiatedRule {
     pub meta: RuleMeta,
     pub rule: Arc<dyn Rule>,
     pub rule_instance: Arc<dyn RuleInstance>,
-    plugin_index: Option<PluginIndex>,
+    pub plugin_index: Option<PluginIndex>,
 }
 
 impl InstantiatedRule {

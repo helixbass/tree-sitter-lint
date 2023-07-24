@@ -169,6 +169,10 @@ impl Config {
             .map(|(rule, plugin_index)| InstantiatedRule::new(rule.clone(), plugin_index, self))
             .collect()
     }
+
+    pub fn get_plugin_name(&self, plugin_index: PluginIndex) -> &str {
+        &self.all_plugins[plugin_index].name
+    }
 }
 
 impl ConfigBuilder {

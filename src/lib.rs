@@ -46,19 +46,19 @@ const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
 pub fn run_and_output(config: Config) {
-    let violations = run(config);
+    let violations = run(&config);
     if violations.is_empty() {
         process::exit(0);
     }
     for violation in violations {
-        violation.print();
+        violation.print(&config);
     }
     process::exit(1);
 }
 
 const MAX_FIX_ITERATIONS: usize = 10;
 
-pub fn run(config: Config) -> Vec<ViolationWithContext> {
+pub fn run(config: &Config) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
     let language = SupportedLanguage::Rust;
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules, language);
@@ -78,7 +78,7 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
                         path,
                         file_contents,
                         instantiated_rule,
-                        &config,
+                        config,
                         language,
                     );
                     instantiated_per_file_rules
@@ -145,7 +145,7 @@ pub fn run(config: Config) -> Vec<ViolationWithContext> {
                     tree_sitter_grep_args.clone(),
                     &aggregated_queries,
                     &path,
-                    &config,
+                    config,
                     language,
                 );
                 (path, (file_contents, violations))
