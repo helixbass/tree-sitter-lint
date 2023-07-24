@@ -1,4 +1,7 @@
 rules:
-  no_default_default: error
-  prefer_impl_param: error
-  no_lazy_static: error
+  no_default_default:
+    level: error
+  prefer_impl_param:
+    level: error
+  no_lazy_static:
+    level: error

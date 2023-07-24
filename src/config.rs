@@ -1,7 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    env, fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use clap::Parser;
 use derive_builder::Builder;
+use serde::Deserialize;
 
 use crate::rule::{InstantiatedRule, Rule};
 
@@ -25,14 +31,13 @@ impl Args {
             fix,
             report_fixed_violations,
         } = self;
-        let config = Config {
+        Config {
             rule,
             all_rules,
             fix,
             report_fixed_violations,
             config_file,
-        };
-        config
+        }
     }
 }
 
@@ -57,8 +62,7 @@ impl Config {
     fn get_active_rules(&self) -> Vec<Arc<dyn Rule>> {
         self.config_file
             .content
-            .rules
-            .iter()
+            .rules()
             .filter(|rule_config| rule_config.level != ErrorLevel::Off)
             .map(|rule_config| {
                 self.all_rules
@@ -120,26 +124,92 @@ impl Config {
 }
 
 #[derive(Clone)]
-struct ParsedConfigFile {
+pub struct ParsedConfigFile {
     pub path: PathBuf,
     pub content: ParsedConfigFileContent,
 }
 
-#[derive(Clone)]
-struct ParsedConfigFileContent {
-    pub rules: Vec<RuleConfiguration>,
+#[derive(Clone, Deserialize)]
+pub struct ParsedConfigFileContent {
+    #[serde(rename = "rules")]
+    rules_by_name: HashMap<String, RuleConfigurationValue>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum ErrorLevel {
+impl ParsedConfigFileContent {
+    pub fn rules(&self) -> impl Iterator<Item = RuleConfiguration> + '_ {
+        self.rules_by_name
+            .iter()
+            .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorLevel {
     Error,
     Off,
 }
 
-#[derive(Clone)]
-struct RuleConfiguration {
+#[derive(Clone, Deserialize)]
+pub struct RuleConfigurationValue {
+    pub level: ErrorLevel,
+}
+
+impl RuleConfigurationValue {
+    pub fn to_rule_configuration(&self, rule_name: impl Into<String>) -> RuleConfiguration {
+        let rule_name = rule_name.into();
+        RuleConfiguration {
+            name: rule_name,
+            level: self.level,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct RuleConfiguration {
     pub name: String,
     pub level: ErrorLevel,
 }
 
-fn load_config_file() -> ParsedConfigFile {}
+fn load_config_file() -> ParsedConfigFile {
+    let config_file_path = find_config_file();
+    let config_file_contents =
+        fs::read_to_string(&config_file_path).expect("Couldn't read config file contents");
+    let parsed = serde_yaml::from_str(&config_file_contents).expect("Couldn't parse config file");
+
+    ParsedConfigFile {
+        path: config_file_path,
+        content: parsed,
+    }
+}
+
+const CONFIG_FILENAME: &str = ".tree-sitter-lint.yml";
+
+fn find_config_file() -> PathBuf {
+    find_filename_in_ancestor_directory(
+        CONFIG_FILENAME,
+        env::current_dir().expect("Couldn't get current directory"),
+    )
+    .expect("Couldn't find config file")
+}
+
+// https://codereview.stackexchange.com/a/236771
+fn find_filename_in_ancestor_directory(
+    filename: impl AsRef<Path>,
+    starting_directory: PathBuf,
+) -> Option<PathBuf> {
+    let filename = filename.as_ref();
+    let mut current_path = starting_directory;
+
+    loop {
+        current_path.push(filename);
+
+        if current_path.is_file() {
+            return Some(current_path);
+        }
+
+        if !(current_path.pop() && current_path.pop()) {
+            return None;
+        }
+    }
+}
