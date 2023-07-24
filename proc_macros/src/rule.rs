@@ -169,6 +169,7 @@ struct Rule {
     fixable: Option<Expr>,
     state: Option<RuleStateSpec>,
     listeners: Vec<RuleListenerSpec>,
+    options_type: Option<Type>,
 }
 
 impl Rule {
@@ -202,6 +203,7 @@ impl Parse for Rule {
         let mut fixable: Option<Expr> = Default::default();
         let mut state: Option<RuleStateSpec> = Default::default();
         let mut listeners: Option<Vec<RuleListenerSpec>> = Default::default();
+        let mut options_type: Option<Type> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=>]>()?;
@@ -231,6 +233,10 @@ impl Parse for Rule {
                         }
                     }
                 }
+                "options_type" => {
+                    assert!(options_type.is_none(), "Already saw 'options_type' key");
+                    options_type = Some(input.parse()?);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -242,6 +248,7 @@ impl Parse for Rule {
             fixable,
             state,
             listeners: listeners.expect("Expected 'listeners'"),
+            options_type,
         })
     }
 }
@@ -393,6 +400,16 @@ fn get_rule_rule_impl(
                 Some(capture_name) => quote!(Some(#capture_name.into())),
                 None => quote!(None),
             });
+    let maybe_deserialize_options = match rule.options_type.as_ref() {
+        None => quote!(),
+        Some(options_type) => {
+            quote! {
+                let options: #options_type = options.map(|options| {
+                    serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                }).unwrap();
+            }
+        }
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
@@ -403,7 +420,9 @@ fn get_rule_rule_impl(
                 }
             }
 
-            fn instantiate(self: std::sync::Arc<Self>, _config: &#crate_name::Config) -> std::sync::Arc<dyn #crate_name::RuleInstance> {
+            fn instantiate(self: std::sync::Arc<Self>, _config: &#crate_name::Config, rule_configuration: &#crate_name::RuleConfiguration) -> std::sync::Arc<dyn #crate_name::RuleInstance> {
+                let options = rule_configuration.options.as_ref();
+                #maybe_deserialize_options
                 std::sync::Arc::new(#rule_instance_struct_name {
                     rule: self.clone(),
                     listener_queries: vec![
@@ -508,7 +527,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                 }
                 Some(RuleStateScope::PerRun) => {
                     let self_field_name = format_ident!("{}", self_field_name);
-                    *node = parse_quote!(self.rule.#self_field_name);
+                    *node = parse_quote!(self.rule_instance.#self_field_name);
                     return;
                 }
                 _ => (),

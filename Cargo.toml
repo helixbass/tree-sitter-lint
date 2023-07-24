@@ -28,6 +28,7 @@ tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", git = "https
 rayon = "1.7.0"
 serde = "1.0.175"
 serde_yaml = "0.9.25"
+serde_json = "1.0.103"
 
 [[bin]]
 name = "tree-sitter-lint"
