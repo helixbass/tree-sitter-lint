@@ -22,10 +22,7 @@ fn maybe_get_ancestor_node_of_kind<'node>(
     kind: &str,
 ) -> Option<Node<'node>> {
     while node.kind() != kind {
-        match node.parent() {
-            None => return None,
-            Some(parent) => node = parent,
-        }
+        node = node.parent()?;
     }
     Some(node)
 }
