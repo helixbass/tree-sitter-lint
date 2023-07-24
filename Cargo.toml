@@ -13,6 +13,9 @@ regex = "1.9.1"
 tree-sitter = "0.20.10"
 tree-sitter-grep = { git = "https://github.com/helixbass/tree-sitter-grep", rev = "3d4682c" }
 tree-sitter-rust = "0.20.3"
+assert_cmd = "2.0.12"
+predicates = "3.0.3"
+tempdir = "0.3.7"
 
 [[bin]]
 name = "tree-sitter-lint"
