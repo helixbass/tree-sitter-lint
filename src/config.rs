@@ -9,7 +9,10 @@ use clap::Parser;
 use derive_builder::Builder;
 use serde::Deserialize;
 
-use crate::rule::{InstantiatedRule, Rule};
+use crate::{
+    rule::{InstantiatedRule, Rule},
+    Plugin,
+};
 
 #[derive(Parser)]
 pub struct Args {
@@ -24,7 +27,11 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn load_config_file_and_into_config(self, all_rules: Vec<Arc<dyn Rule>>) -> Config {
+    pub fn load_config_file_and_into_config(
+        self,
+        all_plugins: Vec<Plugin>,
+        standalone_rules: Vec<Arc<dyn Rule>>,
+    ) -> Config {
         let ParsedConfigFile {
             path: config_file_path,
             content: config_file_content,
@@ -34,9 +41,16 @@ impl Args {
             fix,
             report_fixed_violations,
         } = self;
+        let mut all_rules = standalone_rules;
+        all_rules.extend(
+            all_plugins
+                .iter()
+                .flat_map(|plugin| plugin.rules.iter().cloned()),
+        );
         Config {
             rule,
             all_rules,
+            all_plugins,
             fix,
             report_fixed_violations,
             config_file_path: Some(config_file_path),
@@ -52,6 +66,8 @@ pub struct Config {
     pub rule: Option<String>,
 
     all_rules: Vec<Arc<dyn Rule>>,
+
+    all_plugins: Vec<Plugin>,
 
     #[builder(default)]
     pub fix: bool,
@@ -151,6 +167,7 @@ pub struct ParsedConfigFile {
 
 #[derive(Clone, Deserialize)]
 pub struct ParsedConfigFileContent {
+    pub plugins: HashMap<String, PluginSpecValue>,
     #[serde(rename = "rules")]
     rules_by_name: HashMap<String, RuleConfigurationValue>,
 }
@@ -161,6 +178,11 @@ impl ParsedConfigFileContent {
             .iter()
             .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
     }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PluginSpecValue {
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]

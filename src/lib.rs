@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod context;
 mod macros;
+mod plugin;
 mod rule;
 mod rule_tester;
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub use cli::bootstrap_cli;
 pub use config::{Args, Config, ConfigBuilder};
 use context::PendingFix;
 pub use context::QueryMatchContext;
+pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};

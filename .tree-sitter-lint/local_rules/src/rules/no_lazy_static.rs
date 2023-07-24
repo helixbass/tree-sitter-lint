@@ -4,7 +4,7 @@ use tree_sitter_lint::{rule, violation, Rule};
 
 pub fn no_lazy_static_rule() -> Arc<dyn Rule> {
     rule! {
-        name => "no_lazy_static",
+        name => "no-lazy-static",
         listeners => [
             r#"(
               (macro_invocation

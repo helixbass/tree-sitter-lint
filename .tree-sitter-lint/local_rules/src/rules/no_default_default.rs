@@ -4,7 +4,7 @@ use tree_sitter_lint::{rule, violation, Rule};
 
 pub fn no_default_default_rule() -> Arc<dyn Rule> {
     rule! {
-        name => "no_default_default",
+        name => "no-default-default",
         fixable => true,
         listeners => [
             r#"(
