@@ -25,7 +25,10 @@ pub struct Args {
 
 impl Args {
     pub fn load_config_file_and_into_config(self, all_rules: Vec<Arc<dyn Rule>>) -> Config {
-        let config_file = load_config_file();
+        let ParsedConfigFile {
+            path: config_file_path,
+            content: config_file_content,
+        } = load_config_file();
         let Args {
             rule,
             fix,
@@ -36,7 +39,8 @@ impl Args {
             all_rules,
             fix,
             report_fixed_violations,
-            config_file,
+            config_file_path: Some(config_file_path),
+            rule_configurations: config_file_content.rules().collect(),
         }
     }
 }
@@ -55,14 +59,16 @@ pub struct Config {
     #[builder(default)]
     pub report_fixed_violations: bool,
 
-    pub config_file: ParsedConfigFile,
+    #[builder(default)]
+    pub config_file_path: Option<PathBuf>,
+
+    pub rule_configurations: Vec<RuleConfiguration>,
 }
 
 impl Config {
     fn get_active_rules(&self) -> Vec<Arc<dyn Rule>> {
-        self.config_file
-            .content
-            .rules()
+        self.rule_configurations
+            .iter()
             .filter(|rule_config| rule_config.level != ErrorLevel::Off)
             .map(|rule_config| {
                 self.all_rules
@@ -123,6 +129,20 @@ impl Config {
     }
 }
 
+impl ConfigBuilder {
+    pub fn default_rule_configurations(&mut self) -> &mut Self {
+        self.rule_configurations = Some(
+            self.all_rules
+                .as_ref()
+                .expect("must call .all_rules() before calling .default_rule_configurations()")
+                .into_iter()
+                .map(RuleConfiguration::default_for_rule)
+                .collect(),
+        );
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct ParsedConfigFile {
     pub path: PathBuf,
@@ -165,10 +185,19 @@ impl RuleConfigurationValue {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone)]
 pub struct RuleConfiguration {
     pub name: String,
     pub level: ErrorLevel,
+}
+
+impl RuleConfiguration {
+    pub fn default_for_rule(rule: &Arc<dyn Rule>) -> Self {
+        Self {
+            name: rule.meta().name,
+            level: ErrorLevel::Error,
+        }
+    }
 }
 
 fn load_config_file() -> ParsedConfigFile {

@@ -41,6 +41,7 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_rules([self.rule.clone()])
+                .default_rule_configurations()
                 .build()
                 .unwrap(),
         );
@@ -55,6 +56,7 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_rules([self.rule.clone()])
+                .default_rule_configurations()
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()
