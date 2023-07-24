@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use clap::Parser;
@@ -30,7 +30,7 @@ impl Args {
     pub fn load_config_file_and_into_config(
         self,
         all_plugins: Vec<Plugin>,
-        standalone_rules: Vec<Arc<dyn Rule>>,
+        all_standalone_rules: Vec<Arc<dyn Rule>>,
     ) -> Config {
         let ParsedConfigFile {
             path: config_file_path,
@@ -41,23 +41,20 @@ impl Args {
             fix,
             report_fixed_violations,
         } = self;
-        let mut all_rules = standalone_rules;
-        all_rules.extend(
-            all_plugins
-                .iter()
-                .flat_map(|plugin| plugin.rules.iter().cloned()),
-        );
         Config {
             rule,
-            all_rules,
+            all_standalone_rules,
             all_plugins,
             fix,
             report_fixed_violations,
             config_file_path: Some(config_file_path),
             rule_configurations: config_file_content.rules().collect(),
+            rules_by_plugin_prefixed_name: Default::default(),
         }
     }
 }
+
+pub type PluginIndex = usize;
 
 #[derive(Builder)]
 #[builder(setter(strip_option, into))]
@@ -65,8 +62,9 @@ pub struct Config {
     #[builder(default)]
     pub rule: Option<String>,
 
-    all_rules: Vec<Arc<dyn Rule>>,
+    all_standalone_rules: Vec<Arc<dyn Rule>>,
 
+    #[builder(default)]
     all_plugins: Vec<Plugin>,
 
     #[builder(default)]
@@ -79,17 +77,49 @@ pub struct Config {
     pub config_file_path: Option<PathBuf>,
 
     pub rule_configurations: Vec<RuleConfiguration>,
+
+    #[allow(clippy::type_complexity)]
+    #[builder(setter(skip))]
+    rules_by_plugin_prefixed_name: OnceLock<HashMap<String, (Arc<dyn Rule>, Option<PluginIndex>)>>,
 }
 
 impl Config {
-    fn get_active_rules(&self) -> Vec<Arc<dyn Rule>> {
+    fn get_rules_by_plugin_prefixed_name(
+        &self,
+    ) -> &HashMap<String, (Arc<dyn Rule>, Option<PluginIndex>)> {
+        self.rules_by_plugin_prefixed_name.get_or_init(|| {
+            let mut rules_by_plugin_prefixed_name: HashMap<
+                String,
+                (Arc<dyn Rule>, Option<PluginIndex>),
+            > = self
+                .all_plugins
+                .iter()
+                .enumerate()
+                .flat_map(|(plugin_index, plugin)| {
+                    plugin.rules.iter().map(move |rule| {
+                        (
+                            format!("{}/{}", plugin.name, rule.meta().name),
+                            (rule.clone(), Some(plugin_index)),
+                        )
+                    })
+                })
+                .collect();
+            for standalone_rule in &self.all_standalone_rules {
+                rules_by_plugin_prefixed_name
+                    .insert(standalone_rule.meta().name, (standalone_rule.clone(), None));
+            }
+            rules_by_plugin_prefixed_name
+        })
+    }
+
+    fn get_active_rules_and_associated_plugins(&self) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>)> {
+        let rules_by_plugin_prefixed_name = self.get_rules_by_plugin_prefixed_name();
         self.rule_configurations
             .iter()
             .filter(|rule_config| rule_config.level != ErrorLevel::Off)
             .map(|rule_config| {
-                self.all_rules
-                    .iter()
-                    .find(|rule| rule.meta().name == rule_config.name)
+                rules_by_plugin_prefixed_name
+                    .get(&rule_config.name)
                     .unwrap_or_else(|| panic!("Unknown rule: '{}'", rule_config.name))
                     .clone()
             })
@@ -98,29 +128,28 @@ impl Config {
 
     fn filter_based_on_rule_argument(
         &self,
-        active_rules: Vec<Arc<dyn Rule>>,
-    ) -> Vec<Arc<dyn Rule>> {
+        active_rules_and_associated_plugins: Vec<(Arc<dyn Rule>, Option<PluginIndex>)>,
+    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>)> {
         match self.rule.as_ref() {
             Some(rule_arg) => {
-                let filtered = active_rules
+                let filtered = active_rules_and_associated_plugins
                     .into_iter()
-                    .filter(|rule| &rule.meta().name == rule_arg)
+                    .filter(|(rule, _)| &rule.meta().name == rule_arg)
                     .collect::<Vec<_>>();
                 if !filtered.is_empty() {
                     return filtered;
                 }
                 self.rule_argument_error();
             }
-            None => active_rules,
+            None => active_rules_and_associated_plugins,
         }
     }
 
     fn rule_argument_error(&self) -> ! {
         let rule_arg = self.rule.as_ref().unwrap();
         if self
-            .all_rules
-            .iter()
-            .any(|rule| &rule.meta().name == rule_arg)
+            .get_rules_by_plugin_prefixed_name()
+            .contains_key(rule_arg)
         {
             panic!("The '{rule_arg}' rule is configured as inactive");
         } else {
@@ -129,28 +158,25 @@ impl Config {
     }
 
     pub fn get_instantiated_rules(&self) -> Vec<InstantiatedRule> {
-        let active_rules = self.get_active_rules();
-        if active_rules.is_empty() {
+        let active_rules_and_associated_plugins = self.get_active_rules_and_associated_plugins();
+        if active_rules_and_associated_plugins.is_empty() {
             panic!("No configured active rules");
         }
-        let active_rules = self.filter_based_on_rule_argument(active_rules);
-        let instantiated_rules = active_rules
+        let active_rules_and_associated_plugins =
+            self.filter_based_on_rule_argument(active_rules_and_associated_plugins);
+        active_rules_and_associated_plugins
             .into_iter()
-            .map(|rule| InstantiatedRule::new(rule.clone(), self))
-            .collect::<Vec<_>>();
-        if instantiated_rules.is_empty() {
-            panic!("Invalid rule name: {:?}", self.rule.as_ref().unwrap());
-        }
-        instantiated_rules
+            .map(|(rule, plugin_index)| InstantiatedRule::new(rule.clone(), plugin_index, self))
+            .collect()
     }
 }
 
 impl ConfigBuilder {
     pub fn default_rule_configurations(&mut self) -> &mut Self {
         self.rule_configurations = Some(
-            self.all_rules
+            self.all_standalone_rules
                 .as_ref()
-                .expect("must call .all_rules() before calling .default_rule_configurations()")
+                .expect("must call .all_standalone_rules() before calling .default_rule_configurations()")
                 .into_iter()
                 .map(RuleConfiguration::default_for_rule)
                 .collect(),

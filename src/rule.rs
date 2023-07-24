@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tree_sitter::{Language, Node, Query};
 use tree_sitter_grep::SupportedLanguage;
 
-use crate::{context::QueryMatchContext, Config};
+use crate::{config::PluginIndex, context::QueryMatchContext, Config};
 
 #[derive(Clone)]
 pub struct RuleMeta {
@@ -30,14 +30,16 @@ pub struct InstantiatedRule {
     pub meta: RuleMeta,
     pub rule: Arc<dyn Rule>,
     pub rule_instance: Arc<dyn RuleInstance>,
+    plugin_index: Option<PluginIndex>,
 }
 
 impl InstantiatedRule {
-    pub fn new(rule: Arc<dyn Rule>, config: &Config) -> Self {
+    pub fn new(rule: Arc<dyn Rule>, plugin_index: Option<PluginIndex>, config: &Config) -> Self {
         Self {
             meta: rule.meta(),
             rule_instance: rule.clone().instantiate(config),
             rule,
+            plugin_index,
         }
     }
 }

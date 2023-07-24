@@ -4,6 +4,7 @@ use tree_sitter_lint::{rule, violation, Plugin, Rule};
 
 pub fn instantiate() -> Plugin {
     Plugin {
+        name: "replace-foo-with-bar".to_owned(),
         rules: vec![replace_foo_with_bar_rule()],
     }
 }

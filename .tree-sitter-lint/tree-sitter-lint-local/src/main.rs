@@ -9,7 +9,7 @@ fn main() {
 }
 
 fn all_plugins() -> Vec<Plugin> {
-    vec![]
+    vec![tree_sitter_lint_plugin_replace_foo_with_bar::instantiate()]
 }
 
 fn all_standalone_rules() -> Vec<Arc<dyn Rule>> {
