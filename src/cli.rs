@@ -4,10 +4,14 @@ use std::{
     process::{self, Command},
 };
 
+use clap::Parser;
 use inflector::Inflector;
 use quote::{format_ident, quote};
 
-use crate::config::{find_config_file, load_config_file, ParsedConfigFile};
+use crate::{
+    config::{find_config_file, load_config_file, ParsedConfigFile},
+    Args,
+};
 
 const PER_PROJECT_DIRECTORY_NAME: &str = ".tree-sitter-lint";
 
@@ -20,11 +24,13 @@ pub fn bootstrap_cli() {
     let local_binary_project_directory = per_project_directory.join(LOCAL_BINARY_PROJECT_NAME);
     let path_to_local_release_binary =
         local_binary_project_directory.join(format!("target/release/{LOCAL_BINARY_PROJECT_NAME}"));
-    if should_regenerate_local_binary(&config_file_path, &path_to_local_release_binary) {
+    let command_line_args = env::args_os().collect::<Vec<_>>();
+    let args = Args::parse_from(command_line_args.iter().cloned());
+    if should_regenerate_local_binary(&config_file_path, &path_to_local_release_binary, &args) {
         regenerate_local_binary(&local_binary_project_directory, &Path::new("..").join(".."));
     }
     let mut handle = Command::new(path_to_local_release_binary)
-        .args(env::args_os().skip(1))
+        .args(command_line_args.into_iter().skip(1))
         .spawn()
         .unwrap();
     process::exit(handle.wait().unwrap().code().unwrap_or(1));
@@ -33,7 +39,11 @@ pub fn bootstrap_cli() {
 fn should_regenerate_local_binary(
     config_file_path: &Path,
     path_to_local_release_binary: &Path,
+    args: &Args,
 ) -> bool {
+    if args.force_rebuild {
+        return true;
+    }
     let local_release_binary_modified_timestamp = match path_to_local_release_binary
         .metadata()
         .ok()
