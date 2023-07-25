@@ -266,7 +266,7 @@ impl RuleConfiguration {
     }
 }
 
-fn load_config_file() -> ParsedConfigFile {
+pub fn load_config_file() -> ParsedConfigFile {
     let config_file_path = find_config_file();
     let config_file_contents =
         fs::read_to_string(&config_file_path).expect("Couldn't read config file contents");
@@ -280,7 +280,7 @@ fn load_config_file() -> ParsedConfigFile {
 
 const CONFIG_FILENAME: &str = ".tree-sitter-lint.yml";
 
-fn find_config_file() -> PathBuf {
+pub fn find_config_file() -> PathBuf {
     find_filename_in_ancestor_directory(
         CONFIG_FILENAME,
         env::current_dir().expect("Couldn't get current directory"),
