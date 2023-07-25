@@ -33,15 +33,15 @@ use rayon::prelude::*;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
-use tree_sitter::Query;
-use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
+use tree_sitter::{Query, Tree};
+use tree_sitter_grep::{CaptureInfo, RopeOrSlice, SupportedLanguage};
 pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
 pub extern crate clap;
 pub extern crate serde_json;
-pub extern crate tree_sitter;
 pub extern crate tree_sitter_grep;
+pub use tree_sitter_grep::{ropey, tree_sitter};
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
@@ -190,14 +190,15 @@ fn run_fixing_loop(
         let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
             Default::default();
         tree_sitter_grep::run_for_slice_with_callback(
-            file_contents,
+            &**file_contents,
+            None,
             tree_sitter_grep_args.clone(),
             |capture_info| {
                 let (instantiated_rule, rule_listener_index) =
                     aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
                 let mut query_match_context = QueryMatchContext::new(
                     path,
-                    file_contents,
+                    &**file_contents,
                     instantiated_rule,
                     config,
                     language,
@@ -233,11 +234,13 @@ fn run_fixing_loop(
     }
 }
 
-pub fn run_for_slice(
-    file_contents: &[u8],
+pub fn run_for_slice<'a>(
+    file_contents: impl Into<RopeOrSlice<'a>>,
+    tree: Option<&Tree>,
     path: impl AsRef<Path>,
     config: Config,
 ) -> Vec<ViolationWithContext> {
+    let file_contents = file_contents.into();
     let path = path.as_ref();
     if config.fix {
         panic!("Use run_fixing_for_slice()");
@@ -251,6 +254,7 @@ pub fn run_for_slice(
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
         file_contents,
+        tree,
         tree_sitter_grep_args,
         |capture_info| {
             let (instantiated_rule, rule_listener_index) =
@@ -298,13 +302,19 @@ pub fn run_fixing_for_slice(
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
-        file_contents,
+        &**file_contents,
+        None,
         tree_sitter_grep_args.clone(),
         |capture_info| {
             let (instantiated_rule, rule_listener_index) =
                 aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
-            let mut query_match_context =
-                QueryMatchContext::new(path, file_contents, instantiated_rule, &config, language);
+            let mut query_match_context = QueryMatchContext::new(
+                path,
+                &**file_contents,
+                instantiated_rule,
+                &config,
+                language,
+            );
             instantiated_per_file_rules
                 .entry(instantiated_rule.meta.name.clone())
                 .or_insert_with(|| {

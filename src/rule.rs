@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use tree_sitter::{Language, Node, Query};
 use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
     context::QueryMatchContext,
+    tree_sitter::{Language, Node, Query},
     Config,
 };
 
