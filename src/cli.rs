@@ -56,10 +56,14 @@ fn regenerate_local_binary(
     local_binary_project_directory: &Path,
     relative_path_from_local_binary_project_directory_to_project_directory: &Path,
 ) {
+    eprintln!("Config changed, regenerating local binary");
     let parsed_config_file = load_config_file();
+    let local_binary_project_src_directory = local_binary_project_directory.join("src");
+    let local_binary_project_cargo_toml_path = local_binary_project_directory.join("Cargo.toml");
     if local_binary_project_directory.is_dir() {
-        fs::remove_dir_all(local_binary_project_directory)
-            .expect("Couldn't remove existing local binary project");
+        let _ = fs::remove_dir_all(&local_binary_project_src_directory);
+        let _ = fs::remove_file(&local_binary_project_cargo_toml_path);
+        let _ = fs::remove_file(local_binary_project_directory.join("Cargo.lock"));
     }
     fs::create_dir_all(local_binary_project_directory)
         .expect("Couldn't create local binary project directory");
@@ -74,13 +78,9 @@ fn regenerate_local_binary(
         has_local_rules,
         relative_path_from_local_binary_project_directory_to_project_directory,
     );
-    fs::write(
-        local_binary_project_directory.join("Cargo.toml"),
-        cargo_toml_contents,
-    )
-    .expect("Couldn't write local binary project Cargo.toml");
+    fs::write(local_binary_project_cargo_toml_path, cargo_toml_contents)
+        .expect("Couldn't write local binary project Cargo.toml");
 
-    let local_binary_project_src_directory = local_binary_project_directory.join("src");
     fs::create_dir(&local_binary_project_src_directory)
         .expect("Couldn't create local binary project `src/` directory");
     let src_main_rs_contents = get_src_main_rs_contents(&parsed_config_file, has_local_rules);
