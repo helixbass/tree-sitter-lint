@@ -16,7 +16,7 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     fs,
-    ops::Deref,
+    ops::{self, Deref},
     path::{Path, PathBuf},
     process,
     sync::{Mutex, PoisonError},
@@ -34,7 +34,7 @@ pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListene
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
 use tree_sitter::{Query, Tree};
-use tree_sitter_grep::{CaptureInfo, RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::{ropey::Rope, CaptureInfo, RopeOrSlice, SupportedLanguage};
 pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
@@ -164,9 +164,9 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_fixing_loop(
+fn run_fixing_loop<'a>(
     violations: &mut Vec<ViolationWithContext>,
-    file_contents: &mut Vec<u8>,
+    file_contents: impl Into<MutRopeOrSlice<'a>>,
     mut pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
     tree_sitter_grep_args: tree_sitter_grep::Args,
     aggregated_queries: &AggregatedQueries,
@@ -174,8 +174,9 @@ fn run_fixing_loop(
     config: &Config,
     language: SupportedLanguage,
 ) {
+    let mut file_contents = file_contents.into();
     for _ in 0..MAX_FIX_ITERATIONS {
-        apply_fixes(file_contents, pending_fixes);
+        apply_fixes(&mut file_contents, pending_fixes);
         pending_fixes = Default::default();
         if config.report_fixed_violations {
             *violations = violations
@@ -189,7 +190,7 @@ fn run_fixing_loop(
         let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
             Default::default();
         tree_sitter_grep::run_for_slice_with_callback(
-            &**file_contents,
+            &file_contents,
             None,
             tree_sitter_grep_args.clone(),
             |capture_info| {
@@ -197,7 +198,7 @@ fn run_fixing_loop(
                     aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
                 let mut query_match_context = QueryMatchContext::new(
                     path,
-                    &**file_contents,
+                    &file_contents,
                     instantiated_rule,
                     config,
                     language,
@@ -283,11 +284,52 @@ pub fn run_for_slice<'a>(
     violations.into_inner().unwrap()
 }
 
-pub fn run_fixing_for_slice(
-    file_contents: &mut Vec<u8>,
+pub enum MutRopeOrSlice<'a> {
+    Rope(&'a mut Rope),
+    Slice(&'a mut Vec<u8>),
+}
+
+impl<'a> MutRopeOrSlice<'a> {
+    pub fn splice(&mut self, range: ops::Range<usize>, replacement: &str) {
+        match self {
+            MutRopeOrSlice::Rope(rope) => {
+                rope.remove(range.clone());
+                rope.insert(range.start, replacement);
+            }
+            MutRopeOrSlice::Slice(slice) => {
+                slice.splice(range, replacement.bytes());
+            }
+        }
+    }
+}
+
+impl<'a> From<&'a mut Rope> for MutRopeOrSlice<'a> {
+    fn from(value: &'a mut Rope) -> Self {
+        Self::Rope(value)
+    }
+}
+
+impl<'a> From<&'a mut Vec<u8>> for MutRopeOrSlice<'a> {
+    fn from(value: &'a mut Vec<u8>) -> Self {
+        Self::Slice(value)
+    }
+}
+
+impl<'a> From<&'a MutRopeOrSlice<'a>> for RopeOrSlice<'a> {
+    fn from(value: &'a MutRopeOrSlice<'a>) -> Self {
+        match value {
+            MutRopeOrSlice::Rope(rope) => (&**rope).into(),
+            MutRopeOrSlice::Slice(slice) => (&***slice).into(),
+        }
+    }
+}
+
+pub fn run_fixing_for_slice<'a>(
+    file_contents: impl Into<MutRopeOrSlice<'a>>,
     path: impl AsRef<Path>,
     config: Config,
 ) -> Vec<ViolationWithContext> {
+    let file_contents = file_contents.into();
     let path = path.as_ref();
     if !config.fix {
         panic!("Use run_for_slice()");
@@ -301,19 +343,14 @@ pub fn run_fixing_for_slice(
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
-        &**file_contents,
+        &file_contents,
         None,
         tree_sitter_grep_args.clone(),
         |capture_info| {
             let (instantiated_rule, rule_listener_index) =
                 aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
-            let mut query_match_context = QueryMatchContext::new(
-                path,
-                &**file_contents,
-                instantiated_rule,
-                &config,
-                language,
-            );
+            let mut query_match_context =
+                QueryMatchContext::new(path, &file_contents, instantiated_rule, &config, language);
             instantiated_per_file_rules
                 .entry(instantiated_rule.meta.name.clone())
                 .or_insert_with(|| {
@@ -379,12 +416,15 @@ fn write_files<'a>(files_to_write: impl Iterator<Item = (&'a Path, &'a [u8])>) {
 
 type RuleName = String;
 
-fn apply_fixes(file_contents: &mut Vec<u8>, pending_fixes: HashMap<RuleName, Vec<PendingFix>>) {
+fn apply_fixes(
+    file_contents: &mut MutRopeOrSlice,
+    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+) {
     let non_conflicting_sorted_pending_fixes =
         get_sorted_non_conflicting_pending_fixes(pending_fixes);
     for PendingFix { range, replacement } in non_conflicting_sorted_pending_fixes.into_iter().rev()
     {
-        file_contents.splice(range, replacement.into_bytes());
+        file_contents.splice(range, &replacement);
     }
 }
 
