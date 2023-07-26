@@ -35,8 +35,7 @@ use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
 use tree_sitter::{Query, Tree};
 use tree_sitter_grep::{CaptureInfo, RopeOrSlice, SupportedLanguage};
-pub use violation::ViolationBuilder;
-use violation::ViolationWithContext;
+pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
 pub extern crate serde_json;

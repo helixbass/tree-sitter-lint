@@ -16,7 +16,7 @@ use crate::{
 mod config_file;
 pub use config_file::{find_config_file, load_config_file, ParsedConfigFile};
 
-#[derive(Parser)]
+#[derive(Default, Parser)]
 pub struct Args {
     #[arg(long)]
     pub rule: Option<String>,
