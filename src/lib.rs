@@ -25,7 +25,7 @@ use std::{
 
 use clap::Parser;
 pub use cli::bootstrap_cli;
-pub use config::{Args, Config, ConfigBuilder, RuleConfiguration};
+pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::QueryMatchContext;
 pub use plugin::Plugin;
