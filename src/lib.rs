@@ -288,6 +288,7 @@ pub fn run_for_slice<'a>(
 
 pub fn run_fixing_for_slice<'a>(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
+    tree: Option<&Tree>,
     path: impl AsRef<Path>,
     config: Config,
 ) -> Vec<ViolationWithContext> {
@@ -306,7 +307,7 @@ pub fn run_fixing_for_slice<'a>(
         Default::default();
     tree_sitter_grep::run_for_slice_with_callback(
         &file_contents,
-        None,
+        tree,
         tree_sitter_grep_args.clone(),
         |capture_info| {
             let (instantiated_rule, rule_listener_index) =

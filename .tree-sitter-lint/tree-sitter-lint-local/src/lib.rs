@@ -1,8 +1,8 @@
 use std::{path::Path, sync::Arc};
 
 use tree_sitter_lint::{
-    clap::Parser, tree_sitter::Tree, tree_sitter_grep::RopeOrSlice, Args, Config, Plugin, Rule,
-    ViolationWithContext,
+    clap::Parser, tree_sitter::Tree, tree_sitter_grep::RopeOrSlice, Args, Config, MutRopeOrSlice,
+    Plugin, Rule, ViolationWithContext,
 };
 
 pub fn run_and_output() {
@@ -16,6 +16,15 @@ pub fn run_for_slice<'a>(
     args: Args,
 ) -> Vec<ViolationWithContext> {
     tree_sitter_lint::run_for_slice(file_contents, tree, path, args_to_config(args))
+}
+
+pub fn run_fixing_for_slice<'a>(
+    file_contents: impl Into<MutRopeOrSlice<'a>>,
+    tree: Option<&Tree>,
+    path: impl AsRef<Path>,
+    args: Args,
+) -> Vec<ViolationWithContext> {
+    tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args))
 }
 
 fn args_to_config(args: Args) -> Config {
