@@ -41,7 +41,6 @@ fn should_regenerate_local_binary(
     path_to_local_release_binary: &Path,
     args: &Args,
 ) -> bool {
-    return false;
     if args.force_rebuild {
         return true;
     }
