@@ -3,6 +3,7 @@
 mod cli;
 mod config;
 mod context;
+pub mod lsp;
 mod macros;
 mod plugin;
 mod rule;
@@ -41,6 +42,7 @@ pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
 pub extern crate serde_json;
+pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
 

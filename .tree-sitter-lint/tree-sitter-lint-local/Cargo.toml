@@ -10,3 +10,6 @@ tree-sitter-lint-plugin-replace-foo-with = { path = "../.././tests/fixtures/tree
 
 [[bin]]
 name = "tree-sitter-lint-local"
+
+[[bin]]
+name = "tree-sitter-lint-local-lsp"

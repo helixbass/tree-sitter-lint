@@ -2,7 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use tree_sitter_lint::{
     clap::Parser, tree_sitter::Tree, tree_sitter_grep::RopeOrSlice, Args, Config, MutRopeOrSlice,
-    Plugin, Rule, ViolationWithContext,
+    Plugin, Rule, ViolationWithContext, lsp::{LocalLinter, self},
 };
 
 pub fn run_and_output() {
@@ -25,6 +25,34 @@ pub fn run_fixing_for_slice<'a>(
     args: Args,
 ) -> Vec<ViolationWithContext> {
     tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args))
+}
+
+struct LocalLinterConcrete;
+
+impl LocalLinter for LocalLinterConcrete {
+    fn run_for_slice<'a>(
+        &self,
+        file_contents: impl Into<RopeOrSlice<'a>>,
+        tree: Option<&Tree>,
+        path: impl AsRef<Path>,
+        args: Args,
+    ) -> Vec<ViolationWithContext> {
+        run_for_slice(file_contents, tree, path, args)
+    }
+
+    fn run_fixing_for_slice<'a>(
+        &self,
+        file_contents: impl Into<MutRopeOrSlice<'a>>,
+        tree: Option<&Tree>,
+        path: impl AsRef<Path>,
+        args: Args,
+    ) -> Vec<ViolationWithContext> {
+        run_fixing_for_slice(file_contents, tree, path, args)
+    }
+}
+
+pub async fn run_lsp() {
+    lsp::run(LocalLinterConcrete).await;
 }
 
 fn args_to_config(args: Args) -> Config {
