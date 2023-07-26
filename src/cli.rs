@@ -17,6 +17,8 @@ const PER_PROJECT_DIRECTORY_NAME: &str = ".tree-sitter-lint";
 
 const LOCAL_BINARY_PROJECT_NAME: &str = "tree-sitter-lint-local";
 
+const LOCAL_BINARY_LSP_NAME: &str = "tree-sitter-lint-local-lsp";
+
 pub fn bootstrap_cli() {
     let config_file_path = find_config_file();
     let project_directory = config_file_path.parent().unwrap();
@@ -93,12 +95,36 @@ fn regenerate_local_binary(
 
     fs::create_dir(&local_binary_project_src_directory)
         .expect("Couldn't create local binary project `src/` directory");
-    let src_main_rs_contents = get_src_main_rs_contents(&parsed_config_file, has_local_rules);
+    let local_binary_project_src_bin_directory = local_binary_project_src_directory.join("bin");
+    fs::create_dir(&local_binary_project_src_bin_directory)
+        .expect("Couldn't create local binary project `src/bin/` directory");
+    let local_binary_crate_name = LOCAL_BINARY_PROJECT_NAME.to_snake_case();
+    let src_bin_tree_sitter_lint_local_rs_contents =
+        get_src_bin_tree_sitter_lint_local_rs_contents(&local_binary_crate_name);
     fs::write(
-        local_binary_project_src_directory.join("main.rs"),
-        src_main_rs_contents,
+        local_binary_project_src_bin_directory.join(format!("{LOCAL_BINARY_PROJECT_NAME}.rs")),
+        src_bin_tree_sitter_lint_local_rs_contents,
     )
-    .expect("Couldn't write local binary project src/main.rs");
+    .unwrap_or_else(|_| {
+        panic!("Couldn't write local binary project src/bin/{LOCAL_BINARY_PROJECT_NAME}.rs",);
+    });
+
+    let src_bin_tree_sitter_lint_local_lsp_rs_contents =
+        get_src_bin_tree_sitter_lint_local_lsp_rs_contents(&local_binary_crate_name);
+    fs::write(
+        local_binary_project_src_bin_directory.join(format!("{LOCAL_BINARY_LSP_NAME}.rs")),
+        src_bin_tree_sitter_lint_local_lsp_rs_contents,
+    )
+    .unwrap_or_else(|_| {
+        panic!("Couldn't write local binary project src/bin/{LOCAL_BINARY_LSP_NAME}.rs");
+    });
+
+    let src_lib_rs_contents = get_src_lib_rs_contents(&parsed_config_file, has_local_rules);
+    fs::write(
+        local_binary_project_src_directory.join("lib.rs"),
+        src_lib_rs_contents,
+    )
+    .expect("Couldn't write local binary project src/lib.rs");
 
     let gitignore_contents = get_gitignore_contents();
     fs::write(
@@ -112,7 +138,7 @@ fn regenerate_local_binary(
 
 fn release_build_local_binary(local_binary_project_directory: &Path) {
     let output = Command::new("cargo")
-        .args(["build", "--release"])
+        .args(["build", "--release", "--bin", LOCAL_BINARY_PROJECT_NAME])
         .current_dir(local_binary_project_directory)
         .output()
         .expect("Failed to execute cargo release build command");
@@ -153,13 +179,37 @@ fn get_local_binary_cargo_toml_contents(
                 .expect("Couldn't convert plugin path to string")
         ));
     }
+    contents.push_str("\n[[bin]]\n");
+    contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_PROJECT_NAME));
+    contents.push_str("[[bin]]\n");
+    contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_LSP_NAME));
     contents
 }
 
-fn get_src_main_rs_contents(
-    parsed_config_file: &ParsedConfigFile,
-    has_local_rules: bool,
-) -> String {
+fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str) -> String {
+    let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
+    quote! {
+        fn main() {
+            #local_binary_crate_name::run_and_output();
+        }
+    }
+    .to_string()
+}
+
+fn get_src_bin_tree_sitter_lint_local_lsp_rs_contents(local_binary_crate_name: &str) -> String {
+    let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
+    quote! {
+        use tree_sitter_lint::tokio;
+
+        #[tokio::main]
+        async fn main() {
+            #local_binary_crate_name::run_lsp().await;
+        }
+    }
+    .to_string()
+}
+
+fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rules: bool) -> String {
     let standalone_rules = if has_local_rules {
         quote!(local_rules::get_rules())
     } else {
@@ -173,14 +223,65 @@ fn get_src_main_rs_contents(
         .map(|plugin_name| format_ident!("{}", get_plugin_crate_name(plugin_name).to_snake_case()));
 
     quote! {
-        use std::sync::Arc;
+        use std::{path::Path, sync::Arc};
 
-        use tree_sitter_lint::{clap::Parser, Args, Plugin, Rule};
+        use tree_sitter_lint::{
+            clap::Parser, tree_sitter::Tree, tree_sitter_grep::RopeOrSlice, Args, Config, MutRopeOrSlice,
+            Plugin, Rule, ViolationWithContext, lsp::{LocalLinter, self},
+        };
 
-        fn main() {
-            tree_sitter_lint::run_and_output(
-                Args::parse().load_config_file_and_into_config(all_plugins(), all_standalone_rules()),
-            );
+        pub fn run_and_output() {
+            tree_sitter_lint::run_and_output(args_to_config(Args::parse()));
+        }
+
+        pub fn run_for_slice<'a>(
+            file_contents: impl Into<RopeOrSlice<'a>>,
+            tree: Option<&Tree>,
+            path: impl AsRef<Path>,
+            args: Args,
+        ) -> Vec<ViolationWithContext> {
+            tree_sitter_lint::run_for_slice(file_contents, tree, path, args_to_config(args))
+        }
+
+        pub fn run_fixing_for_slice<'a>(
+            file_contents: impl Into<MutRopeOrSlice<'a>>,
+            tree: Option<&Tree>,
+            path: impl AsRef<Path>,
+            args: Args,
+        ) -> Vec<ViolationWithContext> {
+            tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args))
+        }
+
+        struct LocalLinterConcrete;
+
+        impl LocalLinter for LocalLinterConcrete {
+            fn run_for_slice<'a>(
+                &self,
+                file_contents: impl Into<RopeOrSlice<'a>>,
+                tree: Option<&Tree>,
+                path: impl AsRef<Path>,
+                args: Args,
+            ) -> Vec<ViolationWithContext> {
+                run_for_slice(file_contents, tree, path, args)
+            }
+
+            fn run_fixing_for_slice<'a>(
+                &self,
+                file_contents: impl Into<MutRopeOrSlice<'a>>,
+                tree: Option<&Tree>,
+                path: impl AsRef<Path>,
+                args: Args,
+            ) -> Vec<ViolationWithContext> {
+                run_fixing_for_slice(file_contents, tree, path, args)
+            }
+        }
+
+        pub async fn run_lsp() {
+            lsp::run(LocalLinterConcrete).await;
+        }
+
+        fn args_to_config(args: Args) -> Config {
+            args.load_config_file_and_into_config(all_plugins(), all_standalone_rules())
         }
 
         fn all_plugins() -> Vec<Plugin> {
