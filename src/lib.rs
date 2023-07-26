@@ -7,6 +7,7 @@ mod macros;
 mod plugin;
 mod rule;
 mod rule_tester;
+mod slice;
 #[cfg(test)]
 mod tests;
 mod violation;
@@ -16,7 +17,7 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     fs,
-    ops::{self, Deref},
+    ops::Deref,
     path::{Path, PathBuf},
     process,
     sync::{Mutex, PoisonError},
@@ -33,8 +34,9 @@ use rayon::prelude::*;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
+pub use slice::MutRopeOrSlice;
 use tree_sitter::{Query, Tree};
-use tree_sitter_grep::{ropey::Rope, CaptureInfo, RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::{CaptureInfo, RopeOrSlice, SupportedLanguage};
 pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
@@ -282,46 +284,6 @@ pub fn run_for_slice<'a>(
     )
     .unwrap();
     violations.into_inner().unwrap()
-}
-
-pub enum MutRopeOrSlice<'a> {
-    Rope(&'a mut Rope),
-    Slice(&'a mut Vec<u8>),
-}
-
-impl<'a> MutRopeOrSlice<'a> {
-    pub fn splice(&mut self, range: ops::Range<usize>, replacement: &str) {
-        match self {
-            MutRopeOrSlice::Rope(rope) => {
-                rope.remove(range.clone());
-                rope.insert(range.start, replacement);
-            }
-            MutRopeOrSlice::Slice(slice) => {
-                slice.splice(range, replacement.bytes());
-            }
-        }
-    }
-}
-
-impl<'a> From<&'a mut Rope> for MutRopeOrSlice<'a> {
-    fn from(value: &'a mut Rope) -> Self {
-        Self::Rope(value)
-    }
-}
-
-impl<'a> From<&'a mut Vec<u8>> for MutRopeOrSlice<'a> {
-    fn from(value: &'a mut Vec<u8>) -> Self {
-        Self::Slice(value)
-    }
-}
-
-impl<'a> From<&'a MutRopeOrSlice<'a>> for RopeOrSlice<'a> {
-    fn from(value: &'a MutRopeOrSlice<'a>) -> Self {
-        match value {
-            MutRopeOrSlice::Rope(rope) => (&**rope).into(),
-            MutRopeOrSlice::Slice(slice) => (&***slice).into(),
-        }
-    }
 }
 
 pub fn run_fixing_for_slice<'a>(
