@@ -1,10 +1,10 @@
 use std::{ops, path::Path};
 
-use tree_sitter_grep::{RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::{streaming_iterator::StreamingIterator, RopeOrSlice, SupportedLanguage};
 
 use crate::{
     rule::InstantiatedRule,
-    tree_sitter::{Language, Node, Query, QueryCursor},
+    tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
     Config,
 };
@@ -14,7 +14,7 @@ pub struct QueryMatchContext<'a> {
     pub file_contents: RopeOrSlice<'a>,
     pub rule: &'a InstantiatedRule,
     config: &'a Config,
-    language: SupportedLanguage,
+    pub language: SupportedLanguage,
     pending_fixes: Option<Vec<PendingFix>>,
     pub violations: Option<Vec<ViolationWithContext>>,
 }
@@ -70,36 +70,61 @@ impl<'a> QueryMatchContext<'a> {
         }
     }
 
-    pub fn maybe_get_single_matching_node_for_query<'query, 'enclosing_node>(
+    pub fn maybe_get_single_captured_node_for_query<'query, 'enclosing_node>(
         &self,
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> Option<Node<'enclosing_node>> {
+        self.maybe_get_single_captured_node_for_filtered_query(query, |_| true, enclosing_node)
+    }
+
+    pub fn maybe_get_single_captured_node_for_filtered_query<'query, 'enclosing_node>(
+        &self,
+        query: impl Into<ParsedOrUnparsedQuery<'query>>,
+        mut predicate: impl FnMut(Node) -> bool,
+        enclosing_node: Node<'enclosing_node>,
+    ) -> Option<Node<'enclosing_node>> {
         let query = query.into().into_parsed(self.language.language());
-        let mut query_cursor = QueryCursor::new();
-        let mut matches = query_cursor.matches(&query, enclosing_node, self.file_contents);
-        let first_match = matches.next()?;
-        if matches.next().is_some() {
-            return None;
-        }
-        let mut nodes_for_default_capture_index = first_match.nodes_for_capture_index(0);
-        let first_node = nodes_for_default_capture_index.next()?;
-        if nodes_for_default_capture_index.next().is_some() {
+        let captures = tree_sitter_grep::get_captures_for_enclosing_node(
+            self.file_contents,
+            &query,
+            0,
+            None,
+            enclosing_node,
+        );
+        let mut filtered_captures = captures
+            .filter_map(|capture_info| predicate(capture_info.node).then_some(capture_info.node));
+        let first_node = *filtered_captures.next()?;
+        if filtered_captures.next().is_some() {
             return None;
         }
         Some(first_node)
     }
 
-    pub fn get_number_of_query_matches<'query, 'enclosing_node>(
+    pub fn get_number_of_query_captures<'query, 'enclosing_node>(
         &self,
         query: impl Into<ParsedOrUnparsedQuery<'query>>,
         enclosing_node: Node<'enclosing_node>,
     ) -> usize {
+        self.get_number_of_filtered_query_captures(query, |_| true, enclosing_node)
+    }
+
+    pub fn get_number_of_filtered_query_captures<'query, 'enclosing_node>(
+        &self,
+        query: impl Into<ParsedOrUnparsedQuery<'query>>,
+        mut predicate: impl FnMut(Node) -> bool,
+        enclosing_node: Node<'enclosing_node>,
+    ) -> usize {
         let query = query.into().into_parsed(self.language.language());
-        let mut query_cursor = QueryCursor::new();
-        query_cursor
-            .matches(&query, enclosing_node, self.file_contents)
-            .count()
+        tree_sitter_grep::get_captures_for_enclosing_node(
+            self.file_contents,
+            &query,
+            0,
+            None,
+            enclosing_node,
+        )
+        .filter(|capture_info| predicate(capture_info.node))
+        .count()
     }
 
     pub fn pending_fixes(&self) -> Option<&[PendingFix]> {
@@ -111,29 +136,73 @@ impl<'a> QueryMatchContext<'a> {
     }
 }
 
-pub enum ParsedOrUnparsedQuery<'query_text> {
+pub enum ParsedOrUnparsedQuery<'a> {
     Parsed(Query),
-    Unparsed(&'query_text str),
+    ParsedRef(&'a Query),
+    Unparsed(&'a str),
 }
 
-impl<'query_text> ParsedOrUnparsedQuery<'query_text> {
-    pub fn into_parsed(self, language: Language) -> Query {
+impl<'a> ParsedOrUnparsedQuery<'a> {
+    pub fn parsed(&self, language: Language) -> MaybeOwned<'_, Query> {
         match self {
-            Self::Parsed(query) => query,
-            Self::Unparsed(query_text) => Query::new(language, query_text).unwrap(),
+            Self::Parsed(query) => query.into(),
+            Self::ParsedRef(query) => (*query).into(),
+            Self::Unparsed(query_text) => Query::new(language, query_text).unwrap().into(),
+        }
+    }
+
+    pub fn into_parsed(self, language: Language) -> MaybeOwned<'a, Query> {
+        match self {
+            Self::Parsed(query) => query.into(),
+            Self::ParsedRef(query) => query.into(),
+            Self::Unparsed(query_text) => Query::new(language, query_text).unwrap().into(),
         }
     }
 }
 
-impl<'query_text> From<Query> for ParsedOrUnparsedQuery<'query_text> {
+impl<'a> From<Query> for ParsedOrUnparsedQuery<'a> {
     fn from(value: Query) -> Self {
         Self::Parsed(value)
     }
 }
 
-impl<'query_text> From<&'query_text str> for ParsedOrUnparsedQuery<'query_text> {
-    fn from(value: &'query_text str) -> Self {
+impl<'a> From<&'a Query> for ParsedOrUnparsedQuery<'a> {
+    fn from(value: &'a Query) -> Self {
+        Self::ParsedRef(value)
+    }
+}
+
+impl<'a> From<&'a str> for ParsedOrUnparsedQuery<'a> {
+    fn from(value: &'a str) -> Self {
         Self::Unparsed(value)
+    }
+}
+
+pub enum MaybeOwned<'a, T> {
+    Owned(T),
+    Borrowed(&'a T),
+}
+
+impl<'a, T> ops::Deref for MaybeOwned<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            MaybeOwned::Owned(value) => value,
+            MaybeOwned::Borrowed(value) => value,
+        }
+    }
+}
+
+impl<'a, T> From<T> for MaybeOwned<'a, T> {
+    fn from(value: T) -> Self {
+        Self::Owned(value)
+    }
+}
+
+impl<'a, T> From<&'a T> for MaybeOwned<'a, T> {
+    fn from(value: &'a T) -> Self {
+        Self::Borrowed(value)
     }
 }
 

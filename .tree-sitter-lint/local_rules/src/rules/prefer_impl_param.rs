@@ -77,6 +77,15 @@ macro_rules! return_if_none {
     };
 }
 
+#[macro_export]
+macro_rules! query {
+    ($query:literal, $language:expr $(,)?) => {{
+        static CACHED: std::sync::OnceLock<tree_sitter_lint::tree_sitter::Query> =
+            std::sync::OnceLock::new();
+        CACHED.get_or_init(|| tree_sitter_lint::tree_sitter::Query::new($language, $query).unwrap())
+    }};
+}
+
 pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
     rule! {
         name => "prefer-impl-param",
@@ -90,11 +99,14 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
             )"# => |node, context| {
                 let type_parameter_name =
                     context.get_node_text(get_constrained_type_parameter_name(node));
-                return_if_none!(context.maybe_get_single_matching_node_for_query(
-                    &*format!(
-                      r#"(
-                        (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                    ),
+                let type_identifier_query =
+                    query!(
+                        r#"(type_identifier) @c"#,
+                        context.language.language(),
+                    );
+                return_if_none!(context.maybe_get_single_captured_node_for_filtered_query(
+                    type_identifier_query,
+                    |node| context.get_node_text(node) == type_parameter_name,
                     get_parameters_node_of_enclosing_function(node)
                 ));
                 if let Some(return_type_node) =
@@ -105,11 +117,9 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                     {
                         return;
                     }
-                    if context.get_number_of_query_matches(
-                        &*format!(
-                          r#"(
-                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                        ),
+                    if context.get_number_of_filtered_query_captures(
+                        type_identifier_query,
+                        |node| context.get_node_text(node) == type_parameter_name,
                         return_type_node
                     ) > 0 {
                         return;
@@ -117,11 +127,9 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                 }
                 let type_parameters_node =
                     assert_node_kind!(node.parent().unwrap(), "type_parameters");
-                let only_found_the_defining_usage_in_the_type_parameters = context.maybe_get_single_matching_node_for_query(
-                    &*format!(
-                      r#"(
-                        (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                    ),
+                let only_found_the_defining_usage_in_the_type_parameters = context.maybe_get_single_captured_node_for_filtered_query(
+                    type_identifier_query,
+                    |node| context.get_node_text(node) == type_parameter_name,
                     type_parameters_node
                 ).is_some();
                 if !only_found_the_defining_usage_in_the_type_parameters {
@@ -130,11 +138,9 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                 if let Some(where_clause_node) =
                     maybe_get_where_clause_node_of_enclosing_function(node)
                 {
-                    if context.get_number_of_query_matches(
-                        &*format!(
-                          r#"(
-                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                        ),
+                    if context.get_number_of_filtered_query_captures(
+                        type_identifier_query,
+                        |node| context.get_node_text(node) == type_parameter_name,
                         where_clause_node
                     ) > 0 {
                         return;
