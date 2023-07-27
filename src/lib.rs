@@ -75,7 +75,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
             let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
                 Default::default();
             perform_search(Box::new(
-                |capture_info: CaptureInfo, file_contents, path| {
+                |capture_info: &CaptureInfo, file_contents, path| {
                     let (instantiated_rule, rule_listener_index) =
                         aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
                     let mut query_match_context = QueryMatchContext::new(
