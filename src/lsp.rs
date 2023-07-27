@@ -1,6 +1,7 @@
 use std::{borrow::Cow, ops, path::Path};
 
 use dashmap::DashMap;
+use ropey::Rope;
 use text_diff::Difference;
 use tower_lsp::{
     jsonrpc::Result,
@@ -14,11 +15,11 @@ use tower_lsp::{
     },
     Client, LanguageServer, LspService, Server,
 };
-use tree_sitter_grep::{ropey::Rope, RopeOrSlice};
+
 use crate::{
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
-    ArgsBuilder, ViolationWithContext, Args, MutRopeOrSlice,
+    Args, ArgsBuilder, MutRopeOrSlice, RopeOrSlice, ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -227,7 +228,9 @@ fn parse(contents: &Rope, old_tree: Option<&Tree>) -> Tree {
     parser
         .set_language(SupportedLanguage::Rust.language())
         .unwrap();
-    contents.parse(&mut parser, old_tree).unwrap()
+    <RopeOrSlice<'_>>::from(contents)
+        .parse(&mut parser, old_tree)
+        .unwrap()
 }
 
 fn lsp_position_to_char_offset(file_contents: &Rope, position: Position) -> usize {

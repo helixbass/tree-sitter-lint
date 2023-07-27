@@ -1,12 +1,12 @@
 use std::{ops, path::Path};
 
-use tree_sitter_grep::{RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query, QueryCursor},
     violation::{Violation, ViolationWithContext},
-    Config,
+    Config, RopeOrSlice,
 };
 
 pub struct QueryMatchContext<'a> {

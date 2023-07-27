@@ -35,16 +35,17 @@ use rayon::prelude::*;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
-pub use slice::MutRopeOrSlice;
+pub use slice::{MutRopeOrSlice, RopeOrSlice};
 use tree_sitter::{Query, Tree};
-use tree_sitter_grep::{CaptureInfo, RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
 pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
+pub extern crate ropey;
 pub extern crate serde_json;
 pub extern crate tokio;
 pub extern crate tree_sitter_grep;
-pub use tree_sitter_grep::{ropey, tree_sitter};
+pub use tree_sitter_grep::tree_sitter;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
