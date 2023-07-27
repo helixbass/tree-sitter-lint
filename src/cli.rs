@@ -179,7 +179,9 @@ fn get_local_binary_cargo_toml_contents(
                 .expect("Couldn't convert plugin path to string")
         ));
     }
-    contents.push_str("\n[[bin]]\n");
+    contents.push_str("\n[patch.crates-io]\n");
+    contents.push_str("tree-sitter = { git = \"https://github.com/helixbass/tree-sitter\", rev = \"57e98fb0\" }\n\n");
+    contents.push_str("[[bin]]\n");
     contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_PROJECT_NAME));
     contents.push_str("[[bin]]\n");
     contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_LSP_NAME));
