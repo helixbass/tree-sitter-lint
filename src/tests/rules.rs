@@ -2,9 +2,12 @@
 
 use std::sync::Arc;
 
-use proc_macros::{rule_crate_internal as rule, rule_tests_crate_internal as rule_tests};
+use proc_macros::{
+    rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
+    violation_crate_internal as violation,
+};
 
-use crate::{rule::Rule, violation, RuleTester};
+use crate::{rule::Rule, RuleTester};
 
 #[test]
 fn test_per_file_run_state() {

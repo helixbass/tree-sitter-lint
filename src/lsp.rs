@@ -75,7 +75,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                 violations
                     .into_iter()
                     .map(|violation| Diagnostic {
-                        message: violation.message,
+                        message: violation.message().into_owned(),
                         range: tree_sitter_range_to_lsp_range(
                             &per_file_state.contents,
                             violation.range,

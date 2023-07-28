@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use proc_macros::rule_crate_internal as rule;
+use proc_macros::{rule_crate_internal as rule, violation_crate_internal as violation};
 
-use crate::{rule::Rule, violation};
+use crate::rule::Rule;
 
 #[macro_export]
 macro_rules! assert_fixed_content {

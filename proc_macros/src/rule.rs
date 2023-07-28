@@ -180,6 +180,7 @@ struct Rule {
     listeners: Vec<RuleListenerSpec>,
     options_type: Option<Type>,
     languages: Vec<Ident>,
+    messages: Option<HashMap<Expr, Expr>>,
 }
 
 impl Rule {
@@ -215,6 +216,7 @@ impl Parse for Rule {
         let mut listeners: Option<Vec<RuleListenerSpec>> = Default::default();
         let mut options_type: Option<Type> = Default::default();
         let mut languages: Option<Vec<Ident>> = Default::default();
+        let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=>]>()?;
@@ -260,6 +262,21 @@ impl Parse for Rule {
                         }
                     }
                 }
+                "messages" => {
+                    assert!(messages.is_none(), "Already saw 'messages' key");
+                    let messages_content;
+                    bracketed!(messages_content in input);
+                    let messages = messages.get_or_insert_with(|| Default::default());
+                    while !messages_content.is_empty() {
+                        let key: Expr = messages_content.parse()?;
+                        input.parse::<Token![=>]>()?;
+                        let value: Expr = messages_content.parse()?;
+                        messages.insert(key, value);
+                        if !messages_content.is_empty() {
+                            messages_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -273,6 +290,7 @@ impl Parse for Rule {
             listeners: listeners.expect("Expected 'listeners'"),
             options_type,
             languages: languages.expect("Expected 'languages'"),
+            messages,
         })
     }
 }
@@ -443,6 +461,16 @@ fn get_rule_rule_impl(
         }
     };
     let languages = &rule.languages;
+    let messages = match rule.messages.as_ref() {
+        Some(messages) => {
+            let message_keys = messages.keys();
+            let message_values = messages.values();
+            quote! {
+                Some([#((String::from(#message_keys), String::from(#message_values))),*].into())
+            }
+        }
+        None => quote!(None),
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
@@ -450,6 +478,7 @@ fn get_rule_rule_impl(
                     name: #name.into(),
                     fixable: #fixable,
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
+                    messages: #messages,
                 }
             }
 

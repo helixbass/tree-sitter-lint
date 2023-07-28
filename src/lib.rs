@@ -28,7 +28,7 @@ pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::QueryMatchContext;
 pub use plugin::Plugin;
-pub use proc_macros::{builder_args, rule, rule_tests};
+pub use proc_macros::{builder_args, rule, rule_tests, violation};
 use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{

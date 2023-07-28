@@ -123,7 +123,7 @@ fn assert_that_violation_matches_expected(
     expected_violation: &RuleTestExpectedError,
 ) {
     if let Some(message) = expected_violation.message.as_ref() {
-        assert_eq!(message, &violation.message);
+        assert_eq!(message, &violation.message());
     }
     if let Some(line) = expected_violation.line {
         assert_eq!(line, violation.range.start_point.row + 1);
