@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{ops, sync::Arc};
 
-use tree_sitter_grep::SupportedLanguage;
+use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
@@ -57,11 +57,75 @@ impl InstantiatedRule {
     }
 }
 
+pub enum NodeOrCaptures<'a> {
+    Node(Node<'a>),
+    Captures(Captures<'a>),
+}
+
+impl<'a> From<Node<'a>> for NodeOrCaptures<'a> {
+    fn from(value: Node<'a>) -> Self {
+        Self::Node(value)
+    }
+}
+
+impl<'a> From<Captures<'a>> for NodeOrCaptures<'a> {
+    fn from(value: Captures<'a>) -> Self {
+        Self::Captures(value)
+    }
+}
+
+pub struct Captures<'a> {
+    pub query_match: &'a QueryMatch<'a, 'a>,
+    pub query: Arc<Query>,
+}
+
+impl<'a> Captures<'a> {
+    pub fn new(query_match: &'a QueryMatch<'a, 'a>, query: Arc<Query>) -> Self {
+        Self { query_match, query }
+    }
+
+    pub fn get(&self, capture_name: &str) -> Option<Node> {
+        let mut nodes_for_capture_index = self
+            .query_match
+            .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap());
+        let first_node = nodes_for_capture_index.next()?;
+        if nodes_for_capture_index.next().is_some() {
+            panic!("Use .all() for captures that correspond to multiple nodes");
+        }
+        Some(first_node)
+    }
+
+    pub fn all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
+        self.query_match
+            .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap())
+    }
+}
+
+impl<'a> ops::Index<&str> for Captures<'a> {
+    type Output = Node<'a>;
+
+    fn index(&self, capture_name: &str) -> &Self::Output {
+        let capture_index = self.query.capture_index_for_name(capture_name).unwrap();
+        let mut captures_for_this_capture_index = self
+            .query_match
+            .captures
+            .iter()
+            .filter(|capture| capture.index == capture_index);
+        let first_capture = captures_for_this_capture_index
+            .next()
+            .unwrap_or_else(|| panic!("Capture '{capture_name}' had no nodes"));
+        if captures_for_this_capture_index.next().is_some() {
+            panic!("Use .all() for captures that correspond to multiple nodes");
+        }
+        &first_capture.node
+    }
+}
+
 pub trait RuleInstancePerFile: Send + Sync {
     fn on_query_match(
         &mut self,
         listener_index: usize,
-        node: Node,
+        node_or_captures: NodeOrCaptures,
         context: &mut QueryMatchContext,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
@@ -69,38 +133,58 @@ pub trait RuleInstancePerFile: Send + Sync {
 
 pub struct FileRunInfo {}
 
+pub enum MatchBy {
+    PerCapture { capture_name: Option<String> },
+    PerMatch,
+}
+
 pub struct RuleListenerQuery {
     pub query: String,
-    pub capture_name: Option<String>,
+    pub match_by: MatchBy,
 }
 
 impl RuleListenerQuery {
     pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
         let query = Query::new(language, &self.query).unwrap();
-        let capture_index = match self.capture_name.as_ref() {
-            None => match query.capture_names().len() {
-                0 => panic!("Expected capture"),
-                _ => 0,
+        let resolved_match_by = match &self.match_by {
+            MatchBy::PerCapture { capture_name } => ResolvedMatchBy::PerCapture {
+                capture_index: match capture_name.as_ref() {
+                    None => match query.capture_names().len() {
+                        0 => panic!("Expected capture"),
+                        _ => 0,
+                    },
+                    Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+                },
             },
-            Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+            MatchBy::PerMatch => ResolvedMatchBy::PerMatch,
         };
         ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
-            capture_index,
+            match_by: resolved_match_by,
         }
     }
+}
+
+pub enum ResolvedMatchBy {
+    PerCapture { capture_index: u32 },
+    PerMatch,
 }
 
 pub struct ResolvedRuleListenerQuery {
     pub query: Query,
     pub query_text: String,
-    pub capture_index: u32,
+    pub match_by: ResolvedMatchBy,
 }
 
 impl ResolvedRuleListenerQuery {
     pub fn capture_name(&self) -> &str {
-        &self.query.capture_names()[self.capture_index as usize]
+        match &self.match_by {
+            ResolvedMatchBy::PerCapture { capture_index } => {
+                &self.query.capture_names()[*capture_index as usize]
+            }
+            _ => panic!("Called capture_name() for PerMatch"),
+        }
     }
 }
 

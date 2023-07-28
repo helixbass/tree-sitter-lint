@@ -444,7 +444,9 @@ fn get_rule_rule_impl(
                     listener_queries: vec![
                         #(#crate_name::RuleListenerQuery {
                             query: #rule_listener_queries.into(),
-                            capture_name: #rule_listener_capture_names,
+                            match_by: #crate_name::MatchBy::PerCapture {
+                                capture_name: #rule_listener_capture_names,
+                            },
                         }),*
                     ],
                     #(#rule_instance_state_field_names: #rule_instance_state_field_initializers),*
@@ -619,7 +621,11 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&mut self, listener_index: usize, node: #crate_name::tree_sitter::Node, context: &mut #crate_name::QueryMatchContext) {
+            fn on_query_match(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures, context: &mut #crate_name::QueryMatchContext) {
+                let node = match node_or_captures {
+                    #crate_name::NodeOrCaptures::Node(node) => node,
+                    _ => panic!("Expected node"),
+                };
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks
