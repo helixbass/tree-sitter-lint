@@ -30,7 +30,8 @@ fn replace_foo_with_bar_rule() -> Arc<dyn Rule> {
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust]
     }
 }
 
@@ -57,6 +58,7 @@ fn replace_foo_with_something_rule() -> Arc<dyn Rule> {
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust]
     }
 }

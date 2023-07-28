@@ -13,3 +13,5 @@ rules:
   replace-foo-with/replace-foo-with-something:
     level: error
     options: whee
+  require-blazing-keyword:
+    level: error

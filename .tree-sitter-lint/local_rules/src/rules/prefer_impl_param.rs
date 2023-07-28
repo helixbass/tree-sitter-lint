@@ -153,7 +153,8 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust],
     }
 }
 

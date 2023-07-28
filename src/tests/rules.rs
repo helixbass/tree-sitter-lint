@@ -58,7 +58,8 @@ fn no_more_than_5_uses_of_foo_rule() -> Arc<dyn Rule> {
                     );
                 }
             }
-        ]
+        ],
+        languages => [Rust],
     }
 }
 
@@ -126,6 +127,7 @@ fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
                     );
                 }
             }
-        ]
+        ],
+        languages => [Rust],
     }
 }

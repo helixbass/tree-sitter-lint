@@ -31,6 +31,7 @@ pub use context::QueryMatchContext;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
+use regex::Regex;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
@@ -562,7 +563,8 @@ impl<'a> AggregatedQueries<'a> {
                             .push((rule_index, rule_listener_index));
                     }
                     let query_text_with_unified_capture_name =
-                        regex!(&format!(r#"@{}\b"#, rule_listener_query.capture_name()))
+                        // TODO: cache these regexes (by capture name I guess?)
+                        Regex::new(&format!(r#"@{}\b"#, rule_listener_query.capture_name())).unwrap()
                             .replace_all(
                                 &rule_listener_query.query_text,
                                 CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,

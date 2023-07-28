@@ -146,6 +146,7 @@ fn create_identifier_replacing_rule(
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust]
     }
 }
