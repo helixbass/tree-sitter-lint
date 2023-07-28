@@ -269,7 +269,7 @@ impl Parse for Rule {
                     let messages = messages.get_or_insert_with(|| Default::default());
                     while !messages_content.is_empty() {
                         let key: Expr = messages_content.parse()?;
-                        input.parse::<Token![=>]>()?;
+                        messages_content.parse::<Token![=>]>()?;
                         let value: Expr = messages_content.parse()?;
                         messages.insert(key, value);
                         if !messages_content.is_empty() {
@@ -463,7 +463,10 @@ fn get_rule_rule_impl(
     let languages = &rule.languages;
     let messages = match rule.messages.as_ref() {
         Some(messages) => {
-            let message_keys = messages.keys();
+            let message_keys = messages.keys().map(|key| match key {
+                Expr::Path(key) if key.path.get_ident().is_some() => quote!(stringify!(#key)),
+                _ => quote!(#key),
+            });
             let message_values = messages.values();
             quote! {
                 Some([#((String::from(#message_keys), String::from(#message_values))),*].into())

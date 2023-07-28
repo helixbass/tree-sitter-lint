@@ -98,7 +98,10 @@ pub fn violation_with_crate_name(input: TokenStream, crate_name: &str) -> TokenS
 
     let data = match violation.data.as_ref() {
         Some(data) => {
-            let data_keys = data.keys();
+            let data_keys = data.keys().map(|key| match key {
+                Expr::Path(key) if key.path.get_ident().is_some() => quote!(stringify!(#key)),
+                _ => quote!(#key),
+            });
             let data_values = data.values();
             quote! {
                 .data([#((String::from(#data_keys), String::from(#data_values))),*])

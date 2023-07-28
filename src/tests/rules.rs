@@ -194,3 +194,82 @@ fn test_rule_per_match_callback() {
         },
     );
 }
+
+#[test]
+fn test_rule_messages_non_interpolated() {
+    RuleTester::run(
+        rule! {
+            name => "has-non-interpolated-message",
+            messages => [
+                non_interpolated => "Not interpolated",
+            ],
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message_id => "non_interpolated",
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [r#"Not interpolated"#],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_rule_messages_interpolated() {
+    RuleTester::run(
+        rule! {
+            name => "has-interpolated-message",
+            messages => [
+                interpolated => "Interpolated {{ foo }}",
+            ],
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message_id => "interpolated",
+                        data => {
+                            foo => "bar"
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [r#"Interpolated bar"#],
+                },
+            ]
+        },
+    );
+}
