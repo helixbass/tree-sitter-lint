@@ -35,7 +35,10 @@ pub use rule::{
     FileRunInfo, MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile,
     RuleListenerQuery, RuleMeta,
 };
-pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
+pub use rule_tester::{
+    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestInvalid, RuleTestValid,
+    RuleTester, RuleTests,
+};
 pub use slice::MutRopeOrSlice;
 use tree_sitter::{Query, Tree};
 use tree_sitter_grep::{tree_sitter::QueryMatch, RopeOrSlice, SupportedLanguage};

@@ -9,7 +9,7 @@ use crate::{
     Config,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RuleMeta {
     pub name: String,
     pub fixable: bool,

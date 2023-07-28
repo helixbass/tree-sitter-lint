@@ -1,5 +1,6 @@
 use std::{iter, sync::Arc};
 
+use derive_builder::Builder;
 use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
@@ -67,7 +68,10 @@ impl RuleTester {
                 .unwrap(),
             self.language,
         );
-        assert!(violations.is_empty());
+        assert!(
+            violations.is_empty(),
+            "Valid case failed\ntest: {valid_test:#?}\nviolations: {violations:#?}"
+        );
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
@@ -101,7 +105,12 @@ fn assert_that_violations_match_expected(
     violations: &[ViolationWithContext],
     invalid_test: &RuleTestInvalid,
 ) {
-    assert_eq!(violations.len(), invalid_test.errors.len());
+    assert_eq!(
+        violations.len(),
+        invalid_test.errors.len(),
+        "Didn't get expected number of violations for code {:#?}, got: {violations:#?}",
+        invalid_test.code
+    );
     let mut violations = violations.to_owned();
     violations.sort_by_key(|violation| violation.range);
     for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
@@ -113,7 +122,24 @@ fn assert_that_violation_matches_expected(
     violation: &ViolationWithContext,
     expected_violation: &RuleTestExpectedError,
 ) {
-    assert_eq!(violation.message, expected_violation.message);
+    if let Some(message) = expected_violation.message.as_ref() {
+        assert_eq!(message, &violation.message);
+    }
+    if let Some(line) = expected_violation.line {
+        assert_eq!(line, violation.range.start_point.row + 1);
+    }
+    if let Some(column) = expected_violation.column {
+        assert_eq!(column, violation.range.start_point.column + 1);
+    }
+    if let Some(end_line) = expected_violation.end_line {
+        assert_eq!(end_line, violation.range.end_point.row + 1);
+    }
+    if let Some(end_column) = expected_violation.end_column {
+        assert_eq!(end_column, violation.range.end_point.column + 1);
+    }
+    if let Some(type_) = expected_violation.type_.as_ref() {
+        assert_eq!(type_, violation.kind);
+    }
 }
 
 pub struct RuleTests {
@@ -133,6 +159,7 @@ impl RuleTests {
     }
 }
 
+#[derive(Debug)]
 pub struct RuleTestValid {
     code: String,
     options: Option<RuleOptions>,
@@ -176,19 +203,37 @@ impl RuleTestInvalid {
     }
 }
 
-#[derive(Debug)]
+#[derive(Builder, Clone, Debug, Default)]
+#[builder(default, setter(strip_option, into))]
 pub struct RuleTestExpectedError {
-    pub message: String,
+    pub message: Option<String>,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+    pub end_line: Option<usize>,
+    pub end_column: Option<usize>,
+    pub type_: Option<String>,
 }
 
 impl RuleTestExpectedError {
-    pub fn new(message: String) -> Self {
-        Self { message }
+    pub fn with_type(&self, type_: &'static str) -> Self {
+        Self {
+            type_: Some(type_.to_owned()),
+            ..self.clone()
+        }
     }
 }
 
 impl From<&str> for RuleTestExpectedError {
     fn from(value: &str) -> Self {
-        Self::new(value.to_owned())
+        Self {
+            message: Some(value.to_owned()),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&RuleTestExpectedError> for RuleTestExpectedError {
+    fn from(value: &RuleTestExpectedError) -> Self {
+        value.clone()
     }
 }

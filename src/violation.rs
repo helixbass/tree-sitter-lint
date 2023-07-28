@@ -29,6 +29,7 @@ impl<'a> Violation<'a> {
         ViolationWithContext {
             message,
             range: node.range(),
+            kind: node.kind(),
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
             plugin_index: query_match_context.rule.plugin_index,
@@ -44,7 +45,7 @@ impl<'a> ViolationBuilder<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ViolationWithContext {
     pub message: String,
     pub range: tree_sitter::Range,
@@ -52,6 +53,7 @@ pub struct ViolationWithContext {
     pub rule: RuleMeta,
     pub plugin_index: Option<PluginIndex>,
     pub was_fix: bool,
+    pub kind: &'static str,
 }
 
 impl ViolationWithContext {
