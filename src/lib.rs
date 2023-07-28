@@ -79,81 +79,32 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
             let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
                 Default::default();
             perform_search(Box::new(|query_match: &QueryMatch, file_contents, path| {
-                let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) =
-                    aggregated_queries.get_rule_and_listener_index_and_capture_index(
-                        language,
-                        query_match.pattern_index,
-                    );
-                match capture_index_if_per_capture {
-                    Some(capture_index) => {
-                        query_match
-                            .captures
-                            .into_iter()
-                            .filter(|capture| capture.index == capture_index)
-                            .for_each(|capture| {
-                                run_single_on_query_match_callback(
-                                    path,
-                                    file_contents,
-                                    instantiated_rule,
-                                    &mut instantiated_per_file_rules,
-                                    config,
-                                    language,
-                                    rule_listener_index,
-                                    capture.node.into(),
-                                    |violations| {
-                                        all_violations
-                                            .lock()
-                                            .unwrap()
-                                            .entry(path.to_owned())
-                                            .or_default()
-                                            .extend(violations)
-                                    },
-                                    |fixes| {
-                                        files_with_fixes.append(
-                                            path,
-                                            file_contents,
-                                            &instantiated_rule.meta.name,
-                                            fixes,
-                                            language,
-                                        )
-                                    },
-                                );
-                            });
-                    }
-                    None => {
-                        run_single_on_query_match_callback(
+                run_match(
+                    query_match,
+                    &aggregated_queries,
+                    language,
+                    path,
+                    file_contents,
+                    config,
+                    &mut instantiated_per_file_rules,
+                    |violations| {
+                        all_violations
+                            .lock()
+                            .unwrap()
+                            .entry(path.to_owned())
+                            .or_default()
+                            .extend(violations)
+                    },
+                    |fixes, instantiated_rule| {
+                        files_with_fixes.append(
                             path,
                             file_contents,
-                            instantiated_rule,
-                            &mut instantiated_per_file_rules,
-                            config,
+                            &instantiated_rule.meta.name,
+                            fixes,
                             language,
-                            rule_listener_index,
-                            Captures::new(
-                                query_match,
-                                aggregated_queries.get_query_for_language(language),
-                            )
-                            .into(),
-                            |violations| {
-                                all_violations
-                                    .lock()
-                                    .unwrap()
-                                    .entry(path.to_owned())
-                                    .or_default()
-                                    .extend(violations)
-                            },
-                            |fixes| {
-                                files_with_fixes.append(
-                                    path,
-                                    file_contents,
-                                    &instantiated_rule.meta.name,
-                                    fixes,
-                                    language,
-                                )
-                            },
-                        );
-                    }
-                }
+                        )
+                    },
+                );
             }));
         },
     )
@@ -204,6 +155,63 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
         all_violations.insert(path, violations);
     }
     all_violations.into_values().flatten().collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_match<'a>(
+    query_match: &QueryMatch,
+    aggregated_queries: &'a AggregatedQueries,
+    language: SupportedLanguage,
+    path: &'a Path,
+    file_contents: impl Into<RopeOrSlice<'a>>,
+    config: &'a Config,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile>>,
+    mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
+    mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
+) {
+    let file_contents = file_contents.into();
+    let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = aggregated_queries
+        .get_rule_and_listener_index_and_capture_index(language, query_match.pattern_index);
+    match capture_index_if_per_capture {
+        Some(capture_index) => {
+            query_match
+                .captures
+                .into_iter()
+                .filter(|capture| capture.index == capture_index)
+                .for_each(|capture| {
+                    run_single_on_query_match_callback(
+                        path,
+                        file_contents,
+                        instantiated_rule,
+                        instantiated_per_file_rules,
+                        config,
+                        language,
+                        rule_listener_index,
+                        capture.node.into(),
+                        &mut on_found_violations,
+                        |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+                    );
+                });
+        }
+        None => {
+            run_single_on_query_match_callback(
+                path,
+                file_contents,
+                instantiated_rule,
+                instantiated_per_file_rules,
+                config,
+                language,
+                rule_listener_index,
+                Captures::new(
+                    query_match,
+                    aggregated_queries.get_query_for_language(language),
+                )
+                .into(),
+                on_found_violations,
+                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -274,65 +282,24 @@ fn run_fixing_loop<'a>(
             None,
             tree_sitter_grep_args.clone(),
             |query_match| {
-                let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) =
-                    aggregated_queries.get_rule_and_listener_index_and_capture_index(
-                        language,
-                        query_match.pattern_index,
-                    );
-                match capture_index_if_per_capture {
-                    Some(capture_index) => {
-                        query_match
-                            .captures
-                            .into_iter()
-                            .filter(|capture| capture.index == capture_index)
-                            .for_each(|capture| {
-                                run_single_on_query_match_callback(
-                                    path,
-                                    &file_contents,
-                                    instantiated_rule,
-                                    &mut instantiated_per_file_rules,
-                                    config,
-                                    language,
-                                    rule_listener_index,
-                                    capture.node.into(),
-                                    |reported_violations| {
-                                        violations.extend(reported_violations);
-                                    },
-                                    |fixes| {
-                                        pending_fixes
-                                            .entry(instantiated_rule.meta.name.clone())
-                                            .or_default()
-                                            .extend(fixes);
-                                    },
-                                );
-                            });
-                    }
-                    None => {
-                        run_single_on_query_match_callback(
-                            path,
-                            &file_contents,
-                            instantiated_rule,
-                            &mut instantiated_per_file_rules,
-                            config,
-                            language,
-                            rule_listener_index,
-                            Captures::new(
-                                query_match,
-                                aggregated_queries.get_query_for_language(language),
-                            )
-                            .into(),
-                            |reported_violations| {
-                                violations.extend(reported_violations);
-                            },
-                            |fixes| {
-                                pending_fixes
-                                    .entry(instantiated_rule.meta.name.clone())
-                                    .or_default()
-                                    .extend(fixes);
-                            },
-                        );
-                    }
-                }
+                run_match(
+                    query_match,
+                    aggregated_queries,
+                    language,
+                    path,
+                    &file_contents,
+                    config,
+                    &mut instantiated_per_file_rules,
+                    |reported_violations| {
+                        violations.extend(reported_violations);
+                    },
+                    |fixes, instantiated_rule| {
+                        pending_fixes
+                            .entry(instantiated_rule.meta.name.clone())
+                            .or_default()
+                            .extend(fixes);
+                    },
+                );
             },
         )
         .unwrap();
@@ -365,59 +332,21 @@ pub fn run_for_slice<'a>(
         tree,
         tree_sitter_grep_args,
         |query_match| {
-            let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) =
-                aggregated_queries.get_rule_and_listener_index_and_capture_index(
-                    language,
-                    query_match.pattern_index,
-                );
-            match capture_index_if_per_capture {
-                Some(capture_index) => {
-                    query_match
-                        .captures
-                        .into_iter()
-                        .filter(|capture| capture.index == capture_index)
-                        .for_each(|capture| {
-                            run_single_on_query_match_callback(
-                                path,
-                                file_contents,
-                                instantiated_rule,
-                                &mut instantiated_per_file_rules,
-                                &config,
-                                language,
-                                rule_listener_index,
-                                capture.node.into(),
-                                |reported_violations| {
-                                    violations.lock().unwrap().extend(reported_violations);
-                                },
-                                |_| {
-                                    panic!("Expected no fixes");
-                                },
-                            );
-                        });
-                }
-                None => {
-                    run_single_on_query_match_callback(
-                        path,
-                        file_contents,
-                        instantiated_rule,
-                        &mut instantiated_per_file_rules,
-                        &config,
-                        language,
-                        rule_listener_index,
-                        Captures::new(
-                            query_match,
-                            aggregated_queries.get_query_for_language(language),
-                        )
-                        .into(),
-                        |reported_violations| {
-                            violations.lock().unwrap().extend(reported_violations);
-                        },
-                        |_| {
-                            panic!("Expected no fixes");
-                        },
-                    );
-                }
-            }
+            run_match(
+                query_match,
+                &aggregated_queries,
+                language,
+                path,
+                file_contents,
+                &config,
+                &mut instantiated_per_file_rules,
+                |reported_violations| {
+                    violations.lock().unwrap().extend(reported_violations);
+                },
+                |_, _| {
+                    panic!("Expected no fixes");
+                },
+            );
         },
     )
     .unwrap();
@@ -448,69 +377,26 @@ pub fn run_fixing_for_slice<'a>(
         tree,
         tree_sitter_grep_args.clone(),
         |query_match| {
-            let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) =
-                aggregated_queries.get_rule_and_listener_index_and_capture_index(
-                    language,
-                    query_match.pattern_index,
-                );
-            match capture_index_if_per_capture {
-                Some(capture_index) => {
-                    query_match
-                        .captures
-                        .into_iter()
-                        .filter(|capture| capture.index == capture_index)
-                        .for_each(|capture| {
-                            run_single_on_query_match_callback(
-                                path,
-                                &file_contents,
-                                instantiated_rule,
-                                &mut instantiated_per_file_rules,
-                                &config,
-                                language,
-                                rule_listener_index,
-                                capture.node.into(),
-                                |reported_violations| {
-                                    violations.lock().unwrap().extend(reported_violations);
-                                },
-                                |fixes| {
-                                    pending_fixes
-                                        .lock()
-                                        .unwrap()
-                                        .entry(instantiated_rule.meta.name.clone())
-                                        .or_default()
-                                        .extend(fixes);
-                                },
-                            );
-                        });
-                }
-                None => {
-                    run_single_on_query_match_callback(
-                        path,
-                        &file_contents,
-                        instantiated_rule,
-                        &mut instantiated_per_file_rules,
-                        &config,
-                        language,
-                        rule_listener_index,
-                        Captures::new(
-                            query_match,
-                            aggregated_queries.get_query_for_language(language),
-                        )
-                        .into(),
-                        |reported_violations| {
-                            violations.lock().unwrap().extend(reported_violations);
-                        },
-                        |fixes| {
-                            pending_fixes
-                                .lock()
-                                .unwrap()
-                                .entry(instantiated_rule.meta.name.clone())
-                                .or_default()
-                                .extend(fixes);
-                        },
-                    );
-                }
-            }
+            run_match(
+                query_match,
+                &aggregated_queries,
+                language,
+                path,
+                &file_contents,
+                &config,
+                &mut instantiated_per_file_rules,
+                |reported_violations| {
+                    violations.lock().unwrap().extend(reported_violations);
+                },
+                |fixes, instantiated_rule| {
+                    pending_fixes
+                        .lock()
+                        .unwrap()
+                        .entry(instantiated_rule.meta.name.clone())
+                        .or_default()
+                        .extend(fixes);
+                },
+            );
         },
     )
     .unwrap();
