@@ -105,19 +105,17 @@ impl ViolationWithContext {
     }
 
     pub fn message(&self) -> Cow<'_, str> {
-        match &self.message_or_message_id {
-            MessageOrMessageId::Message(message) => message.into(),
-            MessageOrMessageId::MessageId(message_id) => {
-                let message_template = self
-                    .rule
-                    .messages
-                    .as_ref()
-                    .expect("No messages for rule")
-                    .get(message_id)
-                    .unwrap_or_else(|| panic!("Invalid message ID for rule: {message_id:?}"));
-                format_message(message_template, self.data.as_ref())
-            }
-        }
+        let message_template = match &self.message_or_message_id {
+            MessageOrMessageId::Message(message) => message,
+            MessageOrMessageId::MessageId(message_id) => self
+                .rule
+                .messages
+                .as_ref()
+                .expect("No messages for rule")
+                .get(message_id)
+                .unwrap_or_else(|| panic!("Invalid message ID for rule: {message_id:?}")),
+        };
+        format_message(message_template, self.data.as_ref())
     }
 }
 

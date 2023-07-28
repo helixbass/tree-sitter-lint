@@ -273,3 +273,41 @@ fn test_rule_messages_interpolated() {
         },
     );
 }
+
+#[test]
+fn test_rule_one_off_messages_interpolated() {
+    RuleTester::run(
+        rule! {
+            name => "has-interpolated-message",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "Interpolated {{ foo }}",
+                        data => {
+                            foo => "bar"
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [r#"Interpolated bar"#],
+                },
+            ]
+        },
+    );
+}
