@@ -10,7 +10,7 @@ use syn::{
     punctuated::Punctuated,
     token,
     visit_mut::{self, VisitMut},
-    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Token, Type,
+    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, Token, Type,
 };
 
 use crate::ArrowSeparatedKeyValuePairs;
@@ -125,6 +125,15 @@ struct RuleListenerSpec {
     query: Expr,
     capture_name: Option<Expr>,
     callback: ExprClosure,
+}
+
+impl RuleListenerSpec {
+    pub fn is_per_match(&self) -> bool {
+        matches!(
+            self.callback.inputs.iter().next(),
+            Some(Pat::Ident(first_param)) if first_param.ident.to_string() == "captures"
+        )
+    }
 }
 
 impl Parse for RuleListenerSpec {
@@ -408,13 +417,21 @@ fn get_rule_rule_impl(
                 None => quote!(Default::default()),
             });
     let rule_listener_queries = rule.listeners.iter().map(|listener| &listener.query);
-    let rule_listener_capture_names =
-        rule.listeners
-            .iter()
-            .map(|listener| match listener.capture_name.as_ref() {
+    let rule_listener_match_bys = rule.listeners.iter().map(|listener| {
+        if listener.is_per_match() {
+            quote!(#crate_name::MatchBy::PerMatch)
+        } else {
+            let capture_name = match listener.capture_name.as_ref() {
                 Some(capture_name) => quote!(Some(#capture_name.into())),
                 None => quote!(None),
-            });
+            };
+            quote! {
+                #crate_name::MatchBy::PerCapture {
+                    capture_name: #capture_name,
+                }
+            }
+        }
+    });
     let maybe_deserialize_options = match rule.options_type.as_ref() {
         None => quote!(),
         Some(options_type) => {
@@ -444,9 +461,7 @@ fn get_rule_rule_impl(
                     listener_queries: vec![
                         #(#crate_name::RuleListenerQuery {
                             query: #rule_listener_queries.into(),
-                            match_by: #crate_name::MatchBy::PerCapture {
-                                capture_name: #rule_listener_capture_names,
-                            },
+                            match_by: #rule_listener_match_bys,
                         }),*
                     ],
                     #(#rule_instance_state_field_names: #rule_instance_state_field_initializers),*
@@ -616,16 +631,42 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     let listener_indices = 0..rule.listeners.len();
     let listener_callbacks = rule.listeners.iter().map(|listener| {
         let mut callback_body = listener.callback.body.clone();
+
         SelfAccessRewriter { rule }.visit_expr_mut(&mut callback_body);
-        callback_body
-    });
-    quote! {
-        impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures, context: &mut #crate_name::QueryMatchContext) {
+
+        let node_in_scope = if listener.is_per_match() {
+            quote!()
+        } else {
+            quote! {
                 let node = match node_or_captures {
                     #crate_name::NodeOrCaptures::Node(node) => node,
                     _ => panic!("Expected node"),
                 };
+            }
+        };
+
+        let captures_in_scope = if listener.is_per_match() {
+            quote! {
+                let captures = match node_or_captures {
+                    #crate_name::NodeOrCaptures::Captures(captures) => captures,
+                    _ => panic!("Expected captures"),
+                };
+            }
+        } else {
+            quote!()
+        };
+
+        quote! {
+            #node_in_scope
+
+            #captures_in_scope
+
+            #callback_body
+        }
+    });
+    quote! {
+        impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
+            fn on_query_match(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures, context: &mut #crate_name::QueryMatchContext) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks

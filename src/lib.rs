@@ -14,7 +14,6 @@ mod tests;
 mod violation;
 
 use std::{
-    borrow::Cow,
     cmp::Ordering,
     collections::HashMap,
     fs,
@@ -31,8 +30,7 @@ pub use context::QueryMatchContext;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
-use regex::Regex;
-use rule::{Captures, InstantiatedRule, ResolvedRuleListenerQuery};
+use rule::{Captures, InstantiatedRule};
 pub use rule::{
     FileRunInfo, MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile,
     RuleListenerQuery, RuleMeta,
@@ -50,9 +48,6 @@ pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
 
 use crate::rule::ResolvedMatchBy;
-
-const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
-const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
 
 pub fn run_and_output(config: Config) {
     let violations = run(&config);
@@ -430,7 +425,6 @@ fn get_tree_sitter_grep_args(
                 .map(|(&language, aggregated_query)| (language, aggregated_query.query.clone()))
                 .collect::<HashMap<_, _>>(),
         )
-        .capture_name(CAPTURE_NAME_FOR_TREE_SITTER_GREP)
         .maybe_language(language)
         .build()
         .unwrap()
@@ -627,24 +621,9 @@ impl<'a> AggregatedQueries<'a> {
                             capture_index_if_per_capture,
                         ));
                     }
-                    let query_text: Cow<'_, str> = match &rule_listener_query.match_by {
-                        ResolvedMatchBy::PerCapture { .. } => {
-                            let query_text_with_unified_capture_name =
-                                // TODO: cache these regexes (by capture name I guess?)
-                                Regex::new(&format!(r#"@{}\b"#, rule_listener_query.capture_name())).unwrap()
-                                    .replace_all(
-                                        &rule_listener_query.query_text,
-                                        CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,
-                                    );
-                            assert!(were_any_captures_replaced(
-                                &query_text_with_unified_capture_name,
-                                &rule_listener_query
-                            ));
-                            query_text_with_unified_capture_name
-                        }
-                        ResolvedMatchBy::PerMatch => Cow::Borrowed(&rule_listener_query.query_text),
-                    };
-                    per_language_builder.query_text.push_str(&query_text);
+                    per_language_builder
+                        .query_text
+                        .push_str(&rule_listener_query.query_text);
                     per_language_builder.query_text.push_str("\n\n");
                 }
             }
@@ -681,15 +660,4 @@ impl<'a> AggregatedQueries<'a> {
     pub fn get_query_for_language(&self, language: SupportedLanguage) -> Arc<Query> {
         self.per_language.get(&language).unwrap().query.clone()
     }
-}
-
-#[allow(clippy::ptr_arg)]
-fn were_any_captures_replaced(
-    query_text_with_unified_capture_name: &Cow<'_, str>,
-    _rule_listener: &ResolvedRuleListenerQuery,
-) -> bool {
-    // It's a presumed invariant of `Regex::replace_all()` that it returns a
-    // `Cow::Owned` iff it made any modifications to the original `&str` that it was
-    // passed
-    matches!(query_text_with_unified_capture_name, Cow::Owned(_))
 }
