@@ -1,4 +1,4 @@
-use std::{iter, sync::Arc};
+use std::{collections::HashMap, iter, sync::Arc};
 
 use derive_builder::Builder;
 use tree_sitter_grep::SupportedLanguage;
@@ -6,7 +6,7 @@ use tree_sitter_grep::SupportedLanguage;
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
     rule::{Rule, RuleOptions},
-    violation::ViolationWithContext,
+    violation::{MessageOrMessageId, ViolationWithContext},
     RuleConfiguration,
 };
 
@@ -140,6 +140,17 @@ fn assert_that_violation_matches_expected(
     if let Some(type_) = expected_violation.type_.as_ref() {
         assert_eq!(type_, violation.kind);
     }
+    if let Some(message_id) = expected_violation.message_id.as_ref() {
+        match &violation.message_or_message_id {
+            MessageOrMessageId::MessageId(violation_message_id) => {
+                assert_eq!(violation_message_id, message_id);
+            }
+            _ => panic!("Expected violation to use message ID"),
+        }
+    }
+    if let Some(data) = expected_violation.data.as_ref() {
+        assert_eq!(Some(data), violation.data.as_ref());
+    }
 }
 
 pub struct RuleTests {
@@ -212,6 +223,8 @@ pub struct RuleTestExpectedError {
     pub end_line: Option<usize>,
     pub end_column: Option<usize>,
     pub type_: Option<String>,
+    pub message_id: Option<String>,
+    pub data: Option<HashMap<String, String>>,
 }
 
 impl RuleTestExpectedError {

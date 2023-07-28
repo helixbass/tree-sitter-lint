@@ -311,3 +311,51 @@ fn test_rule_one_off_messages_interpolated() {
         },
     );
 }
+
+#[test]
+fn test_rule_tests_message_id_and_data() {
+    RuleTester::run(
+        rule! {
+            name => "has-interpolated-message",
+            messages => [
+                foo => "Interpolated {{ foo }}",
+            ],
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message_id => "foo",
+                        data => {
+                            foo => "bar",
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [
+                        {
+                            message_id => "foo",
+                            data => [
+                                foo => "bar",
+                            ]
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}

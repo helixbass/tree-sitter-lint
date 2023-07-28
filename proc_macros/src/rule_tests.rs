@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
@@ -92,6 +94,8 @@ enum InvalidRuleTestErrorSpec {
         end_line: Option<Expr>,
         end_column: Option<Expr>,
         type_: Option<Expr>,
+        message_id: Option<Expr>,
+        data: Option<HashMap<Expr, Expr>>,
     },
     Expr(Expr),
 }
@@ -107,6 +111,8 @@ impl Parse for InvalidRuleTestErrorSpec {
             let mut end_line: Option<Expr> = Default::default();
             let mut end_column: Option<Expr> = Default::default();
             let mut type_: Option<Expr> = Default::default();
+            let mut message_id: Option<Expr> = Default::default();
+            let mut data: Option<HashMap<Expr, Expr>> = Default::default();
             while !error_content.is_empty() {
                 let key: Ident = error_content.parse()?;
                 error_content.parse::<Token![=>]>()?;
@@ -129,6 +135,24 @@ impl Parse for InvalidRuleTestErrorSpec {
                     "type_" => {
                         type_ = Some(error_content.parse()?);
                     }
+                    "message_id" => {
+                        message_id = Some(error_content.parse()?);
+                    }
+                    "data" => {
+                        assert!(data.is_none(), "already saw 'data' key");
+                        let data = data.get_or_insert_with(Default::default);
+                        let data_content;
+                        bracketed!(data_content in error_content);
+                        while !data_content.is_empty() {
+                            let key: Expr = data_content.parse()?;
+                            data_content.parse::<Token![=>]>()?;
+                            let value: Expr = data_content.parse()?;
+                            data.insert(key, value);
+                            if !data_content.is_empty() {
+                                data_content.parse::<Token![,]>()?;
+                            }
+                        }
+                    }
                     _ => panic!("didn't expect key '{}'", key),
                 }
                 if !error_content.is_empty() {
@@ -142,6 +166,8 @@ impl Parse for InvalidRuleTestErrorSpec {
                 end_line,
                 end_column,
                 type_,
+                message_id,
+                data,
             }
         } else {
             Self::Expr(input.parse()?)
@@ -159,6 +185,8 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                 end_line,
                 end_column,
                 type_,
+                message_id,
+                data,
             } => {
                 let message = match message.as_ref() {
                     Some(message) => quote!(Some(#message.into())),
@@ -184,6 +212,25 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                     Some(type_) => quote!(Some(#type_)),
                     None => quote!(None),
                 };
+                let message_id = match message_id.as_ref() {
+                    Some(message_id) => quote!(Some(#message_id.into())),
+                    None => quote!(None),
+                };
+                let data = match data.as_ref() {
+                    Some(data) => {
+                        let data_keys = data.keys().map(|key| match key {
+                            Expr::Path(key) if key.path.get_ident().is_some() => {
+                                quote!(stringify!(#key))
+                            }
+                            _ => quote!(#key),
+                        });
+                        let data_values = data.values();
+                        quote! {
+                            Some([#((String::from(#data_keys), String::from(#data_values))),*].into())
+                        }
+                    }
+                    None => quote!(None),
+                };
                 quote! {
                     tree_sitter_lint::RuleTestExpectedError {
                         message: #message,
@@ -192,6 +239,8 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                         end_line: #end_line,
                         end_column: #end_column,
                         type_: #type_,
+                        message_id: #message_id,
+                        data: #data,
                     }
                 }
             }
