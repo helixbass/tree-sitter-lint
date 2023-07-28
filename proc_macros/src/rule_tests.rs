@@ -114,9 +114,19 @@ impl Parse for InvalidRuleTestErrorSpec {
             let mut message_id: Option<Expr> = Default::default();
             let mut data: Option<HashMap<Expr, Expr>> = Default::default();
             while !error_content.is_empty() {
-                let key: Ident = error_content.parse()?;
+                let key: Result<Ident, _> = error_content.parse();
+                let key = match key {
+                    Ok(key) => key.to_string(),
+                    Err(err) => {
+                        if error_content.parse::<Token![type]>().is_ok() {
+                            "type_".to_string()
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                };
                 error_content.parse::<Token![=>]>()?;
-                match &*key.to_string() {
+                match &*key {
                     "message" => {
                         message = Some(error_content.parse()?);
                     }
@@ -135,6 +145,9 @@ impl Parse for InvalidRuleTestErrorSpec {
                     "type_" => {
                         type_ = Some(error_content.parse()?);
                     }
+                    "type" => {
+                        type_ = Some(error_content.parse()?);
+                    }
                     "message_id" => {
                         message_id = Some(error_content.parse()?);
                     }
@@ -142,14 +155,27 @@ impl Parse for InvalidRuleTestErrorSpec {
                         assert!(data.is_none(), "already saw 'data' key");
                         let data = data.get_or_insert_with(Default::default);
                         let data_content;
-                        bracketed!(data_content in error_content);
-                        while !data_content.is_empty() {
-                            let key: Expr = data_content.parse()?;
-                            data_content.parse::<Token![=>]>()?;
-                            let value: Expr = data_content.parse()?;
-                            data.insert(key, value);
-                            if !data_content.is_empty() {
-                                data_content.parse::<Token![,]>()?;
+                        if error_content.peek(token::Brace) {
+                            braced!(data_content in error_content);
+                            while !data_content.is_empty() {
+                                let key: Expr = data_content.parse()?;
+                                data_content.parse::<Token![=>]>()?;
+                                let value: Expr = data_content.parse()?;
+                                data.insert(key, value);
+                                if !data_content.is_empty() {
+                                    data_content.parse::<Token![,]>()?;
+                                }
+                            }
+                        } else {
+                            bracketed!(data_content in error_content);
+                            while !data_content.is_empty() {
+                                let key: Expr = data_content.parse()?;
+                                data_content.parse::<Token![=>]>()?;
+                                let value: Expr = data_content.parse()?;
+                                data.insert(key, value);
+                                if !data_content.is_empty() {
+                                    data_content.parse::<Token![,]>()?;
+                                }
                             }
                         }
                     }
@@ -209,7 +235,7 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                     None => quote!(None),
                 };
                 let type_ = match type_.as_ref() {
-                    Some(type_) => quote!(Some(#type_)),
+                    Some(type_) => quote!(Some(#type_.into())),
                     None => quote!(None),
                 };
                 let message_id = match message_id.as_ref() {
