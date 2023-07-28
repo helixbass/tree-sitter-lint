@@ -1,5 +1,7 @@
 use std::{iter, sync::Arc};
 
+use tree_sitter_grep::SupportedLanguage;
+
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
     rule::{Rule, RuleOptions},
@@ -54,6 +56,7 @@ impl RuleTester {
                 }])
                 .build()
                 .unwrap(),
+            SupportedLanguage::Rust,
         );
         assert!(violations.is_empty());
     }
@@ -76,6 +79,7 @@ impl RuleTester {
                 .report_fixed_violations(true)
                 .build()
                 .unwrap(),
+            SupportedLanguage::Rust,
         );
         if let Some(expected_file_contents) = invalid_test.output.as_ref() {
             assert_eq!(&file_contents, expected_file_contents.as_bytes());
