@@ -10,7 +10,7 @@ use syn::{
     punctuated::Punctuated,
     token,
     visit_mut::{self, VisitMut},
-    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, Token, Type,
+    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
 };
 
 use crate::ArrowSeparatedKeyValuePairs;
@@ -413,6 +413,19 @@ fn get_rule_struct_definition(
     }
 }
 
+fn is_option_type(type_: &Type) -> bool {
+    match type_ {
+        Type::Path(type_path) => matches!(
+            type_path.path.segments.first(),
+            Some(first_segment) if matches!(
+                &first_segment.arguments,
+                PathArguments::AngleBracketed(_)
+            ) && first_segment.ident.to_string() == "Option"
+        ),
+        _ => false,
+    }
+}
+
 fn get_rule_rule_impl(
     rule: &Rule,
     rule_struct_name: &Ident,
@@ -453,10 +466,18 @@ fn get_rule_rule_impl(
     let maybe_deserialize_options = match rule.options_type.as_ref() {
         None => quote!(),
         Some(options_type) => {
-            quote! {
-                let options: #options_type = options.map(|options| {
-                    #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
-                }).unwrap();
+            if is_option_type(options_type) {
+                quote! {
+                    let options: #options_type = options.map(|options| {
+                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                    });
+                }
+            } else {
+                quote! {
+                    let options: #options_type = options.map(|options| {
+                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                    }).unwrap();
+                }
             }
         }
     };

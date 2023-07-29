@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter, sync::Arc};
+use std::{iter, sync::Arc};
 
 use derive_builder::Builder;
 use tree_sitter_grep::SupportedLanguage;
@@ -6,7 +6,7 @@ use tree_sitter_grep::SupportedLanguage;
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
     rule::{Rule, RuleOptions},
-    violation::{MessageOrMessageId, ViolationWithContext},
+    violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
     RuleConfiguration,
 };
 
@@ -224,7 +224,7 @@ pub struct RuleTestExpectedError {
     pub end_column: Option<usize>,
     pub type_: Option<String>,
     pub message_id: Option<String>,
-    pub data: Option<HashMap<String, String>>,
+    pub data: Option<ViolationData>,
 }
 
 impl RuleTestExpectedError {

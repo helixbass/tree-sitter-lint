@@ -3,17 +3,18 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    braced,
     parse::{Parse, ParseStream},
     parse_macro_input, Expr, Ident, Token,
 };
+
+use crate::shared::{parse_data, ExprOrIdent};
 
 struct Violation {
     message: Option<Expr>,
     message_id: Option<Expr>,
     node: Expr,
     fix: Option<Expr>,
-    data: Option<HashMap<Expr, Expr>>,
+    data: Option<HashMap<ExprOrIdent, Expr>>,
 }
 
 impl Parse for Violation {
@@ -22,7 +23,7 @@ impl Parse for Violation {
         let mut message_id: Option<Expr> = Default::default();
         let mut node: Option<Expr> = Default::default();
         let mut fix: Option<Expr> = Default::default();
-        let mut data: Option<HashMap<Expr, Expr>> = Default::default();
+        let mut data: Option<HashMap<ExprOrIdent, Expr>> = Default::default();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -45,19 +46,9 @@ impl Parse for Violation {
                     fix = Some(input.parse()?);
                 }
                 "data" => {
-                    assert!(data.is_none(), "Already saw 'data'");
+                    assert!(data.is_none(), "already saw 'data' key");
                     let data = data.get_or_insert_with(Default::default);
-                    let data_content;
-                    braced!(data_content in input);
-                    while !data_content.is_empty() {
-                        let key: Expr = data_content.parse()?;
-                        data_content.parse::<Token![=>]>()?;
-                        let value: Expr = data_content.parse()?;
-                        data.insert(key, value);
-                        if !data_content.is_empty() {
-                            data_content.parse::<Token![,]>()?;
-                        }
-                    }
+                    parse_data(data, input)?;
                 }
                 _ => panic!("Unexpected key: '{key}'"),
             }
@@ -99,12 +90,15 @@ pub fn violation_with_crate_name(input: TokenStream, crate_name: &str) -> TokenS
     let data = match violation.data.as_ref() {
         Some(data) => {
             let data_keys = data.keys().map(|key| match key {
-                Expr::Path(key) if key.path.get_ident().is_some() => quote!(stringify!(#key)),
+                ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+                ExprOrIdent::Expr(Expr::Path(key)) if key.path.get_ident().is_some() => {
+                    quote!(stringify!(#key))
+                }
                 _ => quote!(#key),
             });
             let data_values = data.values();
             quote! {
-                .data([#((String::from(#data_keys), String::from(#data_values))),*])
+                .data([#((#data_keys.to_string(), #data_values.to_string())),*])
             }
         }
         None => quote!(),

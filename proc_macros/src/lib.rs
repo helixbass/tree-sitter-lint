@@ -4,6 +4,7 @@ mod builder_args;
 mod helpers;
 mod rule;
 mod rule_tests;
+mod shared;
 mod violation;
 
 use helpers::ArrowSeparatedKeyValuePairs;
