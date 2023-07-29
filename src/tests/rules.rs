@@ -514,3 +514,46 @@ fn test_rule_options_optional() {
         },
     );
 }
+
+#[test]
+fn test_rule_messages_multiple_interpolations() {
+    RuleTester::run(
+        rule! {
+            name => "has-interpolated-message",
+            messages => [
+                interpolated => "{{ leading }} interpolated {{ middle }} and {{ trailing }}",
+            ],
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message_id => "interpolated",
+                        data => {
+                            leading => "foo",
+                            middle => "bar",
+                            trailing => "baz",
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [r#"foo interpolated bar and baz"#],
+                },
+            ]
+        },
+    );
+}
