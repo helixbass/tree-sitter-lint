@@ -521,7 +521,7 @@ fn test_rule_messages_multiple_interpolations() {
         rule! {
             name => "has-interpolated-message",
             messages => [
-                interpolated => "{{ leading }} interpolated {{ middle }} and {{ trailing }}",
+                interpolated => "{{ leading }} interpolated {{ middle }}{{ adjacent }} {{ single_space }} and {{ trailing }}",
             ],
             listeners => [
                 r#"(
@@ -533,7 +533,9 @@ fn test_rule_messages_multiple_interpolations() {
                         data => {
                             leading => "foo",
                             middle => "bar",
-                            trailing => "baz",
+                            adjacent => "baz",
+                            single_space => "quux",
+                            trailing => "whee",
                         }
                     });
                 }
@@ -551,7 +553,7 @@ fn test_rule_messages_multiple_interpolations() {
                     code => r#"
                         fn whee() {}
                     "#,
-                    errors => [r#"foo interpolated bar and baz"#],
+                    errors => [r#"foo interpolated barbaz quux and whee"#],
                 },
             ]
         },
