@@ -5,7 +5,9 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, token, Expr, Ident, Token,
+    parse_macro_input,
+    spanned::Spanned,
+    token, Expr, Ident, Token,
 };
 
 struct RuleOptions {
@@ -86,6 +88,33 @@ impl ToTokens for ValidRuleTestSpec {
     }
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum ExprOrIdent {
+    Expr(Expr),
+    Ident(Ident),
+}
+
+impl ToTokens for ExprOrIdent {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Expr(expr) => expr.to_tokens(tokens),
+            Self::Ident(ident) => ident.to_tokens(tokens),
+        }
+    }
+}
+
+impl From<Expr> for ExprOrIdent {
+    fn from(value: Expr) -> Self {
+        Self::Expr(value)
+    }
+}
+
+impl From<Ident> for ExprOrIdent {
+    fn from(value: Ident) -> Self {
+        Self::Ident(value)
+    }
+}
+
 enum InvalidRuleTestErrorSpec {
     Fields {
         message: Option<Expr>,
@@ -95,7 +124,7 @@ enum InvalidRuleTestErrorSpec {
         end_column: Option<Expr>,
         type_: Option<Expr>,
         message_id: Option<Expr>,
-        data: Option<HashMap<Expr, Expr>>,
+        data: Option<HashMap<ExprOrIdent, Expr>>,
     },
     Expr(Expr),
 }
@@ -112,7 +141,7 @@ impl Parse for InvalidRuleTestErrorSpec {
             let mut end_column: Option<Expr> = Default::default();
             let mut type_: Option<Expr> = Default::default();
             let mut message_id: Option<Expr> = Default::default();
-            let mut data: Option<HashMap<Expr, Expr>> = Default::default();
+            let mut data: Option<HashMap<ExprOrIdent, Expr>> = Default::default();
             while !error_content.is_empty() {
                 let key: Result<Ident, _> = error_content.parse();
                 let key = match key {
@@ -158,7 +187,17 @@ impl Parse for InvalidRuleTestErrorSpec {
                         if error_content.peek(token::Brace) {
                             braced!(data_content in error_content);
                             while !data_content.is_empty() {
-                                let key: Expr = data_content.parse()?;
+                                let key: Result<Expr, _> = data_content.parse();
+                                let key: ExprOrIdent = match key {
+                                    Ok(key) => Ok(key.into()),
+                                    Err(err) => {
+                                        if let Ok(key) = data_content.parse::<Token![type]>() {
+                                            Ok(Ident::new("type_", key.span()).into())
+                                        } else {
+                                            Err(err)
+                                        }
+                                    }
+                                }?;
                                 data_content.parse::<Token![=>]>()?;
                                 let value: Expr = data_content.parse()?;
                                 data.insert(key, value);
@@ -169,7 +208,17 @@ impl Parse for InvalidRuleTestErrorSpec {
                         } else {
                             bracketed!(data_content in error_content);
                             while !data_content.is_empty() {
-                                let key: Expr = data_content.parse()?;
+                                let key: Result<Expr, _> = data_content.parse();
+                                let key: ExprOrIdent = match key {
+                                    Ok(key) => Ok(key.into()),
+                                    Err(err) => {
+                                        if let Ok(key) = data_content.parse::<Token![type]>() {
+                                            Ok(Ident::new("type_", key.span()).into())
+                                        } else {
+                                            Err(err)
+                                        }
+                                    }
+                                }?;
                                 data_content.parse::<Token![=>]>()?;
                                 let value: Expr = data_content.parse()?;
                                 data.insert(key, value);
@@ -245,7 +294,8 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                 let data = match data.as_ref() {
                     Some(data) => {
                         let data_keys = data.keys().map(|key| match key {
-                            Expr::Path(key) if key.path.get_ident().is_some() => {
+                            ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+                            ExprOrIdent::Expr(Expr::Path(key)) if key.path.get_ident().is_some() => {
                                 quote!(stringify!(#key))
                             }
                             _ => quote!(#key),
