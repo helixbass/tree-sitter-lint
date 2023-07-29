@@ -359,3 +359,90 @@ fn test_rule_tests_message_id_and_data() {
         },
     );
 }
+
+#[test]
+fn test_violation_type() {
+    RuleTester::run(
+        rule! {
+            name => "reports-functions",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "whee",
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [
+                        {
+                            type => "function_item",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_data_key_named_type() {
+    RuleTester::run(
+        rule! {
+            name => "has-interpolated-message",
+            messages => [
+                foo => "Interpolated {{ type }}",
+            ],
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message_id => "foo",
+                        data => {
+                            type => "bar",
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [
+                        {
+                            message_id => "foo",
+                            data => [
+                                type => "bar",
+                            ]
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
