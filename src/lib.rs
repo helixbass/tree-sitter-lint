@@ -30,7 +30,7 @@ use rule::{FileRunInfo, InstantiatedRule, RuleInstancePerFile};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use tree_sitter_grep::SupportedLanguage;
-use violation::{ViolationBuilder, ViolationWithContext};
+use violation::ViolationWithContext;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
@@ -168,6 +168,7 @@ impl AllInstantiatedPerFileRules {
             .or_insert_with(|| {
                 instantiated_rule
                     .rule_instance
+                    .clone()
                     .instantiate_per_file(&FileRunInfo {})
             })
             .clone()
@@ -217,6 +218,7 @@ fn run_fixing_loop(
                     .or_insert_with(|| {
                         instantiated_rule
                             .rule_instance
+                            .clone()
                             .instantiate_per_file(&FileRunInfo {})
                     })
                     .on_query_match(
@@ -271,6 +273,7 @@ pub fn run_for_slice(
                 .or_insert_with(|| {
                     instantiated_rule
                         .rule_instance
+                        .clone()
                         .instantiate_per_file(&FileRunInfo {})
                 })
                 .on_query_match(
@@ -318,6 +321,7 @@ pub fn run_fixing_for_slice(
                 .or_insert_with(|| {
                     instantiated_rule
                         .rule_instance
+                        .clone()
                         .instantiate_per_file(&FileRunInfo {})
                 })
                 .on_query_match(
@@ -507,7 +511,7 @@ impl<'a> AggregatedQueries<'a> {
         let language = language.language();
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for (rule_listener_index, rule_listener_query) in instantiated_rule
-                .rule
+                .rule_instance
                 .listener_queries()
                 .iter()
                 .map(|rule_listener_query| rule_listener_query.resolve(language))

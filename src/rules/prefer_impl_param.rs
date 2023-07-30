@@ -1,13 +1,9 @@
 use std::sync::Arc;
 
+use proc_macros::rule;
 use tree_sitter::Node;
-use tree_sitter_grep::SupportedLanguage;
 
-use crate::{
-    context::QueryMatchContext,
-    rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta},
-    Config, ViolationBuilder,
-};
+use crate::{rule::Rule, violation};
 
 #[macro_export]
 macro_rules! assert_node_kind {
@@ -87,51 +83,26 @@ macro_rules! return_if_none {
     };
 }
 
-pub struct PreferImplParamRule {
-    listener_queries: Vec<RuleListenerQuery>,
-}
-
-impl Rule for PreferImplParamRule {
-    fn meta(&self) -> RuleMeta {
-        RuleMeta {
-            name: "prefer_impl_param".to_owned(),
-            fixable: false,
-            languages: vec![SupportedLanguage::Rust],
-        }
-    }
-
-    fn listener_queries(&self) -> &[RuleListenerQuery] {
-        &self.listener_queries
-    }
-
-    fn instantiate(&self, _config: &Config) -> Arc<dyn RuleInstance> {
-        Arc::new(PreferImplParamRuleInstance)
-    }
-}
-
-struct PreferImplParamRuleInstance;
-
-impl RuleInstance for PreferImplParamRuleInstance {
-    fn instantiate_per_file(&self, _file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile> {
-        Arc::new(PreferImplParamRuleInstancePerFile)
-    }
-}
-
-struct PreferImplParamRuleInstancePerFile;
-
-impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
-    fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext) {
-        match listener_index {
-            0 => {
+pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
+    rule! {
+        name => "prefer_impl_param",
+        listeners => [
+            r#"(
+              (function_item
+                type_parameters: (type_parameters
+                  (constrained_type_parameter) @c
+                )
+              )
+            )"# => |node, context| {
                 let type_parameter_name =
                     context.get_node_text(get_constrained_type_parameter_name(node));
                 return_if_none!(context.maybe_get_single_matching_node_for_query(
-                            &*format!(
-                              r#"(
-                                (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                            ),
-                            get_parameters_node_of_enclosing_function(node)
-                        ));
+                    &*format!(
+                      r#"(
+                        (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                    ),
+                    get_parameters_node_of_enclosing_function(node)
+                ));
                 if let Some(return_type_node) =
                     maybe_get_return_type_node_of_enclosing_function(node)
                 {
@@ -141,24 +112,24 @@ impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
                         return;
                     }
                     if context.get_number_of_query_matches(
-                                &*format!(
-                                  r#"(
-                                    (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                                ),
-                                return_type_node
-                            ) > 0 {
-                                return;
-                            }
+                        &*format!(
+                          r#"(
+                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                        ),
+                        return_type_node
+                    ) > 0 {
+                        return;
+                    }
                 }
                 let type_parameters_node =
                     assert_node_kind!(node.parent().unwrap(), "type_parameters");
                 let only_found_the_defining_usage_in_the_type_parameters = context.maybe_get_single_matching_node_for_query(
-                            &*format!(
-                              r#"(
-                                (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                            ),
-                            type_parameters_node
-                        ).is_some();
+                    &*format!(
+                      r#"(
+                        (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                    ),
+                    type_parameters_node
+                ).is_some();
                 if !only_found_the_defining_usage_in_the_type_parameters {
                     return;
                 }
@@ -166,41 +137,23 @@ impl RuleInstancePerFile for PreferImplParamRuleInstancePerFile {
                     maybe_get_where_clause_node_of_enclosing_function(node)
                 {
                     if context.get_number_of_query_matches(
-                                &*format!(
-                                  r#"(
-                                    (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
-                                ),
-                                where_clause_node
-                            ) > 0 {
-                                return;
-                            }
+                        &*format!(
+                          r#"(
+                            (type_identifier) @type_parameter_usage (#eq? @type_parameter_usage "{type_parameter_name}"))"#
+                        ),
+                        where_clause_node
+                    ) > 0 {
+                        return;
+                    }
                 }
                 context.report(
-                    ViolationBuilder::default()
-                        .message(r#"Prefer using 'param: impl Trait'"#)
-                        .node(node)
-                        .build()
-                        .unwrap(),
+                    violation! {
+                        message => r#"Prefer using 'param: impl Trait'"#,
+                        node => node,
+                    }
                 );
             }
-            _ => unreachable!(),
-        }
-    }
-}
-
-pub fn prefer_impl_param_rule() -> PreferImplParamRule {
-    PreferImplParamRule {
-        listener_queries: vec![RuleListenerQuery {
-            query: r#"(
-                  (function_item
-                    type_parameters: (type_parameters
-                      (constrained_type_parameter) @c
-                    )
-                  )
-                )"#
-            .to_owned(),
-            capture_name: None,
-        }],
+        ]
     }
 }
 
