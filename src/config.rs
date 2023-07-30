@@ -1,21 +1,23 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use derive_builder::Builder;
-use tree_sitter_grep::SupportedLanguage;
 
 use crate::{
-    rule::{ResolvedRule, Rule},
+    rule::{InstantiatedRule, Rule},
     rules::{no_default_default_rule, no_lazy_static_rule, prefer_impl_param_rule},
 };
 
 #[derive(Builder, Parser)]
 #[builder(setter(strip_option, into))]
 pub struct Config {
-    #[arg(short, long, value_enum)]
-    pub language: SupportedLanguage,
-
     #[arg(long)]
     #[builder(default)]
     pub rule: Option<String>,
+
+    #[arg(skip)]
+    #[builder(default)]
+    rules: Option<Vec<Arc<dyn Rule>>>,
 
     #[arg(long)]
     #[builder(default)]
@@ -27,26 +29,31 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn get_resolved_rules(&self) -> Vec<ResolvedRule> {
-        let resolved_rules = get_rules()
+    fn rules(&self) -> Vec<Arc<dyn Rule>> {
+        self.rules.clone().unwrap_or_else(get_dummy_rules)
+    }
+
+    pub fn get_instantiated_rules(&self) -> Vec<InstantiatedRule> {
+        let instantiated_rules = self
+            .rules()
             .into_iter()
+            .map(|rule| InstantiatedRule::new(rule, self))
             .filter(|rule| match self.rule.as_ref() {
                 Some(rule_arg) => &rule.meta.name == rule_arg,
                 None => true,
             })
-            .map(|rule| rule.resolve(self))
             .collect::<Vec<_>>();
-        if resolved_rules.is_empty() {
+        if instantiated_rules.is_empty() {
             panic!("Invalid rule name: {:?}", self.rule.as_ref().unwrap());
         }
-        resolved_rules
+        instantiated_rules
     }
 }
 
-fn get_rules() -> Vec<Rule> {
+fn get_dummy_rules() -> Vec<Arc<dyn Rule>> {
     vec![
-        no_default_default_rule(),
-        no_lazy_static_rule(),
-        prefer_impl_param_rule(),
+        Arc::new(no_default_default_rule()),
+        Arc::new(no_lazy_static_rule()),
+        Arc::new(prefer_impl_param_rule()),
     ]
 }

@@ -1,17 +1,15 @@
-use std::iter;
-
-use tree_sitter_grep::SupportedLanguage;
+use std::{iter, sync::Arc};
 
 use crate::{config::ConfigBuilder, rule::Rule, violation::ViolationWithContext};
 
 pub struct RuleTester {
-    rule: Rule,
+    rule: Arc<dyn Rule>,
     rule_tests: RuleTests,
 }
 
 impl RuleTester {
-    fn new(rule: Rule, rule_tests: RuleTests) -> Self {
-        if !rule.meta.fixable
+    fn new(rule: Arc<dyn Rule>, rule_tests: RuleTests) -> Self {
+        if !rule.meta().fixable
             && rule_tests
                 .invalid_tests
                 .iter()
@@ -22,8 +20,8 @@ impl RuleTester {
         Self { rule, rule_tests }
     }
 
-    pub fn run(rule: Rule, rule_tests: RuleTests) {
-        Self::new(rule, rule_tests).run_tests()
+    pub fn run(rule: impl Rule + 'static, rule_tests: RuleTests) {
+        Self::new(Arc::new(rule), rule_tests).run_tests()
     }
 
     fn run_tests(&self) {
@@ -41,8 +39,7 @@ impl RuleTester {
             valid_test.code.as_bytes(),
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta.name)
-                .language(SupportedLanguage::Rust)
+                .rule(&self.rule.meta().name)
                 .build()
                 .unwrap(),
         );
@@ -55,8 +52,7 @@ impl RuleTester {
             &mut file_contents,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta.name)
-                .language(SupportedLanguage::Rust)
+                .rule(&self.rule.meta().name)
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()

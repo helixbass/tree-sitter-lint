@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use derive_builder::Builder;
-use tree_sitter::{Node, Query};
+use tree_sitter::{Language, Node, Query};
+use tree_sitter_grep::SupportedLanguage;
 
 use crate::{context::QueryMatchContext, Config};
 
@@ -9,146 +9,72 @@ use crate::{context::QueryMatchContext, Config};
 pub struct RuleMeta {
     pub name: String,
     pub fixable: bool,
+    pub languages: Vec<SupportedLanguage>,
 }
 
-pub struct Rule {
+pub trait Rule: Send + Sync {
+    fn meta(&self) -> RuleMeta;
+    fn listener_queries(&self) -> &[RuleListenerQuery];
+    fn instantiate(&self, config: &Config) -> Arc<dyn RuleInstance>;
+}
+
+pub trait RuleInstance: Send + Sync {
+    fn instantiate_per_file(&self, file_run_info: &FileRunInfo) -> Arc<dyn RuleInstancePerFile>;
+}
+
+pub struct InstantiatedRule {
     pub meta: RuleMeta,
-    #[allow(clippy::type_complexity)]
-    pub create: Arc<dyn Fn(&Config) -> Vec<RuleListener>>,
+    pub rule: Arc<dyn Rule>,
+    pub rule_instance: Arc<dyn RuleInstance>,
 }
 
-impl Rule {
-    pub fn resolve(self, config: &Config) -> ResolvedRule<'_> {
-        let Rule { meta, create } = self;
-
-        ResolvedRule::new(
-            meta,
-            create(config)
-                .into_iter()
-                .map(|rule_listener| rule_listener.resolve(config))
-                .collect(),
-        )
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct RuleBuilder {
-    name: Option<String>,
-    fixable: bool,
-    #[allow(clippy::type_complexity)]
-    create: Option<Arc<dyn Fn(&Config) -> Vec<RuleListener>>>,
-}
-
-impl RuleBuilder {
-    pub fn name(&mut self, name: impl Into<String>) -> &mut Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    pub fn fixable(&mut self, fixable: bool) -> &mut Self {
-        self.fixable = fixable;
-        self
-    }
-
-    pub fn create(
-        &mut self,
-        callback: impl Fn(&Config) -> Vec<RuleListener> + 'static,
-    ) -> &mut Self {
-        self.create = Some(Arc::new(callback));
-        self
-    }
-
-    pub fn build(&self) -> Result<Rule, ()> {
-        Ok(Rule {
-            meta: RuleMeta {
-                name: self.name.clone().ok_or(())?,
-                fixable: self.fixable,
-            },
-            create: self.create.clone().ok_or(())?,
-        })
-    }
-}
-
-#[macro_export]
-macro_rules! rule {
-    ($($variant:ident => $value:expr),* $(,)?) => {
-        proc_macros::builder_args!(
-            $crate::rule::RuleBuilder,
-            $($variant => $value),*,
-        )
-    }
-}
-
-pub struct ResolvedRule<'a> {
-    pub meta: RuleMeta,
-    pub listeners: Vec<ResolvedRuleListener<'a>>,
-}
-
-impl<'a> ResolvedRule<'a> {
-    pub fn new(meta: RuleMeta, listeners: Vec<ResolvedRuleListener<'a>>) -> Self {
-        Self { meta, listeners }
-    }
-}
-
-type OnQueryMatchCallback<'a> = Arc<dyn Fn(Node, &mut QueryMatchContext) + 'a + Send + Sync>;
-
-#[derive(Builder)]
-#[builder(setter(into, strip_option))]
-pub struct RuleListener<'a> {
-    pub query: String,
-    #[builder(default)]
-    pub capture_name: Option<String>,
-    #[builder(setter(custom))]
-    pub on_query_match: OnQueryMatchCallback<'a>,
-}
-
-impl<'a> RuleListener<'a> {
-    pub fn resolve(self, config: &Config) -> ResolvedRuleListener<'a> {
-        let RuleListener {
-            query: query_text,
-            capture_name,
-            on_query_match,
-        } = self;
-        let query = Query::new(config.language.language(), &query_text).unwrap();
-        let capture_index = match capture_name {
-            None => match query.capture_names().len() {
-                0 => panic!("Expected capture"),
-                _ => 0,
-            },
-            Some(capture_name) => query.capture_index_for_name(&capture_name).unwrap(),
-        };
-        ResolvedRuleListener {
-            query,
-            query_text,
-            capture_index,
-            on_query_match,
+impl InstantiatedRule {
+    pub fn new(rule: Arc<dyn Rule>, config: &Config) -> Self {
+        Self {
+            meta: rule.meta(),
+            rule_instance: rule.instantiate(config),
+            rule,
         }
     }
 }
 
-impl<'a> RuleListenerBuilder<'a> {
-    pub fn on_query_match(
-        &mut self,
-        callback: impl Fn(Node, &mut QueryMatchContext) + 'a + Send + Sync,
-    ) -> &mut Self {
-        self.on_query_match = Some(Arc::new(callback));
-        self
+pub trait RuleInstancePerFile: Send + Sync {
+    fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext);
+}
+
+pub struct FileRunInfo {}
+
+pub struct RuleListenerQuery {
+    pub query: String,
+    pub capture_name: Option<String>,
+}
+
+impl RuleListenerQuery {
+    pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
+        let query = Query::new(language, &self.query).unwrap();
+        let capture_index = match self.capture_name.as_ref() {
+            None => match query.capture_names().len() {
+                0 => panic!("Expected capture"),
+                _ => 0,
+            },
+            Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+        };
+        ResolvedRuleListenerQuery {
+            query,
+            query_text: self.query.clone(),
+            capture_index,
+        }
     }
 }
 
-#[macro_export]
-macro_rules! rule_listener {
-    ($($variant:ident => $value:expr),* $(,)?) => {
-        proc_macros::builder_args!(
-            $crate::rule::RuleListenerBuilder,
-            $($variant => $value),*,
-        )
-    }
-}
-
-pub struct ResolvedRuleListener<'a> {
+pub struct ResolvedRuleListenerQuery {
     pub query: Query,
     pub query_text: String,
     pub capture_index: u32,
-    pub on_query_match: OnQueryMatchCallback<'a>,
+}
+
+impl ResolvedRuleListenerQuery {
+    pub fn capture_name(&self) -> &str {
+        &self.query.capture_names()[self.capture_index as usize]
+    }
 }
