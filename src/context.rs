@@ -134,6 +134,14 @@ impl<'a> QueryMatchContext<'a> {
     pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
         self.pending_fixes
     }
+
+    pub fn has_named_child_of_kind(&self, node: Node, kind: &str) -> bool {
+        let mut cursor = node.walk();
+        let ret = node
+            .named_children(&mut cursor)
+            .any(|child| child.kind() == kind);
+        ret
+    }
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
