@@ -63,7 +63,7 @@ impl<'a> QueryMatchContext<'a> {
             .push(violation);
     }
 
-    pub fn get_node_text(&self, node: Node) -> &str {
+    pub fn get_node_text(&self, node: Node) -> &'a str {
         match &self.file_contents {
             RopeOrSlice::Slice(file_contents) => node.utf8_text(file_contents).unwrap(),
             RopeOrSlice::Rope(_) => unimplemented!(),
