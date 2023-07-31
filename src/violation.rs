@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, path::PathBuf, rc::Rc};
 
 use derive_builder::Builder;
+use tree_sitter_grep::tree_sitter::Range;
 
 use crate::{
     config::PluginIndex,
@@ -20,6 +21,8 @@ pub struct Violation<'a> {
     pub fix: Option<Rc<dyn Fn(&mut Fixer) + 'a>>,
     #[builder(default)]
     pub data: Option<ViolationData>,
+    #[builder(default)]
+    pub range: Option<Range>,
 }
 
 impl<'a> Violation<'a> {
@@ -32,10 +35,11 @@ impl<'a> Violation<'a> {
             node,
             fix,
             data,
+            range,
         } = self;
         ViolationWithContext {
             message_or_message_id,
-            range: node.range(),
+            range: range.unwrap_or_else(|| node.range()),
             kind: node.kind(),
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),

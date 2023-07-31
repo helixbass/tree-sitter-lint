@@ -1,4 +1,8 @@
-use std::{ops, path::Path};
+use std::{
+    cell::{Ref, RefCell},
+    ops,
+    path::Path,
+};
 
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::TreeCursor, RopeOrSlice, SupportedLanguage,
@@ -17,8 +21,8 @@ pub struct QueryMatchContext<'a> {
     pub rule: &'a InstantiatedRule,
     config: &'a Config,
     pub language: SupportedLanguage,
-    pending_fixes: Option<Vec<PendingFix>>,
-    pub violations: Option<Vec<ViolationWithContext>>,
+    pending_fixes: RefCell<Option<Vec<PendingFix>>>,
+    pub violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
 impl<'a> QueryMatchContext<'a> {
@@ -41,7 +45,7 @@ impl<'a> QueryMatchContext<'a> {
         }
     }
 
-    pub fn report(&mut self, violation: Violation) {
+    pub fn report(&self, violation: Violation) {
         if self.config.fix {
             if let Some(fix) = violation.fix.as_ref() {
                 if !self.rule.meta.fixable {
@@ -51,6 +55,7 @@ impl<'a> QueryMatchContext<'a> {
                 fix(&mut fixer);
                 if let Some(pending_fixes) = fixer.into_pending_fixes() {
                     self.pending_fixes
+                        .borrow_mut()
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
@@ -61,6 +66,7 @@ impl<'a> QueryMatchContext<'a> {
         }
         let violation = violation.contextualize(self);
         self.violations
+            .borrow_mut()
             .get_or_insert_with(Default::default)
             .push(violation);
     }
@@ -126,12 +132,12 @@ impl<'a> QueryMatchContext<'a> {
         .count()
     }
 
-    pub fn pending_fixes(&self) -> Option<&[PendingFix]> {
-        self.pending_fixes.as_deref()
+    pub fn pending_fixes(&self) -> Ref<Option<Vec<PendingFix>>> {
+        self.pending_fixes.borrow()
     }
 
     pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
-        self.pending_fixes
+        self.pending_fixes.into_inner()
     }
 
     pub fn has_named_child_of_kind(&self, node: Node, kind: &str) -> bool {

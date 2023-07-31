@@ -559,3 +559,42 @@ fn test_rule_messages_multiple_interpolations() {
         },
     );
 }
+
+#[test]
+fn test_violation_range() {
+    RuleTester::run(
+        rule! {
+            name => "reports-range",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "whee",
+                        range => node.child_by_field_name("name").unwrap().range(),
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"fn whee() {}"#,
+                    errors => [
+                        {
+                            message => "whee",
+                            column => 4,
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
