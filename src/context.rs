@@ -1,9 +1,11 @@
 use std::{
+    borrow::Cow,
     cell::{Ref, RefCell},
     ops,
     path::Path,
 };
 
+use squalid::{IsEmpty, OptionExt};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::TreeCursor, RopeOrSlice, SupportedLanguage,
 };
@@ -46,6 +48,7 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn report(&self, violation: Violation) {
+        let mut had_fixes = false;
         if self.config.fix {
             if let Some(fix) = violation.fix.as_ref() {
                 if !self.rule.meta.fixable {
@@ -54,6 +57,7 @@ impl<'a> QueryMatchContext<'a> {
                 let mut fixer = Fixer::default();
                 fix(&mut fixer);
                 if let Some(pending_fixes) = fixer.into_pending_fixes() {
+                    had_fixes = true;
                     self.pending_fixes
                         .borrow_mut()
                         .get_or_insert_with(Default::default)
@@ -64,14 +68,14 @@ impl<'a> QueryMatchContext<'a> {
                 }
             }
         }
-        let violation = violation.contextualize(self);
+        let violation = violation.contextualize(self, had_fixes);
         self.violations
             .borrow_mut()
             .get_or_insert_with(Default::default)
             .push(violation);
     }
 
-    pub fn get_node_text(&self, node: Node) -> &'a str {
+    pub fn get_node_text(&self, node: Node) -> Cow<'a, str> {
         get_node_text(node, self.file_contents)
     }
 
@@ -150,6 +154,10 @@ impl<'a> QueryMatchContext<'a> {
 
     pub fn get_tokens(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
         get_tokens(node)
+    }
+
+    pub fn get_text_slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        get_text_slice(self.file_contents, range)
     }
 }
 
@@ -235,8 +243,20 @@ impl Fixer {
             .push(PendingFix::new(node.byte_range(), replacement.into()));
     }
 
-    pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
+    pub(crate) fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
         self.pending_fixes
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pending_fixes
+            .as_ref()
+            .is_none_or_matches(|pending_fixes| pending_fixes.is_empty())
+    }
+}
+
+impl IsEmpty for Fixer {
+    fn _is_empty(&self) -> bool {
+        self.is_empty()
     }
 }
 
@@ -252,10 +272,14 @@ impl PendingFix {
     }
 }
 
-fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> &'a str {
+fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> Cow<'a, str> {
+    get_text_slice(file_contents, node.byte_range())
+}
+
+fn get_text_slice(file_contents: RopeOrSlice, range: ops::Range<usize>) -> Cow<'_, str> {
     match file_contents {
-        RopeOrSlice::Slice(file_contents) => node.utf8_text(file_contents).unwrap(),
-        RopeOrSlice::Rope(_) => unimplemented!(),
+        RopeOrSlice::Slice(slice) => std::str::from_utf8(&slice[range]).unwrap().into(),
+        RopeOrSlice::Rope(rope) => rope.byte_slice(range).into(),
     }
 }
 

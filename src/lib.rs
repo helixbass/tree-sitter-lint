@@ -46,6 +46,7 @@ pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate clap;
 pub extern crate serde_json;
+pub extern crate serde_yaml;
 pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
@@ -267,7 +268,7 @@ fn run_fixing_loop<'a>(
         if config.report_fixed_violations {
             *violations = violations
                 .iter()
-                .filter(|violation| violation.was_fix)
+                .filter(|violation| violation.had_fixes)
                 .cloned()
                 .collect();
         } else {

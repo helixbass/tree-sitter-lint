@@ -98,11 +98,16 @@ impl RuleTester {
         );
         match invalid_test.output.as_ref() {
             Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
-                assert_eq!(&file_contents, expected_file_contents.as_bytes());
+                assert_eq!(
+                    std::str::from_utf8(&file_contents).unwrap(),
+                    expected_file_contents,
+                    "Didn't get expected output for code {:#?}, got: {violations:#?}",
+                    invalid_test.code
+                );
             }
             Some(RuleTestExpectedOutput::NoOutput) => {
                 assert!(
-                    !violations.iter().any(|violation| violation.was_fix),
+                    !violations.iter().any(|violation| violation.had_fixes),
                     "Unexpected fixing violation was reported"
                 );
             }
@@ -125,42 +130,81 @@ fn assert_that_violations_match_expected(
     let mut violations = violations.to_owned();
     violations.sort_by_key(|violation| violation.range);
     for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
-        assert_that_violation_matches_expected(&violation, expected_violation);
+        assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
     }
 }
 
 fn assert_that_violation_matches_expected(
     violation: &ViolationWithContext,
     expected_violation: &RuleTestExpectedError,
+    invalid_test: &RuleTestInvalid,
 ) {
     if let Some(message) = expected_violation.message.as_ref() {
-        assert_eq!(message, &violation.message());
+        assert_eq!(
+            message,
+            &violation.message(),
+            "Didn't get expected message for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(line) = expected_violation.line {
-        assert_eq!(line, violation.range.start_point.row + 1);
+        assert_eq!(
+            line,
+            violation.range.start_point.row + 1,
+            "Didn't get expected line for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(column) = expected_violation.column {
-        assert_eq!(column, violation.range.start_point.column + 1);
+        assert_eq!(
+            column,
+            violation.range.start_point.column + 1,
+            "Didn't get expected column for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(end_line) = expected_violation.end_line {
-        assert_eq!(end_line, violation.range.end_point.row + 1);
+        assert_eq!(
+            end_line,
+            violation.range.end_point.row + 1,
+            "Didn't get expected end line for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(end_column) = expected_violation.end_column {
-        assert_eq!(end_column, violation.range.end_point.column + 1);
+        assert_eq!(
+            end_column,
+            violation.range.end_point.column + 1,
+            "Didn't get expected end column for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(type_) = expected_violation.type_.as_ref() {
-        assert_eq!(type_, violation.kind);
+        assert_eq!(
+            type_, violation.kind,
+            "Didn't get expected type for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
     if let Some(message_id) = expected_violation.message_id.as_ref() {
         match &violation.message_or_message_id {
             MessageOrMessageId::MessageId(violation_message_id) => {
-                assert_eq!(violation_message_id, message_id);
+                assert_eq!(
+                    violation_message_id, message_id,
+                    "Didn't get expected message ID for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
             }
             _ => panic!("Expected violation to use message ID"),
         }
     }
     if let Some(data) = expected_violation.data.as_ref() {
-        assert_eq!(Some(data), violation.data.as_ref());
+        assert_eq!(
+            Some(data),
+            violation.data.as_ref(),
+            "Didn't get expected data for code {:#?}, got: {violation:#?}",
+            invalid_test.code,
+        );
     }
 }
 

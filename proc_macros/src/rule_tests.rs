@@ -43,7 +43,7 @@ impl ToTokens for RuleOptions {
             }
         };
         quote! {
-            serde_yaml::from_str(stringify!(#yaml)).unwrap()
+            tree_sitter_lint::serde_yaml::from_str(stringify!(#yaml)).unwrap()
         }
         .to_tokens(tokens)
     }

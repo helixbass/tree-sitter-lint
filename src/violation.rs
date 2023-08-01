@@ -29,13 +29,14 @@ impl<'a> Violation<'a> {
     pub fn contextualize(
         self,
         query_match_context: &QueryMatchContext<'a>,
+        had_fixes: bool,
     ) -> ViolationWithContext {
         let Violation {
             message_or_message_id,
             node,
-            fix,
             data,
             range,
+            ..
         } = self;
         ViolationWithContext {
             message_or_message_id,
@@ -44,7 +45,7 @@ impl<'a> Violation<'a> {
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
             plugin_index: query_match_context.rule.plugin_index,
-            was_fix: fix.is_some(),
+            had_fixes,
             data,
         }
     }
@@ -84,7 +85,7 @@ pub struct ViolationWithContext {
     pub path: PathBuf,
     pub rule: RuleMeta,
     pub plugin_index: Option<PluginIndex>,
-    pub was_fix: bool,
+    pub had_fixes: bool,
     pub kind: &'static str,
     pub data: Option<ViolationData>,
 }
