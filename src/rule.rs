@@ -21,7 +21,7 @@ pub trait RuleInstance: Send + Sync {
     fn instantiate_per_file(
         self: Arc<Self>,
         file_run_info: &FileRunInfo,
-    ) -> Arc<dyn RuleInstancePerFile>;
+    ) -> Box<dyn RuleInstancePerFile>;
     fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
@@ -43,7 +43,12 @@ impl InstantiatedRule {
 }
 
 pub trait RuleInstancePerFile: Send + Sync {
-    fn on_query_match(&self, listener_index: usize, node: Node, context: &mut QueryMatchContext);
+    fn on_query_match(
+        &mut self,
+        listener_index: usize,
+        node: Node,
+        context: &mut QueryMatchContext,
+    );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
 

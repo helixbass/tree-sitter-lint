@@ -4,30 +4,116 @@ use std::sync::Arc;
 
 use proc_macros::rule;
 
-use crate::{rule::Rule, run_fixing_for_slice, violation, ConfigBuilder};
+use crate::{rule::Rule, violation};
+
+#[macro_export]
+macro_rules! assert_fixed_content {
+    ($content:literal, $rules:expr, $output:literal $(,)?) => {{
+        let mut file_contents = $content.to_owned().into_bytes();
+        $crate::run_fixing_for_slice(
+            &mut file_contents,
+            "tmp.rs",
+            $crate::ConfigBuilder::default()
+                .rules($rules)
+                .fix(true)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            std::str::from_utf8(&file_contents).unwrap().trim(),
+            $output.trim()
+        );
+    }};
+}
 
 #[test]
 fn test_single_fix() {
-    let mut file_contents = r#"
-        fn foo() {}
-    "#
-    .to_owned()
-    .into_bytes();
-    run_fixing_for_slice(
-        &mut file_contents,
-        "tmp.rs",
-        ConfigBuilder::default()
-            .rules([create_identifier_replacing_rule("foo", "bar")])
-            .fix(true)
-            .build()
-            .unwrap(),
-    );
-    assert_eq!(
-        std::str::from_utf8(&file_contents).unwrap().trim(),
+    assert_fixed_content!(
+        r#"
+            fn foo() {}
+        "#,
+        [create_identifier_replacing_rule("foo", "bar")],
         r#"
             fn bar() {}
         "#
-        .trim()
+    );
+}
+
+#[test]
+fn test_cascading_fixes() {
+    assert_fixed_content!(
+        r#"
+            fn foo() {}
+        "#,
+        [
+            create_identifier_replacing_rule("foo", "bar"),
+            create_identifier_replacing_rule("bar", "baz"),
+        ],
+        r#"
+            fn baz() {}
+        "#
+    );
+}
+
+#[test]
+fn test_more_than_limit_fix_iterations() {
+    assert_fixed_content!(
+        r#"
+            fn foo() {}
+        "#,
+        [
+            create_identifier_replacing_rule("foo", "foo1"),
+            create_identifier_replacing_rule("foo1", "foo2"),
+            create_identifier_replacing_rule("foo2", "foo3"),
+            create_identifier_replacing_rule("foo3", "foo4"),
+            create_identifier_replacing_rule("foo4", "foo5"),
+            create_identifier_replacing_rule("foo5", "foo6"),
+            create_identifier_replacing_rule("foo6", "foo7"),
+            create_identifier_replacing_rule("foo7", "foo8"),
+            create_identifier_replacing_rule("foo8", "foo9"),
+            create_identifier_replacing_rule("foo9", "foo10"),
+            create_identifier_replacing_rule("foo10", "foo11"),
+            create_identifier_replacing_rule("foo11", "foo12"),
+        ],
+        r#"
+            fn foo10() {}
+        "#
+    );
+}
+
+#[test]
+fn test_conflicting_fixes() {
+    assert_fixed_content!(
+        r#"
+            fn start() {}
+        "#,
+        [
+            create_identifier_replacing_rule("start", "option1"),
+            create_identifier_replacing_rule("start", "option2"),
+            create_identifier_replacing_rule("option1", "end"),
+            create_identifier_replacing_rule("option2", "end"),
+        ],
+        r#"
+            fn end() {}
+        "#
+    );
+}
+
+#[test]
+fn test_multiple_nonconflicting_fixes_from_different_rules() {
+    assert_fixed_content!(
+        r#"
+            fn foo() {}
+            fn bar() {}
+        "#,
+        [
+            create_identifier_replacing_rule("foo", "baz"),
+            create_identifier_replacing_rule("bar", "byz")
+        ],
+        r#"
+            fn baz() {}
+            fn byz() {}
+        "#
     );
 }
 
