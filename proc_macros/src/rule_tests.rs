@@ -10,22 +10,40 @@ use syn::{
 
 use crate::shared::{parse_data, ExprOrIdent};
 
-struct RuleOptions {
-    options: Expr,
+enum RuleOptions {
+    Map(HashMap<ExprOrIdent, Expr>),
+    Expr(Expr),
 }
 
 impl Parse for RuleOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let options: Expr = input.parse()?;
-        Ok(Self { options })
+        Ok(if input.peek(token::Brace) {
+            let mut map: HashMap<ExprOrIdent, Expr> = Default::default();
+            parse_data(&mut map, input)?;
+            Self::Map(map)
+        } else {
+            let expr: Expr = input.parse()?;
+            Self::Expr(expr)
+        })
     }
 }
 
 impl ToTokens for RuleOptions {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let options = &self.options;
+        let yaml = match self {
+            RuleOptions::Map(map) => {
+                let keys = map.keys();
+                let values = map.values();
+                quote! {
+                    { #(#keys: #values),* }
+                }
+            }
+            RuleOptions::Expr(expr) => {
+                quote!(#expr)
+            }
+        };
         quote! {
-            #options.into()
+            serde_yaml::from_str(stringify!(#yaml)).unwrap()
         }
         .to_tokens(tokens)
     }

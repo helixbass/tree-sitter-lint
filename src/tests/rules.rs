@@ -6,6 +6,7 @@ use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
 };
+use serde::Deserialize;
 
 use crate::{rule::Rule, RuleTester};
 
@@ -593,6 +594,53 @@ fn test_violation_range() {
                             column => 4,
                         }
                     ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_options_struct() {
+    #[derive(Deserialize)]
+    struct Options {
+        whee: String,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "has-options-struct",
+            options_type => Options,
+            state => {
+                [per-run]
+                whee: String = options.whee,
+            },
+            languages => [Rust],
+            listeners => [
+                "(function_item) @c" => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => self.whee.clone(),
+                    });
+                }
+            ]
+        },
+        rule_tests! {
+            valid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                    "#,
+                    options => { whee => "abc" },
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn foo() {}
+                    "#,
+                    options => { whee => "def" },
+                    errors => ["def"],
                 },
             ]
         },
