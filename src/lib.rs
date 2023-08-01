@@ -1,10 +1,11 @@
 #![allow(clippy::into_iter_on_ref)]
+
+mod cli;
 mod config;
 mod context;
 mod macros;
 mod rule;
 mod rule_tester;
-mod rules;
 #[cfg(test)]
 mod tests;
 mod violation;
@@ -21,14 +22,23 @@ use std::{
 };
 
 use clap::Parser;
-pub use config::{Config, ConfigBuilder};
-use context::{PendingFix, QueryMatchContext};
+pub use cli::bootstrap_cli;
+pub use config::{Args, Config, ConfigBuilder};
+use context::PendingFix;
+pub use context::QueryMatchContext;
+pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
-use rule::{FileRunInfo, InstantiatedRule, RuleInstancePerFile};
+pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
+use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
+pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
+
+pub extern crate clap;
+pub extern crate tree_sitter;
+pub extern crate tree_sitter_grep;
 
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP: &str = "_tree_sitter_lint_capture";
 const CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT: &str = "@_tree_sitter_lint_capture";
@@ -501,10 +511,10 @@ impl<'a> AggregatedQueries<'a> {
                         &rule_listener_query.query_text,
                         CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,
                     );
-                assert!(
-                    matches!(query_text_with_unified_capture_name, Cow::Owned(_),),
-                    "Didn't find any instances of the capture name to replace"
-                );
+                assert!(were_any_captures_replaced(
+                    &query_text_with_unified_capture_name,
+                    &rule_listener_query
+                ));
                 aggregated_query_text.push_str(&query_text_with_unified_capture_name);
                 aggregated_query_text.push_str("\n\n");
             }
@@ -527,4 +537,15 @@ impl<'a> AggregatedQueries<'a> {
         let instantiated_rule = &self.instantiated_rules[rule_index];
         (instantiated_rule, rule_listener_index)
     }
+}
+
+#[allow(clippy::ptr_arg)]
+fn were_any_captures_replaced(
+    query_text_with_unified_capture_name: &Cow<'_, str>,
+    _rule_listener: &ResolvedRuleListenerQuery,
+) -> bool {
+    // It's a presumed invariant of `Regex::replace_all()` that it returns a
+    // `Cow::Owned` iff it made any modifications to the original `&str` that it was
+    // passed
+    matches!(query_text_with_unified_capture_name, Cow::Owned(_))
 }

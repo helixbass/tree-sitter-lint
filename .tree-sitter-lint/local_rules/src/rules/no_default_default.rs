@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use proc_macros::rule;
-
-use crate::{rule::Rule, violation};
+use tree_sitter_lint::{rule, violation, Rule};
 
 pub fn no_default_default_rule() -> Arc<dyn Rule> {
     rule! {
@@ -39,10 +37,9 @@ pub fn no_default_default_rule() -> Arc<dyn Rule> {
 
 #[cfg(test)]
 mod tests {
-    use proc_macros::rule_tests;
+    use tree_sitter_lint::{rule_tests, RuleTester};
 
     use super::*;
-    use crate::RuleTester;
 
     #[test]
     fn test_no_default_default_rule() {

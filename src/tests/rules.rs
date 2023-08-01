@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use proc_macros::{rule, rule_tests};
+use proc_macros::{rule_crate_internal as rule, rule_tests_crate_internal as rule_tests};
 
 use crate::{rule::Rule, violation, RuleTester};
 
