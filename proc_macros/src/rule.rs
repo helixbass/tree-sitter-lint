@@ -562,10 +562,10 @@ fn get_rule_instance_rule_instance_impl(
         });
     quote! {
         impl #crate_name::RuleInstance for #rule_instance_struct_name {
-            fn instantiate_per_file(
+            fn instantiate_per_file<'a>(
                 self: std::sync::Arc<Self>,
-                _file_run_info: &#crate_name::FileRunInfo,
-            ) -> Box<dyn #crate_name::RuleInstancePerFile> {
+                _file_run_info: &'a #crate_name::FileRunInfo,
+            ) -> Box<dyn #crate_name::RuleInstancePerFile<'a>> {
                 Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,
                     #(#rule_instance_per_file_state_field_names: #rule_instance_per_file_state_field_initializers),*
@@ -743,8 +743,8 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
         }
     });
     quote! {
-        impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures, context: &mut #crate_name::QueryMatchContext) {
+        impl<'a> #crate_name::RuleInstancePerFile<'a> for #rule_instance_per_file_struct_name {
+            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a>) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks
