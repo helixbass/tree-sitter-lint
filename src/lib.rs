@@ -70,6 +70,7 @@ pub fn run_and_output(config: Config) {
 
 const MAX_FIX_ITERATIONS: usize = 10;
 
+#[allow(clippy::too_many_arguments)]
 fn run_per_file<'a>(
     aggregated_queries: &'a AggregatedQueries<'a>,
     path: &'a Path,
@@ -87,13 +88,13 @@ fn run_per_file<'a>(
     get_matches(language.language(), file_contents, query, Some(tree)).for_each(|query_match| {
         run_match(
             query_match,
-            &aggregated_queries,
+            aggregated_queries,
             language,
             path,
             file_contents,
             config,
             &mut instantiated_per_file_rules,
-            |violations| on_found_violations(violations),
+            &mut on_found_violations,
             |pending_fixes, instantiated_rule| {
                 on_found_pending_fixes(pending_fixes, instantiated_rule)
             },
@@ -108,7 +109,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
     let all_violations: Mutex<HashMap<PathBuf, Vec<ViolationWithContext>>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
     tree_sitter_grep::run_with_single_per_file_callback(
-        tree_sitter_grep_args.clone(),
+        tree_sitter_grep_args,
         |dir_entry, language, file_contents, tree, query| {
             run_per_file(
                 &aggregated_queries,
