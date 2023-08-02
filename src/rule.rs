@@ -123,7 +123,7 @@ impl<'a> ops::Index<&str> for Captures<'a> {
     }
 }
 
-pub trait RuleInstancePerFile: Send + Sync {
+pub trait RuleInstancePerFile {
     fn on_query_match(
         &mut self,
         listener_index: usize,
