@@ -7,6 +7,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 use serde::Deserialize;
+use tree_sitter_grep::tree_sitter::Node;
 
 use crate::{rule::Rule, RuleTester};
 
@@ -683,6 +684,48 @@ fn test_self_field_in_data() {
                     errors => [
                         {
                             message => "abc",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_store_node_in_per_file_run_state() {
+    RuleTester::run(
+        rule! {
+            name => "stores-node-in-per-file-run-state",
+            state => {
+                [per-file-run]
+                node: Option<Node<'a>>,
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    self.node = Some(node);
+                    context.report(violation! {
+                        node => node,
+                        message => "whee",
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"fn whee() {}"#,
+                    errors => [
+                        {
+                            message => "whee",
                         }
                     ],
                 },

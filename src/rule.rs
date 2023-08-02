@@ -30,7 +30,7 @@ pub trait RuleInstance: Send + Sync {
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
         file_run_info: &FileRunInfo<'a>,
-    ) -> Box<dyn RuleInstancePerFile<'a>>;
+    ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
     fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }

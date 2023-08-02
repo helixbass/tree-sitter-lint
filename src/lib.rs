@@ -82,7 +82,7 @@ fn run_per_file<'a>(
     language: SupportedLanguage,
 ) {
     let file_contents = file_contents.into();
-    let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a>>> =
+    let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>> =
         Default::default();
     get_matches(language.language(), file_contents, query, Some(tree)).for_each(|query_match| {
         run_match(
@@ -194,7 +194,7 @@ fn run_match<'a, 'b>(
     path: &'a Path,
     file_contents: impl Into<RopeOrSlice<'a>>,
     config: &'a Config,
-    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a>>>,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
 ) {
@@ -248,7 +248,7 @@ fn run_single_on_query_match_callback<'a, 'b>(
     path: &'a Path,
     file_contents: impl Into<RopeOrSlice<'a>>,
     instantiated_rule: &'a InstantiatedRule,
-    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a>>>,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
     config: &'a Config,
     language: SupportedLanguage,
     rule_listener_index: usize,
