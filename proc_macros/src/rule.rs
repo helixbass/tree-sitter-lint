@@ -13,7 +13,7 @@ use syn::{
     Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
 };
 
-use crate::ArrowSeparatedKeyValuePairs;
+use crate::{helpers::ExprOrArrowSeparatedKeyValuePairs, ArrowSeparatedKeyValuePairs};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum RuleStateScope {
@@ -598,6 +598,7 @@ fn get_rule_instance_per_file_struct_definition(
     }
 }
 
+#[derive(Copy, Clone)]
 struct SelfAccessRewriter<'a> {
     rule: &'a Rule,
 }
@@ -637,17 +638,17 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                     #(#rewritten_macro_args),*
                 }
             }
-            _ => match syn::parse2::<ArrowSeparatedKeyValuePairs>(node.mac.tokens.clone()) {
-                Ok(ArrowSeparatedKeyValuePairs { keys_and_values }) => {
-                    let rewritten_macro_args = keys_and_values
-                        .into_iter()
-                        .map(|(key, mut value)| {
-                            SelfAccessRewriter { rule: self.rule }.visit_expr_mut(&mut value);
-                            (key, value)
-                        })
-                        .collect::<HashMap<_, _>>();
-                    let keys = rewritten_macro_args.keys();
-                    let values = rewritten_macro_args.values();
+            _ => match syn::parse2::<
+                ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
+            >(node.mac.tokens.clone())
+            {
+                Ok(mut arrow_separated_key_value_pairs) => {
+                    rewrite_self_accesses_in_arrow_separated_key_value_pairs(
+                        *self,
+                        &mut arrow_separated_key_value_pairs,
+                    );
+                    let keys = arrow_separated_key_value_pairs.keys_and_values.keys();
+                    let values = arrow_separated_key_value_pairs.keys_and_values.values();
                     quote! {
                         #(#keys => #values),*
                     }
@@ -658,6 +659,26 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
         node.mac.tokens = rewritten_macro_args;
         visit_mut::visit_expr_macro_mut(self, node);
     }
+}
+
+fn rewrite_self_accesses_in_arrow_separated_key_value_pairs(
+    mut rewriter: SelfAccessRewriter,
+    arrow_separated_key_value_pairs: &mut ArrowSeparatedKeyValuePairs<
+        Ident,
+        ExprOrArrowSeparatedKeyValuePairs,
+    >,
+) {
+    arrow_separated_key_value_pairs
+        .keys_and_values
+        .values_mut()
+        .for_each(|value| match value {
+            ExprOrArrowSeparatedKeyValuePairs::Expr(value) => {
+                rewriter.visit_expr_mut(value);
+            }
+            ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(value) => {
+                rewrite_self_accesses_in_arrow_separated_key_value_pairs(rewriter, value);
+            }
+        });
 }
 
 fn get_self_field_access_name(expr_field: &ExprField) -> Option<String> {

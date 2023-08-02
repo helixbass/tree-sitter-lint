@@ -646,3 +646,47 @@ fn test_options_struct() {
         },
     );
 }
+
+#[test]
+fn test_self_field_in_data() {
+    RuleTester::run(
+        rule! {
+            name => "uses-self-in-data",
+            state => {
+                [per-run]
+                foo: &'static str = "abc",
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "{{whee}}",
+                        data => {
+                            whee => self.foo,
+                        }
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"fn whee() {}"#,
+                    errors => [
+                        {
+                            message => "abc",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
