@@ -877,3 +877,46 @@ fn test_rule_test_errors_variable() {
         },
     );
 }
+
+#[test]
+fn test_get_token_after() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-token-after",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if context.get_token_after(node, None).text(context) == "mod" {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                r#"
+                    fn foo() {}
+                    fn bar() {}
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+
+                        mod foo;
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}

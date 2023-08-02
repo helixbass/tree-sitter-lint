@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+use derive_builder::Builder;
 use squalid::{IsEmpty, OptionExt};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::TreeCursor, RopeOrSlice, SupportedLanguage,
@@ -158,6 +159,66 @@ impl<'a> QueryMatchContext<'a> {
 
     pub fn get_text_slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
         get_text_slice(self.file_contents, range)
+    }
+
+    pub fn get_token_after<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node {
+        let skip_options = skip_options.map(Into::into);
+    }
+}
+
+#[derive(Builder)]
+#[builder(default, setter(strip_option))]
+pub struct SkipOptions<TFilter: FnMut(Node) -> bool> {
+    skip: Option<usize>,
+    include_comments: Option<bool>,
+    filter: Option<TFilter>,
+}
+
+impl<TFilter: FnMut(Node) -> bool> SkipOptions<TFilter> {
+    pub fn skip(&self) -> usize {
+        self.skip.unwrap_or_default()
+    }
+
+    pub fn include_comments(&self) -> bool {
+        self.include_comments.unwrap_or_default()
+    }
+
+    pub fn filter(&self) -> Option<&TFilter> {
+        self.filter.as_ref()
+    }
+}
+
+impl<TFilter: FnMut(Node) -> bool> Default for SkipOptions<TFilter> {
+    fn default() -> Self {
+        Self {
+            skip: Default::default(),
+            include_comments: Default::default(),
+            filter: Default::default(),
+        }
+    }
+}
+
+impl From<usize> for SkipOptions<fn(Node) -> bool> {
+    fn from(value: usize) -> Self {
+        Self {
+            skip: Some(value),
+            include_comments: Default::default(),
+            filter: Default::default(),
+        }
+    }
+}
+
+impl<TFilter: FnMut(Node) -> bool> From<TFilter> for SkipOptions<TFilter> {
+    fn from(value: TFilter) -> Self {
+        Self {
+            skip: Default::default(),
+            include_comments: Default::default(),
+            filter: Some(value),
+        }
     }
 }
 
