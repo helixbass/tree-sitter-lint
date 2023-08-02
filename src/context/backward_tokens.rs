@@ -141,6 +141,33 @@ mod tests {
 
     #[test]
     fn test_get_backward_tokens_simple() {
-        test_backward_tokens_text("const x = 5;", &[";", "5", "=", "x", "const"]);
+        test_backward_tokens_text(
+            "const x = 5;",
+            &["const", "x", "=", "5", ";"]
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn test_get_backward_tokens_structured() {
+        test_backward_tokens_text(
+            r#"
+                const whee = function(foo) {
+                    for (let x = 1; x < 100; x++) {
+                        foo(x);
+                    }
+                }
+            "#,
+            &[
+                "const", "whee", "=", "function", "(", "foo", ")", "{", "for", "(", "let", "x",
+                "=", "1", ";", "x", "<", "100", ";", "x", "++", ")", "{", "foo", "(", "x", ")",
+                ";", "}", "}",
+            ]
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>(),
+        );
     }
 }
