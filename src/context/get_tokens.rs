@@ -25,25 +25,9 @@ macro_rules! move_to_next_sibling_or_try_go_to_parent_and_loop {
     };
 }
 
-macro_rules! loop_landed_on_comment_or_node {
-    ($self:expr) => {
-        loop_if_on_comment!($self);
-        loop_landed_on_node!($self);
-    };
-}
-
-macro_rules! loop_if_on_comment {
-    ($self:expr) => {
-        if $self.cursor.node().kind() == "comment" {
-            $self.state = OnComment;
-            continue;
-        }
-    };
-}
-
 macro_rules! loop_landed_on_node {
     ($self:expr) => {
-        $self.state = LandedOnNonCommentNode;
+        $self.state = LandedOnNode;
         continue;
     };
 }
@@ -87,36 +71,29 @@ impl<'a> Iterator for TokenWalker<'a> {
                     return None;
                 }
                 Initial => {
-                    if self.cursor.node().kind() == "comment" {
-                        loop_done!(self);
-                    }
                     if !self.cursor.goto_first_child() {
                         self.state = Done;
                         return Some(self.cursor.node());
                     }
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 ReturnedCurrentNode => {
                     move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
-                OnComment => {
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                LandedOnNonCommentNode => {
+                LandedOnNode => {
                     if !self.cursor.goto_first_child() {
                         self.state = ReturnedCurrentNode;
                         return Some(self.cursor.node());
                     }
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 JustReturnedToParent => {
                     if self.cursor.node() == self.original_node {
                         loop_done!(self);
                     }
                     move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
             }
         }
@@ -126,10 +103,9 @@ impl<'a> Iterator for TokenWalker<'a> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TokenWalkerState {
     Initial,
-    OnComment,
     ReturnedCurrentNode,
     JustReturnedToParent,
-    LandedOnNonCommentNode,
+    LandedOnNode,
     Done,
 }
 
@@ -175,26 +151,22 @@ impl<'a> Iterator for TokenWalkerUntilEndOfFile<'a> {
                     return None;
                 }
                 Initial => {
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 ReturnedCurrentNode => {
                     move_to_next_sibling_or_try_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
-                OnComment => {
-                    move_to_next_sibling_or_try_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                LandedOnNonCommentNode => {
+                LandedOnNode => {
                     if !self.cursor.goto_first_child() {
                         self.state = ReturnedCurrentNode;
                         return Some(self.cursor.node());
                     }
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 JustReturnedToParent => {
                     move_to_next_sibling_or_try_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
             }
         }
@@ -241,20 +213,6 @@ mod tests {
                 "=", "1", ";", "x", "<", "100", ";", "x", "++", ")", "{", "foo", "(", "x", ")",
                 ";", "}", "}",
             ],
-        );
-    }
-
-    #[test]
-    fn test_get_tokens_omits_comments() {
-        test_all_tokens_text(
-            r#"
-            /*leading*/
-            const x = 5
-            /*hello*/ // whee
-            foo()
-            // trailing
-        "#,
-            &["const", "x", "=", "5", "foo", "(", ")"],
         );
     }
 

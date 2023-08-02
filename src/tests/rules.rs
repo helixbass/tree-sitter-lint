@@ -961,3 +961,57 @@ fn test_get_last_token() {
         },
     );
 }
+
+#[test]
+fn test_comments_exist_between() {
+    RuleTester::run(
+        rule! {
+            name => "uses-comments-exist-between",
+            listeners => [
+                r#"(
+                  (if_expression
+                    condition: (_) @condition
+                    alternative: (else_clause
+                      (block) @else
+                    )
+                  )
+                )"# => |captures, context| {
+                    if context.comments_exist_between(
+                        captures["condition"], captures["else"]
+                    ) {
+                        context.report(violation! {
+                            node => captures["condition"],
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    if foo {
+                        bar();
+                    } else {
+                        // inside else block
+                        baz();
+                    }
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        if foo {
+                            bar();
+                            // inside if block
+                        } else {
+                            baz();
+                        }
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}

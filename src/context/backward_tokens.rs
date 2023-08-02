@@ -2,25 +2,9 @@ use tree_sitter_grep::tree_sitter::Node;
 
 use super::get_tokens::TokenWalkerState;
 
-macro_rules! loop_landed_on_comment_or_node {
-    ($self:expr) => {
-        loop_if_on_comment!($self);
-        loop_landed_on_node!($self);
-    };
-}
-
-macro_rules! loop_if_on_comment {
-    ($self:expr) => {
-        if $self.node.kind() == "comment" {
-            $self.state = OnComment;
-            continue;
-        }
-    };
-}
-
 macro_rules! loop_landed_on_node {
     ($self:expr) => {
-        $self.state = LandedOnNonCommentNode;
+        $self.state = LandedOnNode;
         continue;
     };
 }
@@ -79,40 +63,33 @@ impl<'a> Iterator for BackwardTokenWalker<'a> {
                     return None;
                 }
                 Initial => {
-                    if self.node.kind() == "comment" {
-                        loop_done!(self);
-                    }
                     let num_children = self.node.child_count();
                     if num_children == 0 {
                         self.state = Done;
                         return Some(self.node);
                     }
                     self.node = self.node.child(num_children - 1).unwrap();
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 ReturnedCurrentNode => {
                     move_to_prev_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
-                OnComment => {
-                    move_to_prev_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                LandedOnNonCommentNode => {
+                LandedOnNode => {
                     let num_children = self.node.child_count();
                     if num_children == 0 {
                         self.state = ReturnedCurrentNode;
                         return Some(self.node);
                     }
                     self.node = self.node.child(num_children - 1).unwrap();
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
                 JustReturnedToParent => {
                     if self.node == self.original_node {
                         loop_done!(self);
                     }
                     move_to_prev_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
+                    loop_landed_on_node!(self);
                 }
             }
         }

@@ -209,6 +209,14 @@ impl<'a> QueryMatchContext<'a> {
             })
             .unwrap()
     }
+
+    pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
+        let comment_kinds = self.language.comment_kinds();
+        let end = end.start_byte();
+        get_tokens_after_node(start)
+            .take_while(|node| node.start_byte() < end)
+            .any(|node| comment_kinds.contains(node.kind()))
+    }
 }
 
 #[derive(Builder)]
