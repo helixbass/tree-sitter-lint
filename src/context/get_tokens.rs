@@ -124,7 +124,7 @@ impl<'a> Iterator for TokenWalker<'a> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum TokenWalkerState {
+pub enum TokenWalkerState {
     Initial,
     OnComment,
     ReturnedCurrentNode,

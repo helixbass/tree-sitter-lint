@@ -9,11 +9,12 @@ use derive_builder::Builder;
 use squalid::{IsEmpty, OptionExt};
 use tree_sitter_grep::{streaming_iterator::StreamingIterator, RopeOrSlice, SupportedLanguage};
 
+mod backward_tokens;
 mod get_tokens;
 
 use get_tokens::get_tokens;
 
-use self::get_tokens::get_tokens_after_node;
+use self::{backward_tokens::get_backward_tokens, get_tokens::get_tokens_after_node};
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
@@ -188,6 +189,25 @@ impl<'a> QueryMatchContext<'a> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Node<'a> {
         self.maybe_get_token_after(node, skip_options).unwrap()
+    }
+
+    pub fn get_last_token<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node<'a> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_backward_tokens(node)
+            .skip(skip_options.skip())
+            .find(|node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+            .unwrap()
     }
 }
 

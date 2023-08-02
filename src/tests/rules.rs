@@ -922,3 +922,42 @@ fn test_get_token_after() {
         },
     );
 }
+
+#[test]
+fn test_get_last_token() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-last-token",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if context.get_node_text(
+                        context.get_last_token(node, Option::<fn(Node) -> bool>::None)
+                    ) == "}" {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
