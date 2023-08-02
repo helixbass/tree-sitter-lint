@@ -469,13 +469,17 @@ fn get_rule_rule_impl(
             if is_option_type(options_type) {
                 quote! {
                     let options: #options_type = options.map(|options| {
-                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                        #crate_name::serde_json::from_str(&options.to_string()).unwrap_or_else(|_| {
+                            panic!("Couldn't parse rule options: {:#?}", options.to_string());
+                        })
                     });
                 }
             } else {
                 quote! {
                     let options: #options_type = options.map(|options| {
-                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                        #crate_name::serde_json::from_str(&options.to_string()).unwrap_or_else(|_| {
+                            panic!("Couldn't parse rule options: {:#?}", options.to_string());
+                        })
                     }).unwrap();
                 }
             }
