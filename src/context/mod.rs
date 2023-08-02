@@ -7,10 +7,13 @@ use std::{
 
 use derive_builder::Builder;
 use squalid::{IsEmpty, OptionExt};
-use tree_sitter_grep::{
-    streaming_iterator::StreamingIterator, tree_sitter::TreeCursor, RopeOrSlice, SupportedLanguage,
-};
+use tree_sitter_grep::{streaming_iterator::StreamingIterator, RopeOrSlice, SupportedLanguage};
 
+mod get_tokens;
+
+use get_tokens::get_tokens;
+
+use self::get_tokens::get_tokens_after_node;
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
@@ -161,12 +164,30 @@ impl<'a> QueryMatchContext<'a> {
         get_text_slice(self.file_contents, range)
     }
 
+    pub fn maybe_get_token_after<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Option<Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_tokens_after_node(node)
+            .skip(skip_options.skip())
+            .find(|node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
     pub fn get_token_after<TFilter: FnMut(Node) -> bool>(
         &self,
-        node: Node,
+        node: Node<'a>,
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
-    ) -> Node {
-        let skip_options = skip_options.map(Into::into);
+    ) -> Node<'a> {
+        self.maybe_get_token_after(node, skip_options).unwrap()
     }
 }
 
@@ -187,8 +208,8 @@ impl<TFilter: FnMut(Node) -> bool> SkipOptions<TFilter> {
         self.include_comments.unwrap_or_default()
     }
 
-    pub fn filter(&self) -> Option<&TFilter> {
-        self.filter.as_ref()
+    pub fn filter(&mut self) -> Option<&mut TFilter> {
+        self.filter.as_mut()
     }
 }
 
@@ -341,181 +362,5 @@ fn get_text_slice(file_contents: RopeOrSlice, range: ops::Range<usize>) -> Cow<'
     match file_contents {
         RopeOrSlice::Slice(slice) => std::str::from_utf8(&slice[range]).unwrap().into(),
         RopeOrSlice::Rope(rope) => rope.byte_slice(range).into(),
-    }
-}
-
-macro_rules! move_to_next_sibling_or_go_to_parent_and_loop {
-    ($self:expr) => {
-        if !$self.cursor.goto_next_sibling() {
-            $self.cursor.goto_parent();
-            $self.state = JustReturnedToParent;
-            continue;
-        }
-    };
-}
-
-macro_rules! loop_landed_on_comment_or_node {
-    ($self:expr) => {
-        loop_if_on_comment!($self);
-        loop_landed_on_node!($self);
-    };
-}
-
-macro_rules! loop_if_on_comment {
-    ($self:expr) => {
-        if $self.cursor.node().kind() == "comment" {
-            $self.state = OnComment;
-            continue;
-        }
-    };
-}
-
-macro_rules! loop_landed_on_node {
-    ($self:expr) => {
-        $self.state = LandedOnNonCommentNode;
-        continue;
-    };
-}
-
-macro_rules! loop_done {
-    ($self:expr) => {
-        $self.state = Done;
-        continue;
-    };
-}
-
-fn get_tokens(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalker::new(node)
-}
-
-struct TokenWalker<'a> {
-    state: TokenWalkerState,
-    cursor: TreeCursor<'a>,
-    original_node: Node<'a>,
-}
-
-impl<'a> TokenWalker<'a> {
-    pub fn new(node: Node<'a>) -> Self {
-        Self {
-            state: TokenWalkerState::Initial,
-            cursor: node.walk(),
-            original_node: node,
-        }
-    }
-}
-
-impl<'a> Iterator for TokenWalker<'a> {
-    type Item = Node<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use TokenWalkerState::*;
-
-        loop {
-            match self.state {
-                Done => {
-                    return None;
-                }
-                Initial => {
-                    if self.cursor.node().kind() == "comment" {
-                        loop_done!(self);
-                    }
-                    if !self.cursor.goto_first_child() {
-                        self.state = Done;
-                        return Some(self.cursor.node());
-                    }
-                    loop_landed_on_comment_or_node!(self);
-                }
-                ReturnedCurrentNode => {
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                OnComment => {
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                LandedOnNonCommentNode => {
-                    if !self.cursor.goto_first_child() {
-                        self.state = ReturnedCurrentNode;
-                        return Some(self.cursor.node());
-                    }
-                    loop_landed_on_comment_or_node!(self);
-                }
-                JustReturnedToParent => {
-                    if self.cursor.node() == self.original_node {
-                        loop_done!(self);
-                    }
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-            }
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum TokenWalkerState {
-    Initial,
-    OnComment,
-    ReturnedCurrentNode,
-    JustReturnedToParent,
-    LandedOnNonCommentNode,
-    Done,
-}
-
-#[cfg(test)]
-mod tests {
-    use tree_sitter_grep::tree_sitter::Parser;
-
-    use super::*;
-
-    fn test_all_tokens_text(text: &str, all_tokens_text: &[&str]) {
-        let mut parser = Parser::new();
-        parser
-            .set_language(SupportedLanguage::Javascript.language())
-            .unwrap();
-        let tree = parser.parse(text, None).unwrap();
-        assert_eq!(
-            get_tokens(tree.root_node())
-                .map(|node| node.utf8_text(text.as_bytes()).unwrap())
-                .collect::<Vec<_>>(),
-            all_tokens_text
-        );
-    }
-
-    #[test]
-    fn test_get_tokens_simple() {
-        test_all_tokens_text("const x = 5;", &["const", "x", "=", "5", ";"]);
-    }
-
-    #[test]
-    fn test_get_tokens_structured() {
-        test_all_tokens_text(
-            r#"
-            const whee = function(foo) {
-                for (let x = 1; x < 100; x++) {
-                    foo(x);
-                }
-            }
-        "#,
-            &[
-                "const", "whee", "=", "function", "(", "foo", ")", "{", "for", "(", "let", "x",
-                "=", "1", ";", "x", "<", "100", ";", "x", "++", ")", "{", "foo", "(", "x", ")",
-                ";", "}", "}",
-            ],
-        );
-    }
-
-    #[test]
-    fn test_get_tokens_omits_comments() {
-        test_all_tokens_text(
-            r#"
-            /*leading*/
-            const x = 5
-            /*hello*/ // whee
-            foo()
-            // trailing
-        "#,
-            &["const", "x", "=", "5", "foo", "(", ")"],
-        );
     }
 }

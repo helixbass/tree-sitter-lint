@@ -7,6 +7,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 use serde::Deserialize;
+use squalid::OptionExt;
 use tree_sitter_grep::tree_sitter::Node;
 
 use crate::{rule::Rule, RuleTester, ROOT_EXIT};
@@ -887,7 +888,8 @@ fn test_get_token_after() {
                 r#"(
                   (function_item) @c
                 )"# => |node, context| {
-                    if context.get_token_after(node, None).text(context) == "mod" {
+                    if context.maybe_get_token_after(node, Option::<fn(Node) -> bool>::None)
+                        .matches(|next_token| context.get_node_text(next_token) == "mod") {
                         context.report(violation! {
                             node => node,
                             message => "whee",
