@@ -288,9 +288,48 @@ fn expr_is_ident(expr: &Expr, ident_name: &str) -> bool {
     )
 }
 
+enum InvalidRuleTestErrorsSpec {
+    Expr(Expr),
+    Vec(Vec<InvalidRuleTestErrorSpec>),
+}
+
+impl Parse for InvalidRuleTestErrorsSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(if input.peek(token::Bracket) {
+            let mut errors: Vec<InvalidRuleTestErrorSpec> = Default::default();
+            let errors_content;
+            bracketed!(errors_content in input);
+            while !errors_content.is_empty() {
+                errors.push(errors_content.parse()?);
+                if !errors_content.is_empty() {
+                    errors_content.parse::<Token![,]>()?;
+                }
+            }
+            Self::Vec(errors)
+        } else {
+            Self::Expr(input.parse()?)
+        })
+    }
+}
+
+impl ToTokens for InvalidRuleTestErrorsSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Expr(value) => quote!(#value.iter().cloned().collect::<Vec<_>>()),
+            Self::Vec(value) => {
+                let errors = value.iter().map(|error| quote!(#error));
+                quote! {
+                    vec![#(#errors),*]
+                }
+            }
+        }
+        .to_tokens(tokens)
+    }
+}
+
 struct InvalidRuleTestSpec {
     code: Expr,
-    errors: Vec<InvalidRuleTestErrorSpec>,
+    errors: InvalidRuleTestErrorsSpec,
     output: Option<Expr>,
     options: Option<RuleOptions>,
 }
@@ -298,7 +337,7 @@ struct InvalidRuleTestSpec {
 impl Parse for InvalidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
-        let mut errors: Option<Vec<InvalidRuleTestErrorSpec>> = Default::default();
+        let mut errors: Option<InvalidRuleTestErrorsSpec> = Default::default();
         let mut output: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
         let content;
@@ -311,15 +350,7 @@ impl Parse for InvalidRuleTestSpec {
                     code = Some(content.parse()?);
                 }
                 "errors" => {
-                    let errors_content;
-                    bracketed!(errors_content in content);
-                    let errors = errors.get_or_insert_with(|| Default::default());
-                    while !errors_content.is_empty() {
-                        errors.push(errors_content.parse()?);
-                        if !errors_content.is_empty() {
-                            errors_content.parse::<Token![,]>()?;
-                        }
-                    }
+                    errors = Some(content.parse()?);
                 }
                 "output" => {
                     output = Some(content.parse()?);
@@ -345,7 +376,7 @@ impl Parse for InvalidRuleTestSpec {
 impl ToTokens for InvalidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
-        let errors = self.errors.iter().map(|error| quote!(#error));
+        let errors = &self.errors;
         let output = match self.output.as_ref() {
             Some(output) if expr_is_ident(output, "None") => quote! {
                 Some(tree_sitter_lint::RuleTestExpectedOutput::NoOutput)
@@ -364,7 +395,7 @@ impl ToTokens for InvalidRuleTestSpec {
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
-                vec![#(#errors),*],
+                #errors,
                 #output,
                 #options
             )
