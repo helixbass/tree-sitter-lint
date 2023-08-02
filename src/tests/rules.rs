@@ -9,7 +9,7 @@ use proc_macros::{
 use serde::Deserialize;
 use tree_sitter_grep::tree_sitter::Node;
 
-use crate::{rule::Rule, RuleTester};
+use crate::{rule::Rule, RuleTester, ROOT_EXIT};
 
 #[test]
 fn test_per_file_run_state() {
@@ -726,6 +726,103 @@ fn test_store_node_in_per_file_run_state() {
                     errors => [
                         {
                             message => "whee",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_root_exit_listener() {
+    RuleTester::run(
+        rule! {
+            name => "uses-root-exit-listener",
+            listeners => [
+                ROOT_EXIT => |node, context| {
+                    let mut cursor = node.walk();
+                    if node.named_children(&mut cursor).count() != 1 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#""#,
+                    errors => [
+                        {
+                            message => "whee",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_root_exit_listener_amid_other_listeners() {
+    RuleTester::run(
+        rule! {
+            name => "uses-root-exit-listener",
+            listeners => [
+                r#"(function_item) @c"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "function",
+                    });
+                },
+                ROOT_EXIT => |node, context| {
+                    let mut cursor = node.walk();
+                    if node.named_children(&mut cursor).count() != 1 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                },
+                r#"(use_declaration) @c"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "use declaration",
+                    });
+                },
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    mod foo;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                        fn bar() {}
+                    "#,
+                    errors => [
+                        {
+                            message => "whee",
+                        },
+                        {
+                            message => "use declaration",
+                        },
+                        {
+                            message => "function",
                         }
                     ],
                 },

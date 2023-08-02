@@ -34,7 +34,7 @@ use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{
     FileRunInfo, MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile,
-    RuleListenerQuery, RuleMeta,
+    RuleListenerQuery, RuleMeta, ROOT_EXIT,
 };
 pub use rule_tester::{
     RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid,
@@ -81,6 +81,7 @@ fn run_per_file<'a>(
     tree: &'a Tree,
     query: &'a Arc<Query>,
     language: SupportedLanguage,
+    instantiated_rules: &'a [InstantiatedRule],
 ) {
     let file_contents = file_contents.into();
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>> =
@@ -99,7 +100,26 @@ fn run_per_file<'a>(
                 on_found_pending_fixes(pending_fixes, instantiated_rule)
             },
         );
-    })
+    });
+
+    for (&instantiated_rule_index, &rule_listener_index) in
+        &aggregated_queries.instantiated_rule_root_exit_rule_listener_indices
+    {
+        run_single_on_query_match_callback(
+            path,
+            file_contents,
+            &instantiated_rules[instantiated_rule_index],
+            &mut instantiated_per_file_rules,
+            config,
+            language,
+            rule_listener_index,
+            tree.root_node().into(),
+            &mut on_found_violations,
+            |pending_fixes| {
+                on_found_pending_fixes(pending_fixes, &instantiated_rules[instantiated_rule_index])
+            },
+        );
+    }
 }
 
 pub fn run(config: &Config) -> Vec<ViolationWithContext> {
@@ -136,6 +156,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
                 tree,
                 query,
                 language,
+                &instantiated_rules,
             );
         },
     )
@@ -171,6 +192,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
                     &path,
                     config,
                     language,
+                    &instantiated_rules,
                 );
                 (path, (file_contents, violations))
             },
@@ -290,6 +312,7 @@ fn run_fixing_loop<'a>(
     path: &Path,
     config: &Config,
     language: SupportedLanguage,
+    instantiated_rules: &[InstantiatedRule],
 ) {
     let mut file_contents = file_contents.into();
     for _ in 0..MAX_FIX_ITERATIONS {
@@ -329,6 +352,7 @@ fn run_fixing_loop<'a>(
                 .unwrap()
                 .query,
             language,
+            instantiated_rules,
         );
         if pending_fixes.is_empty() {
             break;
@@ -379,6 +403,7 @@ pub fn run_for_slice<'a>(
             .unwrap()
             .query,
         language,
+        &instantiated_rules,
     );
     violations.into_inner().unwrap()
 }
@@ -432,6 +457,7 @@ pub fn run_fixing_for_slice<'a>(
             .unwrap()
             .query,
         language,
+        &instantiated_rules,
     );
     let mut violations = violations.into_inner().unwrap();
     let pending_fixes = pending_fixes.into_inner().unwrap();
@@ -446,6 +472,7 @@ pub fn run_fixing_for_slice<'a>(
         path,
         &config,
         language,
+        &instantiated_rules,
     );
     violations
 }
@@ -629,11 +656,14 @@ impl AggregatedQueriesPerLanguageBuilder {
 struct AggregatedQueries<'a> {
     instantiated_rules: &'a [InstantiatedRule],
     per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguage>,
+    pub instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize>,
 }
 
 impl<'a> AggregatedQueries<'a> {
     pub fn new(instantiated_rules: &'a [InstantiatedRule]) -> Self {
         let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
+            Default::default();
+        let mut instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize> =
             Default::default();
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for &language in &instantiated_rule.meta.languages {
@@ -642,8 +672,20 @@ impl<'a> AggregatedQueries<'a> {
                     .rule_instance
                     .listener_queries()
                     .iter()
-                    .map(|rule_listener_query| rule_listener_query.resolve(language.language()))
                     .enumerate()
+                    .filter_map(|(rule_listener_index, rule_listener_query)| {
+                        if rule_listener_query.query == ROOT_EXIT {
+                            instantiated_rule_root_exit_rule_listener_indices
+                                .insert(rule_index, rule_listener_index);
+
+                            return None;
+                        }
+
+                        Some((
+                            rule_listener_index,
+                            rule_listener_query.resolve(language.language()),
+                        ))
+                    })
                 {
                     let capture_index_if_per_capture: CaptureIndexIfPerCapture =
                         match &rule_listener_query.match_by {
@@ -665,6 +707,7 @@ impl<'a> AggregatedQueries<'a> {
                 }
             }
         }
+
         Self {
             instantiated_rules,
             per_language: per_language
@@ -673,6 +716,7 @@ impl<'a> AggregatedQueries<'a> {
                     (language, per_language_value.build(language))
                 })
                 .collect(),
+            instantiated_rule_root_exit_rule_listener_indices,
         }
     }
 

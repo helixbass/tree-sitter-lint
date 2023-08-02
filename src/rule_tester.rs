@@ -1,7 +1,7 @@
-use std::{iter, sync::Arc};
+use std::{cmp::Ordering, iter, sync::Arc};
 
 use derive_builder::Builder;
-use tree_sitter_grep::SupportedLanguage;
+use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
@@ -117,6 +117,19 @@ impl RuleTester {
     }
 }
 
+fn compare_ranges(a: Range, b: Range) -> Ordering {
+    match a.start_byte.cmp(&b.start_byte) {
+        Ordering::Equal => {}
+        ord => return ord,
+    }
+
+    match a.end_byte.cmp(&b.end_byte) {
+        Ordering::Equal => Ordering::Equal,
+        Ordering::Less => Ordering::Greater,
+        Ordering::Greater => Ordering::Less,
+    }
+}
+
 fn assert_that_violations_match_expected(
     violations: &[ViolationWithContext],
     invalid_test: &RuleTestInvalid,
@@ -128,7 +141,9 @@ fn assert_that_violations_match_expected(
         invalid_test.code
     );
     let mut violations = violations.to_owned();
-    violations.sort_by_key(|violation| violation.range);
+    // if https://github.com/tree-sitter/tree-sitter/pull/2460 gets merged then
+    // could restore this to `violations.sort_by_key(|violation| violation.range)`
+    violations.sort_by(|a, b| compare_ranges(a.range, b.range));
     for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
         assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
     }
