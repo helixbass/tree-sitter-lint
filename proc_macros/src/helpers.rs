@@ -29,6 +29,16 @@ pub struct ArrowSeparatedKeyValuePairs<TKey = Ident, TValue = Expr> {
     pub keys_and_values: HashMap<TKey, TValue>,
 }
 
+impl ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs> {
+    pub fn to_yaml(&self) -> proc_macro2::TokenStream {
+        let keys = self.keys_and_values.keys();
+        let values = self.keys_and_values.values().map(|value| value.to_yaml());
+        quote! {
+            { #(#keys: #values),* }
+        }
+    }
+}
+
 impl<TKey, TValue> Parse for ArrowSeparatedKeyValuePairs<TKey, TValue>
 where
     TKey: Parse + Eq + std::hash::Hash,
@@ -69,6 +79,17 @@ pub enum ExprOrArrowSeparatedKeyValuePairs {
     ArrowSeparatedKeyValuePairs(
         ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
     ),
+}
+
+impl ExprOrArrowSeparatedKeyValuePairs {
+    pub fn to_yaml(&self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Expr(expr) => quote!(#expr),
+            Self::ArrowSeparatedKeyValuePairs(arrow_separated_key_value_pairs) => {
+                arrow_separated_key_value_pairs.to_yaml()
+            }
+        }
+    }
 }
 
 impl Parse for ExprOrArrowSeparatedKeyValuePairs {

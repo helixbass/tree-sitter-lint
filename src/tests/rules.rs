@@ -1015,3 +1015,60 @@ fn test_comments_exist_between() {
         },
     );
 }
+
+#[test]
+fn test_options_list() {
+    #[derive(Deserialize)]
+    struct OptionType {
+        #[allow(dead_code)]
+        foo: String,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "has-options-list",
+            options_type => Option<Vec<OptionType>>,
+            state => {
+                [per-run]
+                options: Vec<OptionType> = options.unwrap_or_default(),
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if !self.options.is_empty() {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => [],
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => [{
+                        foo => "abc",
+                    }],
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
