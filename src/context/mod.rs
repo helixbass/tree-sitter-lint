@@ -157,8 +157,23 @@ impl<'a> QueryMatchContext<'a> {
         ret
     }
 
-    pub fn get_tokens(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+    pub fn get_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        let language = self.language;
         get_tokens(node)
+            .skip(skip_options.skip())
+            .filter(move |node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
     }
 
     pub fn get_text_slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {

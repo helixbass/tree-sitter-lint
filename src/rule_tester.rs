@@ -96,6 +96,7 @@ impl RuleTester {
                 .unwrap(),
             self.language,
         );
+        assert_that_violations_match_expected(&violations, invalid_test);
         match invalid_test.output.as_ref() {
             Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
                 assert_eq!(
@@ -113,7 +114,6 @@ impl RuleTester {
             }
             _ => (),
         }
-        assert_that_violations_match_expected(&violations, invalid_test);
     }
 }
 
