@@ -362,6 +362,12 @@ impl Fixer {
             .as_ref()
             .is_none_or_matches(|pending_fixes| pending_fixes.is_empty())
     }
+
+    pub fn remove_range(&mut self, range: ops::Range<usize>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(range, Default::default()));
+    }
 }
 
 impl IsEmpty for Fixer {

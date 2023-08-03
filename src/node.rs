@@ -73,6 +73,12 @@ impl<'a> NodeExt<'a> for Node<'a> {
 
 fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
     while cursor.node() != node {
-        cursor.goto_first_child_for_byte(node.start_byte()).unwrap();
+        // this seems like it should be right but see https://github.com/tree-sitter/tree-sitter/issues/2463
+        // cursor.goto_first_child_for_byte(node.start_byte()).unwrap();
+        if node.is_descendant_of(cursor.node()) {
+            assert!(cursor.goto_first_child());
+        } else {
+            assert!(cursor.goto_next_sibling());
+        }
     }
 }
