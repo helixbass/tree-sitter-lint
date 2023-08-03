@@ -232,6 +232,25 @@ impl<'a> QueryMatchContext<'a> {
             .take_while(|node| node.start_byte() < end)
             .any(|node| comment_kinds.contains(node.kind()))
     }
+
+    pub fn get_first_token<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node<'a> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_tokens(node)
+            .skip(skip_options.skip())
+            .find(move |node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+            .unwrap()
+    }
 }
 
 #[derive(Builder)]
