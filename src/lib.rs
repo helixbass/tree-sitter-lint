@@ -28,7 +28,7 @@ use std::{
 pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
-pub use context::QueryMatchContext;
+pub use context::{QueryMatchContext, SkipOptions, SkipOptionsBuilder};
 pub use node::NodeExt;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};

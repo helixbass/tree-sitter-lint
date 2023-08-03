@@ -14,7 +14,10 @@ mod get_tokens;
 
 use get_tokens::get_tokens;
 
-use self::{backward_tokens::get_backward_tokens, get_tokens::get_tokens_after_node};
+use self::{
+    backward_tokens::{get_backward_tokens, get_tokens_before_node},
+    get_tokens::get_tokens_after_node,
+};
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
@@ -251,6 +254,32 @@ impl<'a> QueryMatchContext<'a> {
             })
             .unwrap()
     }
+
+    pub fn maybe_get_token_before<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Option<Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_tokens_before_node(node)
+            .skip(skip_options.skip())
+            .find(|node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
+    pub fn get_token_before<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node<'a> {
+        self.maybe_get_token_before(node, skip_options).unwrap()
+    }
 }
 
 #[derive(Builder)]
@@ -401,6 +430,12 @@ impl Fixer {
         self.pending_fixes
             .get_or_insert_with(Default::default)
             .push(PendingFix::new(range, Default::default()));
+    }
+
+    pub fn replace_text_range(&mut self, range: ops::Range<usize>, replacement: impl Into<String>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(range, replacement.into()));
     }
 }
 

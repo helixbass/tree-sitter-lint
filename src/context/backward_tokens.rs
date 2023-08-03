@@ -31,6 +31,27 @@ macro_rules! move_to_prev_sibling_or_go_to_parent_and_loop {
     };
 }
 
+macro_rules! move_to_prev_sibling_or_try_go_to_parent_and_loop {
+    ($self:expr) => {
+        match $self.node.prev_sibling() {
+            None => {
+                $self.node = match $self.node.parent() {
+                    None => {
+                        $self.state = Done;
+                        continue;
+                    }
+                    Some(parent) => parent,
+                };
+                $self.state = JustReturnedToParent;
+                continue;
+            }
+            Some(prev_sibling) => {
+                $self.node = prev_sibling;
+            }
+        }
+    };
+}
+
 pub fn get_backward_tokens(node: Node) -> impl Iterator<Item = Node> {
     BackwardTokenWalker::new(node)
 }
@@ -89,6 +110,72 @@ impl<'a> Iterator for BackwardTokenWalker<'a> {
                         loop_done!(self);
                     }
                     move_to_prev_sibling_or_go_to_parent_and_loop!(self);
+                    loop_landed_on_node!(self);
+                }
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn get_tokens_including_before_node(node: Node) -> impl Iterator<Item = Node> {
+    TokenWalkerUntilBeginningOfFile::new(node)
+}
+
+pub fn get_tokens_before_node(node: Node) -> impl Iterator<Item = Node> {
+    TokenWalkerUntilBeginningOfFile::for_before_node(node)
+}
+
+struct TokenWalkerUntilBeginningOfFile<'a> {
+    state: TokenWalkerState,
+    node: Node<'a>,
+}
+
+impl<'a> TokenWalkerUntilBeginningOfFile<'a> {
+    pub fn new(node: Node<'a>) -> Self {
+        Self {
+            state: TokenWalkerState::Initial,
+            node,
+        }
+    }
+
+    pub fn for_before_node(node: Node<'a>) -> Self {
+        Self {
+            state: TokenWalkerState::JustReturnedToParent,
+            node,
+        }
+    }
+}
+
+impl<'a> Iterator for TokenWalkerUntilBeginningOfFile<'a> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use TokenWalkerState::*;
+
+        loop {
+            match self.state {
+                Done => {
+                    return None;
+                }
+                Initial => {
+                    loop_landed_on_node!(self);
+                }
+                ReturnedCurrentNode => {
+                    move_to_prev_sibling_or_try_go_to_parent_and_loop!(self);
+                    loop_landed_on_node!(self);
+                }
+                LandedOnNode => {
+                    let num_children = self.node.child_count();
+                    if num_children == 0 {
+                        self.state = ReturnedCurrentNode;
+                        return Some(self.node);
+                    }
+                    self.node = self.node.child(num_children - 1).unwrap();
+                    loop_landed_on_node!(self);
+                }
+                JustReturnedToParent => {
+                    move_to_prev_sibling_or_try_go_to_parent_and_loop!(self);
                     loop_landed_on_node!(self);
                 }
             }

@@ -109,7 +109,8 @@ impl RuleTester {
             Some(RuleTestExpectedOutput::NoOutput) => {
                 assert!(
                     !violations.iter().any(|violation| violation.had_fixes),
-                    "Unexpected fixing violation was reported"
+                    "Unexpected fixing violation was reported for code {:#?}, got: {violations:#?}",
+                    invalid_test.code
                 );
             }
             _ => (),
