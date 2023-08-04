@@ -302,6 +302,11 @@ impl<'a> QueryMatchContext<'a> {
                     }
             })
     }
+
+    pub fn get_comments_after(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+        let comment_kinds = self.language.comment_kinds();
+        get_tokens_after_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+    }
 }
 
 #[derive(Builder)]

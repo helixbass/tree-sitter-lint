@@ -1169,3 +1169,54 @@ fn test_get_tokens_between() {
         },
     );
 }
+
+#[test]
+fn test_get_comments_after() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-comments-after",
+            listeners => [
+                r#"(
+                  (use_declaration) @c
+                )"# => |node, context| {
+                    if context.get_comments_after(
+                        node
+                    ).count() == 2 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar::baz;
+                "#,
+                r#"
+                    use foo::bar::baz;
+                    // one comment
+                "#,
+                r#"
+                    use foo::bar::baz;
+                    // one comment
+                    /* two comments */
+                    // three comments
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                        // one comment
+                        /* two comments */
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
