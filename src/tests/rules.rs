@@ -612,7 +612,7 @@ fn test_options_struct() {
     RuleTester::run(
         rule! {
             name => "has-options-struct",
-            options_type => Options,
+            options_type! => Options,
             state => {
                 [per-run]
                 whee: String = options.whee,
@@ -1066,6 +1066,62 @@ fn test_options_list() {
                     options => [{
                         foo => "abc",
                     }],
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_options_default() {
+    #[derive(Default, Deserialize)]
+    struct Options {
+        foo: String,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "has-options-with-default",
+            options_type => Options,
+            state => {
+                [per-run]
+                foo: String = options.foo,
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if self.foo == "abc" {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => { foo => "def" },
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        foo => "abc",
+                    },
                     errors => [{ message => "whee" }],
                 },
             ]
