@@ -280,6 +280,28 @@ impl<'a> QueryMatchContext<'a> {
     ) -> Node<'a> {
         self.maybe_get_token_before(node, skip_options).unwrap()
     }
+
+    pub fn get_tokens_between<TFilter: FnMut(Node) -> bool>(
+        &self,
+        a: Node<'a>,
+        b: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        let b_start = b.start_byte();
+        let language = self.language;
+        get_tokens_after_node(a)
+            .take_while(move |token| token.start_byte() < b_start)
+            .skip(skip_options.skip())
+            .filter(move |node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
 }
 
 #[derive(Builder)]

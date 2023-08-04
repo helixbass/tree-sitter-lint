@@ -1128,3 +1128,44 @@ fn test_options_default() {
         },
     );
 }
+
+#[test]
+fn test_get_tokens_between() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-tokens-between",
+            listeners => [
+                r#"(
+                  (use_declaration) @c
+                )"# => |node, context| {
+                    if context.get_tokens_between(
+                        context.get_first_token(node, Option::<fn(Node) -> bool>::None),
+                        context.get_last_token(node, Option::<fn(Node) -> bool>::None),
+                        Option::<fn(Node) -> bool>::None
+                    ).count() == 3 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar::baz;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
