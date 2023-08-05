@@ -3,6 +3,7 @@ use std::{
     cell::{Ref, RefCell},
     ops,
     path::Path,
+    sync::Arc,
 };
 
 use tree_sitter_grep::{
@@ -23,7 +24,7 @@ use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    Config,
+    AggregatedQueries, Config,
 };
 
 #[derive(Copy, Clone)]
@@ -33,15 +34,22 @@ pub struct FileRunContext<'a> {
     pub tree: &'a Tree,
     pub config: &'a Config,
     pub language: SupportedLanguage,
+    pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
+    pub(crate) query: &'a Arc<Query>,
+    pub(crate) instantiated_rules: &'a [InstantiatedRule],
 }
 
 impl<'a> FileRunContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
         config: &'a Config,
         language: SupportedLanguage,
+        aggregated_queries: &'a AggregatedQueries,
+        query: &'a Arc<Query>,
+        instantiated_rules: &'a [InstantiatedRule],
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -50,6 +58,9 @@ impl<'a> FileRunContext<'a> {
             tree,
             config,
             language,
+            aggregated_queries,
+            query,
+            instantiated_rules,
         }
     }
 }
