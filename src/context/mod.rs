@@ -5,19 +5,20 @@ use std::{
     path::Path,
 };
 
-use derive_builder::Builder;
-use squalid::{IsEmpty, OptionExt};
-use tree_sitter_grep::{streaming_iterator::StreamingIterator, RopeOrSlice, SupportedLanguage};
+use tree_sitter_grep::{
+    streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
+};
 
 mod backward_tokens;
+mod fix;
 mod get_tokens;
+mod skip_options;
 
-use get_tokens::get_tokens;
+use backward_tokens::{get_backward_tokens, get_tokens_before_node};
+pub use fix::{Fixer, PendingFix};
+use get_tokens::{get_tokens, get_tokens_after_node};
+pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
-use self::{
-    backward_tokens::{get_backward_tokens, get_tokens_before_node},
-    get_tokens::get_tokens_after_node,
-};
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
@@ -25,21 +26,20 @@ use crate::{
     Config,
 };
 
-pub struct QueryMatchContext<'a> {
+#[derive(Copy, Clone)]
+pub struct FileRunContext<'a> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
-    pub rule: &'a InstantiatedRule,
-    config: &'a Config,
+    pub tree: &'a Tree,
+    pub config: &'a Config,
     pub language: SupportedLanguage,
-    pending_fixes: RefCell<Option<Vec<PendingFix>>>,
-    pub violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<'a> QueryMatchContext<'a> {
+impl<'a> FileRunContext<'a> {
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
-        rule: &'a InstantiatedRule,
+        tree: &'a Tree,
         config: &'a Config,
         language: SupportedLanguage,
     ) -> Self {
@@ -47,9 +47,25 @@ impl<'a> QueryMatchContext<'a> {
         Self {
             path,
             file_contents,
-            rule,
+            tree,
             config,
             language,
+        }
+    }
+}
+
+pub struct QueryMatchContext<'a> {
+    pub file_run_context: FileRunContext<'a>,
+    pub(crate) rule: &'a InstantiatedRule,
+    pending_fixes: RefCell<Option<Vec<PendingFix>>>,
+    pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
+}
+
+impl<'a> QueryMatchContext<'a> {
+    pub fn new(file_run_context: FileRunContext<'a>, rule: &'a InstantiatedRule) -> Self {
+        Self {
+            file_run_context,
+            rule,
             pending_fixes: Default::default(),
             violations: Default::default(),
         }
@@ -57,7 +73,7 @@ impl<'a> QueryMatchContext<'a> {
 
     pub fn report(&self, violation: Violation) {
         let mut had_fixes = false;
-        if self.config.fix {
+        if self.file_run_context.config.fix {
             if let Some(fix) = violation.fix.as_ref() {
                 if !self.rule.meta.fixable {
                     panic!("Rule {:?} isn't declared as fixable", self.rule.meta.name);
@@ -71,7 +87,7 @@ impl<'a> QueryMatchContext<'a> {
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
-                if !self.config.report_fixed_violations {
+                if !self.file_run_context.config.report_fixed_violations {
                     return;
                 }
             }
@@ -84,7 +100,7 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_node_text(&self, node: Node) -> Cow<'a, str> {
-        get_node_text(node, self.file_contents)
+        get_node_text(node, self.file_run_context.file_contents)
     }
 
     pub fn maybe_get_single_captured_node_for_query<'query, 'enclosing_node>(
@@ -101,9 +117,11 @@ impl<'a> QueryMatchContext<'a> {
         mut predicate: impl FnMut(Node) -> bool,
         enclosing_node: Node<'enclosing_node>,
     ) -> Option<Node<'enclosing_node>> {
-        let query = query.into().into_parsed(self.language.language());
+        let query = query
+            .into()
+            .into_parsed(self.file_run_context.language.language());
         let captures = tree_sitter_grep::get_captures_for_enclosing_node(
-            self.file_contents,
+            self.file_run_context.file_contents,
             &query,
             0,
             None,
@@ -132,9 +150,11 @@ impl<'a> QueryMatchContext<'a> {
         mut predicate: impl FnMut(Node) -> bool,
         enclosing_node: Node<'enclosing_node>,
     ) -> usize {
-        let query = query.into().into_parsed(self.language.language());
+        let query = query
+            .into()
+            .into_parsed(self.file_run_context.language.language());
         tree_sitter_grep::get_captures_for_enclosing_node(
-            self.file_contents,
+            self.file_run_context.file_contents,
             &query,
             0,
             None,
@@ -166,7 +186,7 @@ impl<'a> QueryMatchContext<'a> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        let language = self.language;
+        let language = self.file_run_context.language;
         get_tokens(node)
             .skip(skip_options.skip())
             .filter(move |node| {
@@ -180,7 +200,7 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_text_slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
-        get_text_slice(self.file_contents, range)
+        get_text_slice(self.file_run_context.file_contents, range)
     }
 
     pub fn maybe_get_token_after<TFilter: FnMut(Node) -> bool>(
@@ -196,7 +216,11 @@ impl<'a> QueryMatchContext<'a> {
                     && if skip_options.include_comments() {
                         true
                     } else {
-                        !self.language.comment_kinds().contains(node.kind())
+                        !self
+                            .file_run_context
+                            .language
+                            .comment_kinds()
+                            .contains(node.kind())
                     }
             })
     }
@@ -222,14 +246,18 @@ impl<'a> QueryMatchContext<'a> {
                     && if skip_options.include_comments() {
                         true
                     } else {
-                        !self.language.comment_kinds().contains(node.kind())
+                        !self
+                            .file_run_context
+                            .language
+                            .comment_kinds()
+                            .contains(node.kind())
                     }
             })
             .unwrap()
     }
 
     pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
-        let comment_kinds = self.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language.comment_kinds();
         let end = end.start_byte();
         get_tokens_after_node(start)
             .take_while(|node| node.start_byte() < end)
@@ -249,7 +277,11 @@ impl<'a> QueryMatchContext<'a> {
                     && if skip_options.include_comments() {
                         true
                     } else {
-                        !self.language.comment_kinds().contains(node.kind())
+                        !self
+                            .file_run_context
+                            .language
+                            .comment_kinds()
+                            .contains(node.kind())
                     }
             })
             .unwrap()
@@ -268,7 +300,11 @@ impl<'a> QueryMatchContext<'a> {
                     && if skip_options.include_comments() {
                         true
                     } else {
-                        !self.language.comment_kinds().contains(node.kind())
+                        !self
+                            .file_run_context
+                            .language
+                            .comment_kinds()
+                            .contains(node.kind())
                     }
             })
     }
@@ -289,7 +325,7 @@ impl<'a> QueryMatchContext<'a> {
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
         let b_start = b.start_byte();
-        let language = self.language;
+        let language = self.file_run_context.language;
         get_tokens_after_node(a)
             .take_while(move |token| token.start_byte() < b_start)
             .skip(skip_options.skip())
@@ -304,61 +340,15 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_comments_after(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
-        let comment_kinds = self.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language.comment_kinds();
         get_tokens_after_node(node).take_while(|node| comment_kinds.contains(node.kind()))
     }
-}
 
-#[derive(Builder)]
-#[builder(default, setter(strip_option))]
-pub struct SkipOptions<TFilter: FnMut(Node) -> bool> {
-    skip: Option<usize>,
-    include_comments: Option<bool>,
-    filter: Option<TFilter>,
-}
-
-impl<TFilter: FnMut(Node) -> bool> SkipOptions<TFilter> {
-    pub fn skip(&self) -> usize {
-        self.skip.unwrap_or_default()
+    pub fn language(&self) -> SupportedLanguage {
+        self.file_run_context.language
     }
 
-    pub fn include_comments(&self) -> bool {
-        self.include_comments.unwrap_or_default()
-    }
-
-    pub fn filter(&mut self) -> Option<&mut TFilter> {
-        self.filter.as_mut()
-    }
-}
-
-impl<TFilter: FnMut(Node) -> bool> Default for SkipOptions<TFilter> {
-    fn default() -> Self {
-        Self {
-            skip: Default::default(),
-            include_comments: Default::default(),
-            filter: Default::default(),
-        }
-    }
-}
-
-impl From<usize> for SkipOptions<fn(Node) -> bool> {
-    fn from(value: usize) -> Self {
-        Self {
-            skip: Some(value),
-            include_comments: Default::default(),
-            filter: Default::default(),
-        }
-    }
-}
-
-impl<TFilter: FnMut(Node) -> bool> From<TFilter> for SkipOptions<TFilter> {
-    fn from(value: TFilter) -> Self {
-        Self {
-            skip: Default::default(),
-            include_comments: Default::default(),
-            filter: Some(value),
-        }
-    }
+    // pub fn retrieve<TFromFileRunContext: FromFileRunContext>(&self) -> TFromFileRunContext {}
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
@@ -428,59 +418,6 @@ impl<'a, T> From<T> for MaybeOwned<'a, T> {
 impl<'a, T> From<&'a T> for MaybeOwned<'a, T> {
     fn from(value: &'a T) -> Self {
         Self::Borrowed(value)
-    }
-}
-
-#[derive(Default)]
-pub struct Fixer {
-    pending_fixes: Option<Vec<PendingFix>>,
-}
-
-impl Fixer {
-    pub fn replace_text(&mut self, node: Node, replacement: impl Into<String>) {
-        self.pending_fixes
-            .get_or_insert_with(Default::default)
-            .push(PendingFix::new(node.byte_range(), replacement.into()));
-    }
-
-    pub(crate) fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
-        self.pending_fixes
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.pending_fixes
-            .as_ref()
-            .is_none_or_matches(|pending_fixes| pending_fixes.is_empty())
-    }
-
-    pub fn remove_range(&mut self, range: ops::Range<usize>) {
-        self.pending_fixes
-            .get_or_insert_with(Default::default)
-            .push(PendingFix::new(range, Default::default()));
-    }
-
-    pub fn replace_text_range(&mut self, range: ops::Range<usize>, replacement: impl Into<String>) {
-        self.pending_fixes
-            .get_or_insert_with(Default::default)
-            .push(PendingFix::new(range, replacement.into()));
-    }
-}
-
-impl IsEmpty for Fixer {
-    fn _is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
-
-#[derive(Clone)]
-pub struct PendingFix {
-    pub range: ops::Range<usize>,
-    pub replacement: String,
-}
-
-impl PendingFix {
-    pub fn new(range: ops::Range<usize>, replacement: String) -> Self {
-        Self { range, replacement }
     }
 }
 

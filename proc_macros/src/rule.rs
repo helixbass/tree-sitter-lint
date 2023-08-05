@@ -577,7 +577,7 @@ fn get_rule_instance_rule_instance_impl(
         impl #crate_name::RuleInstance for #rule_instance_struct_name {
             fn instantiate_per_file<'a>(
                 self: std::sync::Arc<Self>,
-                _file_run_info: &#crate_name::FileRunInfo<'a>,
+                _file_run_context: #crate_name::FileRunContext<'a>,
             ) -> Box<dyn #crate_name::RuleInstancePerFile<'a> + 'a> {
                 Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,

@@ -1,10 +1,10 @@
-use std::{collections::HashMap, ops, path::Path, sync::Arc};
+use std::{collections::HashMap, ops, sync::Arc};
 
 use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
-    context::QueryMatchContext,
+    context::{FileRunContext, QueryMatchContext},
     tree_sitter::{Language, Node, Query},
     Config,
 };
@@ -29,7 +29,7 @@ pub trait Rule: Send + Sync {
 pub trait RuleInstance: Send + Sync {
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_info: &FileRunInfo<'a>,
+        file_run_context: FileRunContext<'a>,
     ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
     fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
@@ -131,10 +131,6 @@ pub trait RuleInstancePerFile<'a> {
         context: &mut QueryMatchContext<'a>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
-}
-
-pub struct FileRunInfo<'a> {
-    pub path: &'a Path,
 }
 
 pub enum MatchBy {

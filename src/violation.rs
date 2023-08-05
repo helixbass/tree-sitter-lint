@@ -42,7 +42,7 @@ impl<'a> Violation<'a> {
             message_or_message_id,
             range: range.unwrap_or_else(|| node.range()),
             kind: node.kind(),
-            path: query_match_context.path.to_owned(),
+            path: query_match_context.file_run_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
             plugin_index: query_match_context.rule.plugin_index,
             had_fixes,
