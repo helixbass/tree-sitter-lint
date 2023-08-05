@@ -28,7 +28,7 @@ pub struct Violation<'a> {
 impl<'a> Violation<'a> {
     pub fn contextualize(
         self,
-        query_match_context: &QueryMatchContext<'a>,
+        query_match_context: &QueryMatchContext,
         had_fixes: bool,
     ) -> ViolationWithContext {
         let Violation {

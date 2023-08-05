@@ -23,14 +23,15 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     process,
+    rc::Rc,
     sync::{Mutex, PoisonError},
 };
 
 use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
-use context::PendingFix;
 pub use context::{FileRunContext, QueryMatchContext, SkipOptions, SkipOptionsBuilder};
+use context::{FromFileRunContextInstances, PendingFix};
 pub use node::NodeExt;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
@@ -87,7 +88,7 @@ fn run_per_file<'a>(
     )
     .for_each(|query_match| {
         run_match(
-            file_run_context,
+            file_run_context.clone(),
             query_match,
             file_run_context.aggregated_queries,
             &mut instantiated_per_file_rules,
@@ -103,7 +104,7 @@ fn run_per_file<'a>(
         .instantiated_rule_root_exit_rule_listener_indices
     {
         run_single_on_query_match_callback(
-            file_run_context,
+            file_run_context.clone(),
             &file_run_context.instantiated_rules[instantiated_rule_index],
             &mut instantiated_per_file_rules,
             rule_listener_index,
@@ -128,6 +129,8 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
     tree_sitter_grep::run_with_single_per_file_callback(
         tree_sitter_grep_args,
         |dir_entry, language, file_contents, tree, query| {
+            let from_file_run_context_instances: Rc<FromFileRunContextInstances> =
+                Default::default();
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -138,6 +141,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
                     &aggregated_queries,
                     query,
                     &instantiated_rules,
+                    from_file_run_context_instances,
                 ),
                 |violations| {
                     all_violations
@@ -229,7 +233,7 @@ fn run_match<'a, 'b>(
                 .filter(|capture| capture.index == capture_index)
                 .for_each(|capture| {
                     run_single_on_query_match_callback(
-                        file_run_context,
+                        file_run_context.clone(),
                         instantiated_rule,
                         instantiated_per_file_rules,
                         rule_listener_index,
@@ -241,7 +245,7 @@ fn run_match<'a, 'b>(
         }
         None => {
             run_single_on_query_match_callback(
-                file_run_context,
+                file_run_context.clone(),
                 instantiated_rule,
                 instantiated_per_file_rules,
                 rule_listener_index,
@@ -266,14 +270,15 @@ fn run_single_on_query_match_callback<'a, 'b>(
     on_found_violations: impl FnOnce(Vec<ViolationWithContext>),
     on_found_pending_fixes: impl FnOnce(Vec<PendingFix>),
 ) {
-    let mut query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
+    let mut query_match_context =
+        QueryMatchContext::new(file_run_context.clone(), instantiated_rule);
     instantiated_per_file_rules
         .entry(instantiated_rule.meta.name.clone())
         .or_insert_with(|| {
             instantiated_rule
                 .rule_instance
                 .clone()
-                .instantiate_per_file(file_run_context)
+                .instantiate_per_file(file_run_context.clone())
         })
         .on_query_match(
             rule_listener_index,
@@ -317,6 +322,7 @@ fn run_fixing_loop<'a>(
         let tree = RopeOrSlice::<'_>::from(&file_contents)
             .parse(&mut get_parser(language.language()), None)
             .unwrap();
+        let from_file_run_context_instances: Rc<FromFileRunContextInstances> = Default::default();
         run_per_file(
             FileRunContext::new(
                 path,
@@ -331,6 +337,7 @@ fn run_fixing_loop<'a>(
                     .unwrap()
                     .query,
                 instantiated_rules,
+                from_file_run_context_instances,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);
@@ -373,6 +380,7 @@ pub fn run_for_slice<'a>(
         },
         Cow::Borrowed,
     );
+    let from_file_run_context_instances: Rc<FromFileRunContextInstances> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -387,6 +395,7 @@ pub fn run_for_slice<'a>(
                 .unwrap()
                 .query,
             &instantiated_rules,
+            from_file_run_context_instances,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -424,6 +433,7 @@ pub fn run_fixing_for_slice<'a>(
     );
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
+    let from_file_run_context_instances: Rc<FromFileRunContextInstances> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -438,6 +448,7 @@ pub fn run_fixing_for_slice<'a>(
                 .unwrap()
                 .query,
             &instantiated_rules,
+            from_file_run_context_instances,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);

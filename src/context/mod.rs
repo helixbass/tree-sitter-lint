@@ -1,11 +1,15 @@
 use std::{
+    any::TypeId,
     borrow::Cow,
     cell::{Ref, RefCell},
     ops,
     path::Path,
+    rc::Rc,
     sync::Arc,
 };
 
+use better_any::{Tid, TidAble, TidExt};
+use dashmap::DashMap;
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
 };
@@ -27,7 +31,7 @@ use crate::{
     AggregatedQueries, Config,
 };
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct FileRunContext<'a> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
@@ -37,6 +41,7 @@ pub struct FileRunContext<'a> {
     pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
+    from_file_run_context_instances: Rc<FromFileRunContextInstances<'a>>,
 }
 
 impl<'a> FileRunContext<'a> {
@@ -50,6 +55,7 @@ impl<'a> FileRunContext<'a> {
         aggregated_queries: &'a AggregatedQueries,
         query: &'a Arc<Query>,
         instantiated_rules: &'a [InstantiatedRule],
+        from_file_run_context_instances: Rc<FromFileRunContextInstances<'a>>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -61,7 +67,29 @@ impl<'a> FileRunContext<'a> {
             aggregated_queries,
             query,
             instantiated_rules,
+            from_file_run_context_instances,
         }
+    }
+}
+
+#[derive(Default)]
+pub struct FromFileRunContextInstances<'a> {
+    instances: DashMap<TypeId, Rc<dyn Tid<'a>>>,
+}
+
+impl<'a> FromFileRunContextInstances<'a> {
+    pub fn get_or_init<TFromFileRunContext: FromFileRunContext<'a>>(
+        &self,
+        file_run_context: FileRunContext<'a>,
+    ) -> Rc<TFromFileRunContext> {
+        let any = self
+            .instances
+            .entry(TFromFileRunContext::id())
+            .or_insert_with(|| {
+                Rc::new(TFromFileRunContext::from_file_run_context(file_run_context))
+            })
+            .clone();
+        any.downcast_rc::<TFromFileRunContext>().ok().unwrap()
     }
 }
 
@@ -359,7 +387,15 @@ impl<'a> QueryMatchContext<'a> {
         self.file_run_context.language
     }
 
-    // pub fn retrieve<TFromFileRunContext: FromFileRunContext>(&self) -> TFromFileRunContext {}
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a>>(&self) -> Rc<TFromFileRunContext> {
+        self.file_run_context
+            .from_file_run_context_instances
+            .get_or_init::<TFromFileRunContext>(self.file_run_context.clone())
+    }
+}
+
+pub trait FromFileRunContext<'a>: TidAble<'a> {
+    fn from_file_run_context(file_run_context: FileRunContext<'a>) -> Self;
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
