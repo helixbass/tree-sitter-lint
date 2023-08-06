@@ -14,11 +14,16 @@ use tree_sitter_grep::{
 mod backward_tokens;
 mod fix;
 mod get_tokens;
+mod provided_types;
 mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use fix::{Fixer, PendingFix};
 use get_tokens::{get_tokens, get_tokens_after_node};
+pub use provided_types::{
+    FromFileRunContext, FromFileRunContextInstanceProvider,
+    FromFileRunContextInstanceProviderFactory,
+};
 pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
 use crate::{
@@ -107,32 +112,6 @@ impl<
             from_file_run_context_instance_provider,
         }
     }
-}
-
-// pub trait FromFileRunContextInstanceProvider<'b> {
-//     fn get<'a: 'b>(&self, id: TypeId, file_run_context: FileRunContext<'a, '_>)
-//         -> Option<&dyn Tid>;
-// }
-
-pub trait FromFileRunContextInstanceProvider<'a>: Sized {
-    type Parent: FromFileRunContextInstanceProviderFactory<Provider<'a> = Self>;
-
-    fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
-        &self,
-        file_run_context: FileRunContext<'a, '_, Self::Parent>,
-    ) -> Option<&T>;
-}
-
-pub trait FromFileRunContextInstanceProviderFactory: Send + Sync {
-    type Provider<'a>: FromFileRunContextInstanceProvider<'a, Parent = Self>;
-
-    fn create<'a>(&self) -> Self::Provider<'a>;
-}
-
-pub trait FromFileRunContext<'a> {
-    fn from_file_run_context(
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
-    ) -> Self;
 }
 
 pub struct QueryMatchContext<
