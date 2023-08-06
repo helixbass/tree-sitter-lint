@@ -22,7 +22,8 @@ pub use fix::{Fixer, PendingFix};
 use get_tokens::{get_tokens, get_tokens_after_node};
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory,
+    FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
+    FromFileRunContextProvidedTypesOnceLockStorage,
 };
 pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 

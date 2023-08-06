@@ -33,7 +33,9 @@ pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::{
     FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, QueryMatchContext, SkipOptions, SkipOptionsBuilder,
+    FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
+    FromFileRunContextProvidedTypesOnceLockStorage, QueryMatchContext, SkipOptions,
+    SkipOptionsBuilder,
 };
 pub use node::NodeExt;
 pub use plugin::Plugin;
@@ -56,6 +58,7 @@ use tree_sitter_grep::{
 };
 pub use violation::{ViolationBuilder, ViolationWithContext};
 
+pub extern crate better_any;
 pub extern crate clap;
 pub extern crate serde_json;
 pub extern crate serde_yaml;
