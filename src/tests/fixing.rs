@@ -7,7 +7,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 
-use crate::{rule::Rule, RuleTester};
+use crate::{rule::Rule, FromFileRunContextInstanceProvider, RuleTester};
 
 #[macro_export]
 macro_rules! assert_fixed_content {
@@ -124,10 +124,12 @@ fn test_multiple_nonconflicting_fixes_from_different_rules() {
     );
 }
 
-fn create_identifier_replacing_rule(
+fn create_identifier_replacing_rule<
+    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+>(
     name: impl Into<String>,
     replacement: impl Into<String>,
-) -> Arc<dyn Rule> {
+) -> Arc<dyn Rule<TFromFileRunContextInstanceProvider>> {
     rule! {
         name => format!("replace_{}_with_{}", self.name, self.replacement),
         fixable => true,

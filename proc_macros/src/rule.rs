@@ -513,7 +513,7 @@ fn get_rule_rule_impl(
         None => quote!(None),
     };
     quote! {
-        impl #crate_name::Rule for #rule_struct_name {
+        impl<TFr: #crate_name::FromFileRunContextInstanceProvider> #crate_name::Rule<TFr> for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
                 #crate_name::RuleMeta {
                     name: #name.into(),
@@ -523,7 +523,11 @@ fn get_rule_rule_impl(
                 }
             }
 
-            fn instantiate(self: std::sync::Arc<Self>, _config: &#crate_name::Config, rule_configuration: &#crate_name::RuleConfiguration) -> std::sync::Arc<dyn #crate_name::RuleInstance> {
+            fn instantiate(
+                self: std::sync::Arc<Self>,
+                _config: &#crate_name::Config<TFr>,
+                rule_configuration: &#crate_name::RuleConfiguration,
+            ) -> std::sync::Arc<dyn #crate_name::RuleInstance<TFr>> {
                 let options = rule_configuration.options.as_ref();
                 #maybe_deserialize_options
                 std::sync::Arc::new(#rule_instance_struct_name {
@@ -574,11 +578,11 @@ fn get_rule_instance_rule_instance_impl(
             None => quote!(Default::default()),
         });
     quote! {
-        impl #crate_name::RuleInstance for #rule_instance_struct_name {
+        impl<TFr: #crate_name::FromFileRunContextInstanceProvider> #crate_name::RuleInstance<TFr> for #rule_instance_struct_name {
             fn instantiate_per_file<'a>(
                 self: std::sync::Arc<Self>,
-                _file_run_context: #crate_name::FileRunContext<'a, '_>,
-            ) -> Box<dyn #crate_name::RuleInstancePerFile<'a> + 'a> {
+                _file_run_context: #crate_name::FileRunContext<'a, '_, TFr>,
+            ) -> Box<dyn #crate_name::RuleInstancePerFile<'a, TFr> + 'a> {
                 Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,
                     _phantom_data: std::marker::PhantomData,
@@ -586,7 +590,7 @@ fn get_rule_instance_rule_instance_impl(
                 })
             }
 
-            fn rule(&self) -> std::sync::Arc<dyn #crate_name::Rule> {
+            fn rule(&self) -> std::sync::Arc<dyn #crate_name::Rule<TFr>> {
                 self.rule.clone()
             }
 
@@ -758,8 +762,8 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
         }
     });
     quote! {
-        impl<'a> #crate_name::RuleInstancePerFile<'a> for #rule_instance_per_file_struct_name<'a> {
-            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a, '_>) {
+        impl<'a, TFr: #crate_name::FromFileRunContextInstanceProvider> #crate_name::RuleInstancePerFile<'a, TFr> for #rule_instance_per_file_struct_name<'a> {
+            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a, '_, TFr>) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks
@@ -768,7 +772,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
                 }
             }
 
-            fn rule_instance(&self) -> std::sync::Arc<dyn #crate_name::RuleInstance> {
+            fn rule_instance(&self) -> std::sync::Arc<dyn #crate_name::RuleInstance<TFr>> {
                 self.rule_instance.clone()
             }
         }

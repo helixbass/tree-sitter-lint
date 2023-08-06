@@ -1,6 +1,6 @@
-use std::{any::TypeId, cmp::Ordering, iter, sync::Arc};
+use std::{cmp::Ordering, iter, sync::Arc};
 
-use better_any::Tid;
+use better_any::TidAble;
 use derive_builder::Builder;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
@@ -9,17 +9,27 @@ use crate::{
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    FileRunContext, RuleConfiguration,
+    FileRunContext, FromFileRunContext, RuleConfiguration,
 };
 
-pub struct RuleTester {
-    rule: Arc<dyn Rule>,
+pub struct RuleTester<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> {
+    rule: Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
     rule_tests: RuleTests,
     language: SupportedLanguage,
+    get_from_file_run_context_instance_provider:
+        Box<dyn Fn() -> TFromFileRunContextInstanceProvider + Sync>,
 }
 
-impl RuleTester {
-    fn new(rule: Arc<dyn Rule>, rule_tests: RuleTests) -> Self {
+impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
+    RuleTester<TFromFileRunContextInstanceProvider>
+{
+    fn new(
+        rule: Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+        rule_tests: RuleTests,
+        get_from_file_run_context_instance_provider: Box<
+            dyn Fn() -> TFromFileRunContextInstanceProvider + Sync,
+        >,
+    ) -> Self {
         if !rule.meta().fixable
             && rule_tests.invalid_tests.iter().any(|invalid_test| {
                 matches!(
@@ -38,11 +48,23 @@ impl RuleTester {
             language: languages[0],
             rule,
             rule_tests,
+            get_from_file_run_context_instance_provider,
         }
     }
 
-    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
-        Self::new(rule, rule_tests).run_tests()
+    pub fn run_with_from_file_run_context_instance_provider(
+        rule: Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+        rule_tests: RuleTests,
+        get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider
+            + Sync
+            + 'static,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(get_from_file_run_context_instance_provider),
+        )
+        .run_tests()
     }
 
     fn run_tests(&self) {
@@ -71,7 +93,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
-            get_dummy_from_file_run_context_instance_provider,
+            || (self.get_from_file_run_context_instance_provider)(),
         );
         assert!(
             violations.is_empty(),
@@ -98,7 +120,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
-            get_dummy_from_file_run_context_instance_provider,
+            || (self.get_from_file_run_context_instance_provider)(),
         );
         assert_that_violations_match_expected(&violations, invalid_test);
         match invalid_test.output.as_ref() {
@@ -119,6 +141,20 @@ impl RuleTester {
             }
             _ => (),
         }
+    }
+}
+
+impl RuleTester<DummyFromFileRunContextInstanceProvider> {
+    pub fn run(
+        rule: Arc<dyn Rule<DummyFromFileRunContextInstanceProvider>>,
+        rule_tests: RuleTests,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(|| DummyFromFileRunContextInstanceProvider),
+        )
+        .run_tests()
     }
 }
 
@@ -343,15 +379,20 @@ impl From<&RuleTestExpectedError> for RuleTestExpectedError {
     }
 }
 
-struct DummyFromFileRunContextInstanceProvider;
+#[derive(Clone)]
+pub struct DummyFromFileRunContextInstanceProvider;
 
 impl FromFileRunContextInstanceProvider for DummyFromFileRunContextInstanceProvider {
-    fn get(&self, _id: TypeId, _file_run_context: FileRunContext<'_, '_>) -> Option<&dyn Tid> {
+    fn get<'a, T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+        &self,
+        _file_run_context: FileRunContext<'_, '_, Self>,
+    ) -> Option<&T> {
         unreachable!()
     }
 }
 
-pub fn get_dummy_from_file_run_context_instance_provider(
-) -> Box<dyn FromFileRunContextInstanceProvider> {
-    Box::new(DummyFromFileRunContextInstanceProvider)
+#[allow(dead_code)]
+pub fn get_dummy_from_file_run_context_instance_provider() -> DummyFromFileRunContextInstanceProvider
+{
+    DummyFromFileRunContextInstanceProvider
 }

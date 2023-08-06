@@ -1,5 +1,4 @@
 use std::{
-    any::TypeId,
     borrow::Cow,
     cell::{Ref, RefCell},
     ops,
@@ -7,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use better_any::{Tid, TidAble, TidExt};
+use better_any::TidAble;
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
 };
@@ -29,31 +28,59 @@ use crate::{
     AggregatedQueries, Config,
 };
 
-#[derive(Copy, Clone)]
-pub struct FileRunContext<'a, 'b> {
+pub struct FileRunContext<
+    'a,
+    'b,
+    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
-    pub config: &'a Config,
+    pub config: &'a Config<TFromFileRunContextInstanceProvider>,
     pub language: SupportedLanguage,
-    pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
+    pub(crate) aggregated_queries: &'a AggregatedQueries<'a, TFromFileRunContextInstanceProvider>,
     pub(crate) query: &'a Arc<Query>,
-    pub(crate) instantiated_rules: &'a [InstantiatedRule],
-    from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider,
+    pub(crate) instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
+    from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProvider,
 }
 
-impl<'a, 'b> FileRunContext<'a, 'b> {
+impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> Copy
+    for FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+{
+}
+
+impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> Clone
+    for FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+{
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path,
+            file_contents: self.file_contents,
+            tree: self.tree,
+            config: self.config,
+            language: self.language,
+            aggregated_queries: self.aggregated_queries,
+            query: self.query,
+            instantiated_rules: self.instantiated_rules,
+            from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
+        }
+    }
+}
+
+impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
+    FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
-        config: &'a Config,
+        config: &'a Config<TFromFileRunContextInstanceProvider>,
         language: SupportedLanguage,
-        aggregated_queries: &'a AggregatedQueries,
+        aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProvider>,
         query: &'a Arc<Query>,
-        instantiated_rules: &'a [InstantiatedRule],
-        from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider,
+        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
+        from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProvider,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -70,19 +97,42 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
     }
 }
 
-pub trait FromFileRunContextInstanceProvider {
-    fn get(&self, id: TypeId, file_run_context: FileRunContext) -> Option<&dyn Tid>;
+// pub trait FromFileRunContextInstanceProvider<'b> {
+//     fn get<'a: 'b>(&self, id: TypeId, file_run_context: FileRunContext<'a, '_>)
+//         -> Option<&dyn Tid>;
+// }
+
+pub trait FromFileRunContextInstanceProvider: Sized {
+    fn get<'a, T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+        &self,
+        file_run_context: FileRunContext<'a, '_, Self>,
+    ) -> Option<&T>;
 }
 
-pub struct QueryMatchContext<'a, 'b> {
-    pub file_run_context: FileRunContext<'a, 'b>,
-    pub(crate) rule: &'a InstantiatedRule,
+pub trait FromFileRunContext<'a> {
+    fn from_file_run_context(
+        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProvider>,
+    ) -> Self;
+}
+
+pub struct QueryMatchContext<
+    'a,
+    'b,
+    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+> {
+    pub file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
+    pub(crate) rule: &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
     pending_fixes: RefCell<Option<Vec<PendingFix>>>,
     pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<'a, 'b> QueryMatchContext<'a, 'b> {
-    pub fn new(file_run_context: FileRunContext<'a, 'b>, rule: &'a InstantiatedRule) -> Self {
+impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
+    QueryMatchContext<'a, 'b, TFromFileRunContextInstanceProvider>
+{
+    pub fn new(
+        file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
+        rule: &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
+    ) -> Self {
         Self {
             file_run_context,
             rule,
@@ -368,18 +418,14 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         self.file_run_context.language
     }
 
-    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'b>>(&self) -> &TFromFileRunContext {
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + for<'c> TidAble<'c>>(
+        &self,
+    ) -> &TFromFileRunContext {
         self.file_run_context
             .from_file_run_context_instance_provider
-            .get(TFromFileRunContext::id(), self.file_run_context)
-            .unwrap()
-            .downcast_ref::<TFromFileRunContext>()
+            .get::<TFromFileRunContext>(self.file_run_context)
             .unwrap()
     }
-}
-
-pub trait FromFileRunContext<'a>: TidAble<'a> + Send + Sync {
-    fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self;
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
