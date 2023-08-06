@@ -109,6 +109,7 @@ pub struct Config<
 impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
     Config<TFromFileRunContextInstanceProviderFactory>
 {
+    #[allow(clippy::type_complexity)]
     fn get_rules_by_plugin_prefixed_name(
         &self,
     ) -> &HashMap<
@@ -146,6 +147,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
         })
     }
 
+    #[allow(clippy::type_complexity)]
     fn get_active_rules_and_associated_plugins_and_options(
         &self,
     ) -> Vec<(
@@ -167,6 +169,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
             .collect()
     }
 
+    #[allow(clippy::type_complexity)]
     fn filter_based_on_rule_argument<'a>(
         &self,
         active_rules_and_associated_plugins_and_options: Vec<(

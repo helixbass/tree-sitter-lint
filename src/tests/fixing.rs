@@ -7,10 +7,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 
-use crate::{
-    rule::Rule, FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
-    RuleTester,
-};
+use crate::{rule::Rule, FromFileRunContextInstanceProviderFactory, RuleTester};
 
 #[macro_export]
 macro_rules! assert_fixed_content {

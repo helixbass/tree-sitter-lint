@@ -297,6 +297,7 @@ fn test_retrieve() {
 
     #[derive(Clone)]
     struct Foo<'a> {
+        #[allow(dead_code)]
         text: &'a str,
     }
 
@@ -311,7 +312,7 @@ fn test_retrieve() {
             Self {
                 text: match &file_run_context.file_contents {
                     RopeOrSlice::Slice(file_contents) => {
-                        &std::str::from_utf8(&file_contents[..4]).unwrap()
+                        std::str::from_utf8(&file_contents[..4]).unwrap()
                     }
                     _ => unreachable!(),
                 },

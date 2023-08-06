@@ -81,7 +81,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta().name)
+                .rule(self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
                     name: self.rule.meta().name,
@@ -106,7 +106,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta().name)
+                .rule(self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
                     name: self.rule.meta().name,

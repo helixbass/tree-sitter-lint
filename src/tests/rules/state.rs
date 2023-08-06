@@ -6,9 +6,7 @@ use proc_macros::{
 };
 use tree_sitter_grep::tree_sitter::Node;
 
-use crate::{
-    FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory, Rule, RuleTester,
-};
+use crate::{FromFileRunContextInstanceProviderFactory, Rule, RuleTester};
 
 #[test]
 fn test_per_file_run_state() {

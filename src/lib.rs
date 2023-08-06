@@ -548,8 +548,8 @@ pub fn run_fixing_for_slice<
     violations
 }
 
-fn get_tree_sitter_grep_args<'a>(
-    aggregated_queries: &AggregatedQueries<'a, impl FromFileRunContextInstanceProviderFactory>,
+fn get_tree_sitter_grep_args(
+    aggregated_queries: &AggregatedQueries<impl FromFileRunContextInstanceProviderFactory>,
     language: Option<SupportedLanguage>,
 ) -> tree_sitter_grep::Args {
     tree_sitter_grep::ArgsBuilder::default()
