@@ -4,12 +4,10 @@ use std::{
     cell::{Ref, RefCell},
     ops,
     path::Path,
-    rc::Rc,
     sync::Arc,
 };
 
 use better_any::{Tid, TidAble, TidExt};
-use dashmap::DashMap;
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
 };
@@ -31,8 +29,8 @@ use crate::{
     AggregatedQueries, Config,
 };
 
-#[derive(Clone)]
-pub struct FileRunContext<'a> {
+#[derive(Copy, Clone)]
+pub struct FileRunContext<'a, 'b> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
@@ -41,10 +39,10 @@ pub struct FileRunContext<'a> {
     pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
-    from_file_run_context_instances: Rc<FromFileRunContextInstances<'a>>,
+    from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider,
 }
 
-impl<'a> FileRunContext<'a> {
+impl<'a, 'b> FileRunContext<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
@@ -55,7 +53,7 @@ impl<'a> FileRunContext<'a> {
         aggregated_queries: &'a AggregatedQueries,
         query: &'a Arc<Query>,
         instantiated_rules: &'a [InstantiatedRule],
-        from_file_run_context_instances: Rc<FromFileRunContextInstances<'a>>,
+        from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -67,41 +65,24 @@ impl<'a> FileRunContext<'a> {
             aggregated_queries,
             query,
             instantiated_rules,
-            from_file_run_context_instances,
+            from_file_run_context_instance_provider,
         }
     }
 }
 
-#[derive(Default)]
-pub struct FromFileRunContextInstances<'a> {
-    instances: DashMap<TypeId, Rc<dyn Tid<'a>>>,
+pub trait FromFileRunContextInstanceProvider {
+    fn get(&self, id: TypeId, file_run_context: FileRunContext) -> Option<&dyn Tid>;
 }
 
-impl<'a> FromFileRunContextInstances<'a> {
-    pub fn get_or_init<TFromFileRunContext: FromFileRunContext<'a>>(
-        &self,
-        file_run_context: FileRunContext<'a>,
-    ) -> Rc<TFromFileRunContext> {
-        let any = self
-            .instances
-            .entry(TFromFileRunContext::id())
-            .or_insert_with(|| {
-                Rc::new(TFromFileRunContext::from_file_run_context(file_run_context))
-            })
-            .clone();
-        any.downcast_rc::<TFromFileRunContext>().ok().unwrap()
-    }
-}
-
-pub struct QueryMatchContext<'a> {
-    pub file_run_context: FileRunContext<'a>,
+pub struct QueryMatchContext<'a, 'b> {
+    pub file_run_context: FileRunContext<'a, 'b>,
     pub(crate) rule: &'a InstantiatedRule,
     pending_fixes: RefCell<Option<Vec<PendingFix>>>,
     pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<'a> QueryMatchContext<'a> {
-    pub fn new(file_run_context: FileRunContext<'a>, rule: &'a InstantiatedRule) -> Self {
+impl<'a, 'b> QueryMatchContext<'a, 'b> {
+    pub fn new(file_run_context: FileRunContext<'a, 'b>, rule: &'a InstantiatedRule) -> Self {
         Self {
             file_run_context,
             rule,
@@ -387,15 +368,18 @@ impl<'a> QueryMatchContext<'a> {
         self.file_run_context.language
     }
 
-    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a>>(&self) -> Rc<TFromFileRunContext> {
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'b>>(&self) -> &TFromFileRunContext {
         self.file_run_context
-            .from_file_run_context_instances
-            .get_or_init::<TFromFileRunContext>(self.file_run_context.clone())
+            .from_file_run_context_instance_provider
+            .get(TFromFileRunContext::id(), self.file_run_context)
+            .unwrap()
+            .downcast_ref::<TFromFileRunContext>()
+            .unwrap()
     }
 }
 
-pub trait FromFileRunContext<'a>: TidAble<'a> {
-    fn from_file_run_context(file_run_context: FileRunContext<'a>) -> Self;
+pub trait FromFileRunContext<'a>: TidAble<'a> + Send + Sync {
+    fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self;
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {

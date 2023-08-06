@@ -24,6 +24,7 @@ macro_rules! assert_fixed_content {
                 .build()
                 .unwrap(),
             $crate::tree_sitter_grep::SupportedLanguage::Rust,
+            $crate::rule_tester::get_dummy_from_file_run_context_instance_provider,
         );
         assert_eq!(
             std::str::from_utf8(&file_contents).unwrap().trim(),
@@ -41,7 +42,7 @@ fn test_single_fix() {
         [create_identifier_replacing_rule("foo", "bar")],
         r#"
             fn bar() {}
-        "#
+        "#,
     );
 }
 

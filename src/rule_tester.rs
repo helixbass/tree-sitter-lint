@@ -1,13 +1,15 @@
-use std::{cmp::Ordering, iter, sync::Arc};
+use std::{any::TypeId, cmp::Ordering, iter, sync::Arc};
 
+use better_any::Tid;
 use derive_builder::Builder;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
+    context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    RuleConfiguration,
+    FileRunContext, RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -69,6 +71,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
+            get_dummy_from_file_run_context_instance_provider,
         );
         assert!(
             violations.is_empty(),
@@ -95,6 +98,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
+            get_dummy_from_file_run_context_instance_provider,
         );
         assert_that_violations_match_expected(&violations, invalid_test);
         match invalid_test.output.as_ref() {
@@ -337,4 +341,17 @@ impl From<&RuleTestExpectedError> for RuleTestExpectedError {
     fn from(value: &RuleTestExpectedError) -> Self {
         value.clone()
     }
+}
+
+struct DummyFromFileRunContextInstanceProvider;
+
+impl FromFileRunContextInstanceProvider for DummyFromFileRunContextInstanceProvider {
+    fn get(&self, _id: TypeId, _file_run_context: FileRunContext<'_, '_>) -> Option<&dyn Tid> {
+        unreachable!()
+    }
+}
+
+pub fn get_dummy_from_file_run_context_instance_provider(
+) -> Box<dyn FromFileRunContextInstanceProvider> {
+    Box::new(DummyFromFileRunContextInstanceProvider)
 }
