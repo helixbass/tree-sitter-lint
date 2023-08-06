@@ -303,7 +303,6 @@ fn test_retrieve() {
     impl<'a> FromFileRunContext<'a> for Foo<'a> {
         fn from_file_run_context(
             file_run_context: FileRunContext<
-                '_,
                 'a,
                 '_,
                 impl FromFileRunContextInstanceProviderFactory,
@@ -332,7 +331,7 @@ fn test_retrieve() {
 
         fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
             &self,
-            file_run_context: FileRunContext<'_, 'a, '_, Self::Parent>,
+            file_run_context: FileRunContext<'a, '_, Self::Parent>,
         ) -> Option<&T> {
             match T::id() {
                 id if id == Foo::<'a>::id() => Some(unsafe {

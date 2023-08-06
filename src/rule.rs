@@ -35,7 +35,7 @@ pub trait RuleInstance<
 {
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_context: FileRunContext<'a, '_, '_, TFromFileRunContextInstanceProviderFactory>,
+        file_run_context: FileRunContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
     ) -> Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>;
     fn rule(&self) -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
@@ -142,7 +142,7 @@ pub trait RuleInstancePerFile<
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a, '_, '_, TFromFileRunContextInstanceProviderFactory>,
+        context: &mut QueryMatchContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
 }

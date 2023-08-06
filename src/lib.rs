@@ -84,11 +84,10 @@ const MAX_FIX_ITERATIONS: usize = 10;
 fn run_per_file<
     'a,
     'b,
-    'c,
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory<Provider<'b> = TFromFileRunContextInstanceProvider>,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider<'b, Parent = TFromFileRunContextInstanceProviderFactory>,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory<Provider<'a> = TFromFileRunContextInstanceProvider>,
+    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider<'a, Parent = TFromFileRunContextInstanceProviderFactory>,
 >(
-    file_run_context: FileRunContext<'a, 'b, 'c, TFromFileRunContextInstanceProviderFactory>,
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(
         Vec<PendingFix>,
@@ -241,11 +240,10 @@ fn run_match<
     'a,
     'b,
     'c,
-    'd,
     TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
-    file_run_context: FileRunContext<'a, 'b, 'c, TFromFileRunContextInstanceProviderFactory>,
-    query_match: &'d QueryMatch<'a, 'a>,
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
+    query_match: &'c QueryMatch<'a, 'a>,
     aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
     instantiated_per_file_rules: &mut HashMap<
         RuleName,
@@ -302,17 +300,16 @@ fn run_single_on_query_match_callback<
     'a,
     'b,
     'c,
-    'd,
     TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
-    file_run_context: FileRunContext<'a, 'b, 'c, TFromFileRunContextInstanceProviderFactory>,
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
     instantiated_rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     instantiated_per_file_rules: &mut HashMap<
         RuleName,
         Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>,
     >,
     rule_listener_index: usize,
-    node_or_captures: NodeOrCaptures<'a, 'd>,
+    node_or_captures: NodeOrCaptures<'a, 'c>,
     on_found_violations: impl FnOnce(Vec<ViolationWithContext>),
     on_found_pending_fixes: impl FnOnce(Vec<PendingFix>),
 ) {
