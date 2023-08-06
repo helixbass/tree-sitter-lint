@@ -116,7 +116,7 @@ struct FromFileRunContextInstanceProviderLocal<'a> {
 impl<'a> FromFileRunContextInstanceProvider<'a> for FromFileRunContextInstanceProviderLocal<'a> {
     type Parent = FromFileRunContextInstanceProviderFactoryLocal;
 
-    fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
         &self,
         file_run_context: FileRunContext<'a, '_, Self::Parent>,
     ) -> Option<&T> {

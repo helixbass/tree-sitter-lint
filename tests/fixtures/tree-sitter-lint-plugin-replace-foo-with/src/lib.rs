@@ -18,6 +18,7 @@ impl<'a> FromFileRunContext<'a> for Foo<'a> {
     fn from_file_run_context(
         file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
     ) -> Self {
+        println!("instantiating Foo for {:#?}", file_run_context.path);
         Self {
             text: match &file_run_context.file_contents {
                 RopeOrSlice::Slice(file_contents) => {
@@ -73,6 +74,7 @@ pub fn instantiate<T: FromFileRunContextInstanceProviderFactory>() -> Plugin<T> 
         rules: vec![
             replace_foo_with_bar_rule(),
             replace_foo_with_something_rule(),
+            starts_with_use_rule(),
         ],
     }
 }
@@ -123,6 +125,27 @@ fn replace_foo_with_something_rule<T: FromFileRunContextInstanceProviderFactory>
                         }
                     }
                 );
+            }
+        ],
+        languages => [Rust]
+    }
+}
+
+fn starts_with_use_rule<T: FromFileRunContextInstanceProviderFactory>() -> Arc<dyn Rule<T>> {
+    rule! {
+        name => "starts-with-use",
+        listeners => [
+            r#"
+              (use_declaration) @c
+            "# => |node, context| {
+                if context.retrieve::<Foo<'a>>().text == "use " {
+                    context.report(
+                        violation! {
+                            node => node,
+                            message => r#"Starts with 'use'"#,
+                        }
+                    );
+                }
             }
         ],
         languages => [Rust]
