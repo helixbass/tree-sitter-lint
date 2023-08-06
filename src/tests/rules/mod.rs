@@ -57,8 +57,8 @@ fn test_rule_options() {
 }
 
 fn no_more_than_n_uses_of_foo_rule<
-    TFromFileRunContextInstanceProvider: for<'a> FromFileRunContextInstanceProvider<'a>,
->() -> Arc<dyn Rule<TFromFileRunContextInstanceProvider>> {
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>() -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>> {
     rule! {
         name => "no_more_than_n_uses_of_foo",
         options_type => usize,
@@ -303,6 +303,7 @@ fn test_retrieve() {
     impl<'a> FromFileRunContext<'a> for Foo<'a> {
         fn from_file_run_context(
             file_run_context: FileRunContext<
+                '_,
                 'a,
                 '_,
                 impl FromFileRunContextInstanceProviderFactory,
@@ -331,7 +332,7 @@ fn test_retrieve() {
 
         fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
             &self,
-            file_run_context: FileRunContext<'a, '_, Self::Parent>,
+            file_run_context: FileRunContext<'_, 'a, '_, Self::Parent>,
         ) -> Option<&T> {
             match T::id() {
                 id if id == Foo::<'a>::id() => Some(unsafe {

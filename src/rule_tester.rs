@@ -387,7 +387,7 @@ impl<'a> FromFileRunContextInstanceProvider<'a> for DummyFromFileRunContextInsta
 
     fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
         &self,
-        _file_run_context: FileRunContext<'_, 'a, Self::Parent>,
+        _file_run_context: FileRunContext<'_, 'a, '_, Self::Parent>,
     ) -> Option<&T> {
         unreachable!()
     }
