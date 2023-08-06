@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::{
-    any, mem,
+    mem,
     sync::{Arc, OnceLock},
 };
 
@@ -17,8 +17,8 @@ mod tokens;
 mod violations;
 
 use crate::{
-    rule::Rule, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider, RuleTester,
-    ROOT_EXIT,
+    rule::Rule, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
+    FromFileRunContextInstanceProviderFactory, RuleTester, ROOT_EXIT,
 };
 
 #[test]
@@ -57,7 +57,7 @@ fn test_rule_options() {
 }
 
 fn no_more_than_n_uses_of_foo_rule<
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProvider: for<'a> FromFileRunContextInstanceProvider<'a>,
 >() -> Arc<dyn Rule<TFromFileRunContextInstanceProvider>> {
     rule! {
         name => "no_more_than_n_uses_of_foo",
@@ -302,7 +302,11 @@ fn test_retrieve() {
 
     impl<'a> FromFileRunContext<'a> for Foo<'a> {
         fn from_file_run_context(
-            file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProvider>,
+            file_run_context: FileRunContext<
+                'a,
+                '_,
+                impl FromFileRunContextInstanceProviderFactory,
+            >,
         ) -> Self {
             Self {
                 text: match &file_run_context.file_contents {
@@ -322,19 +326,33 @@ fn test_retrieve() {
         foo_instance: OnceLock<Foo<'a>>,
     }
 
-    impl<'a> FromFileRunContextInstanceProvider for FooProvider<'a> {
-        fn get<'c, T: FromFileRunContext<'c> + for<'b> TidAble<'b>>(
+    impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
+        type Parent = FooProviderFactory;
+
+        fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
             &self,
-            file_run_context: FileRunContext<'c, '_, Self>,
+            file_run_context: FileRunContext<'a, '_, Self::Parent>,
         ) -> Option<&T> {
             match T::id() {
-                id if id == Foo::id() => Some(unsafe {
-                    mem::transmute::<&Foo<'c>, &T>(
+                id if id == Foo::<'a>::id() => Some(unsafe {
+                    mem::transmute::<&Foo<'a>, &T>(
                         self.foo_instance
                             .get_or_init(|| Foo::from_file_run_context(file_run_context)),
                     )
                 }),
                 _ => None,
+            }
+        }
+    }
+
+    struct FooProviderFactory;
+
+    impl FromFileRunContextInstanceProviderFactory for FooProviderFactory {
+        type Provider<'a> = FooProvider<'a>;
+
+        fn create<'a>(&self) -> Self::Provider<'a> {
+            FooProvider {
+                foo_instance: Default::default(),
             }
         }
     }
@@ -385,6 +403,6 @@ fn test_retrieve() {
                 },
             ]
         },
-        || FooProvider::default(),
+        FooProviderFactory,
     );
 }

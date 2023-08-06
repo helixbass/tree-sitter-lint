@@ -32,8 +32,8 @@ pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::{
-    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider, QueryMatchContext,
-    SkipOptions, SkipOptionsBuilder,
+    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
+    FromFileRunContextInstanceProviderFactory, QueryMatchContext, SkipOptions, SkipOptionsBuilder,
 };
 pub use node::NodeExt;
 pub use plugin::Plugin;
@@ -63,13 +63,13 @@ pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
 
-pub fn run_and_output<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>(
-    config: Config<TFromFileRunContextInstanceProvider>,
-    get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider
-        + Send
-        + Sync,
+pub fn run_and_output<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>(
+    config: Config<TFromFileRunContextInstanceProviderFactory>,
+    from_file_run_context_instance_provider_factory: TFromFileRunContextInstanceProviderFactory,
 ) {
-    let violations = run(&config, get_from_file_run_context_instance_provider);
+    let violations = run(&config, from_file_run_context_instance_provider_factory);
     if violations.is_empty() {
         process::exit(0);
     }
@@ -81,17 +81,22 @@ pub fn run_and_output<TFromFileRunContextInstanceProvider: FromFileRunContextIns
 
 const MAX_FIX_ITERATIONS: usize = 10;
 
-fn run_per_file<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>(
-    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
+fn run_per_file<
+    'a,
+    'b,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory<Provider<'b> = TFromFileRunContextInstanceProvider>,
+    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider<'b, Parent = TFromFileRunContextInstanceProviderFactory>,
+>(
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(
         Vec<PendingFix>,
-        &InstantiatedRule<TFromFileRunContextInstanceProvider>,
+        &InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     ),
 ) {
     let mut instantiated_per_file_rules: HashMap<
         RuleName,
-        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProvider> + 'a>,
+        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>,
     > = Default::default();
     get_matches(
         file_run_context.language.language(),
@@ -133,11 +138,11 @@ fn run_per_file<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextI
     }
 }
 
-pub fn run<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>(
-    config: &Config<TFromFileRunContextInstanceProvider>,
-    get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider
-        + Send
-        + Sync,
+pub fn run<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>(
+    config: &Config<TFromFileRunContextInstanceProviderFactory>,
+    from_file_run_context_instance_provider_factory: TFromFileRunContextInstanceProviderFactory,
 ) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
@@ -148,7 +153,7 @@ pub fn run<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvid
         tree_sitter_grep_args,
         |dir_entry, language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
-                get_from_file_run_context_instance_provider();
+                from_file_run_context_instance_provider_factory.create();
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -214,7 +219,7 @@ pub fn run<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvid
                     config,
                     language,
                     &instantiated_rules,
-                    &get_from_file_run_context_instance_provider,
+                    &from_file_run_context_instance_provider_factory,
                 );
                 (path, (file_contents, violations))
             },
@@ -235,19 +240,19 @@ fn run_match<
     'a,
     'b,
     'c,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
-    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
     query_match: &'c QueryMatch<'a, 'a>,
-    aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProvider>,
+    aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
     instantiated_per_file_rules: &mut HashMap<
         RuleName,
-        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProvider> + 'a>,
+        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>,
     >,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(
         Vec<PendingFix>,
-        &InstantiatedRule<TFromFileRunContextInstanceProvider>,
+        &InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     ),
 ) {
     let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = aggregated_queries
@@ -295,13 +300,13 @@ fn run_single_on_query_match_callback<
     'a,
     'b,
     'c,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
-    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
-    instantiated_rule: &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
+    file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
+    instantiated_rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     instantiated_per_file_rules: &mut HashMap<
         RuleName,
-        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProvider> + 'a>,
+        Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>,
     >,
     rule_listener_index: usize,
     node_or_captures: NodeOrCaptures<'a, 'c>,
@@ -332,16 +337,19 @@ fn run_single_on_query_match_callback<
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_fixing_loop<'a, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>(
+fn run_fixing_loop<
+    'a,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>(
     violations: &mut Vec<ViolationWithContext>,
     file_contents: impl Into<MutRopeOrSlice<'a>>,
     mut pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
-    aggregated_queries: &AggregatedQueries<TFromFileRunContextInstanceProvider>,
+    aggregated_queries: &AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
     path: &Path,
-    config: &Config<TFromFileRunContextInstanceProvider>,
+    config: &Config<TFromFileRunContextInstanceProviderFactory>,
     language: SupportedLanguage,
-    instantiated_rules: &[InstantiatedRule<TFromFileRunContextInstanceProvider>],
-    get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider,
+    instantiated_rules: &[InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+    from_file_run_context_instance_provider_factory: &TFromFileRunContextInstanceProviderFactory,
 ) {
     let mut file_contents = file_contents.into();
     for _ in 0..MAX_FIX_ITERATIONS {
@@ -360,7 +368,8 @@ fn run_fixing_loop<'a, TFromFileRunContextInstanceProvider: FromFileRunContextIn
         let tree = RopeOrSlice::<'_>::from(&file_contents)
             .parse(&mut get_parser(language.language()), None)
             .unwrap();
-        let from_file_run_context_instance_provider = get_from_file_run_context_instance_provider();
+        let from_file_run_context_instance_provider =
+            from_file_run_context_instance_provider_factory.create();
         run_per_file(
             FileRunContext::new(
                 path,
@@ -400,16 +409,14 @@ fn run_fixing_loop<'a, TFromFileRunContextInstanceProvider: FromFileRunContextIn
 
 pub fn run_for_slice<
     'a,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
     file_contents: impl Into<RopeOrSlice<'a>>,
     tree: Option<&Tree>,
     path: impl AsRef<Path>,
-    config: Config<TFromFileRunContextInstanceProvider>,
+    config: Config<TFromFileRunContextInstanceProviderFactory>,
     language: SupportedLanguage,
-    get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider
-        + Send
-        + Sync,
+    from_file_run_context_instance_provider_factory: &TFromFileRunContextInstanceProviderFactory,
 ) -> Vec<ViolationWithContext> {
     let file_contents = file_contents.into();
     let path = path.as_ref();
@@ -429,7 +436,8 @@ pub fn run_for_slice<
         },
         Cow::Borrowed,
     );
-    let from_file_run_context_instance_provider = get_from_file_run_context_instance_provider();
+    let from_file_run_context_instance_provider =
+        from_file_run_context_instance_provider_factory.create();
     run_per_file(
         FileRunContext::new(
             path,
@@ -462,14 +470,14 @@ pub fn run_for_slice<
 
 pub fn run_fixing_for_slice<
     'a,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 >(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
     tree: Option<&Tree>,
     path: impl AsRef<Path>,
-    config: Config<TFromFileRunContextInstanceProvider>,
+    config: Config<TFromFileRunContextInstanceProviderFactory>,
     language: SupportedLanguage,
-    get_from_file_run_context_instance_provider: impl Fn() -> TFromFileRunContextInstanceProvider,
+    from_file_run_context_instance_provider_factory: &TFromFileRunContextInstanceProviderFactory,
 ) -> Vec<ViolationWithContext> {
     let file_contents = file_contents.into();
     let path = path.as_ref();
@@ -490,7 +498,8 @@ pub fn run_fixing_for_slice<
     );
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
-    let from_file_run_context_instance_provider = get_from_file_run_context_instance_provider();
+    let from_file_run_context_instance_provider =
+        from_file_run_context_instance_provider_factory.create();
     run_per_file(
         FileRunContext::new(
             path,
@@ -533,13 +542,13 @@ pub fn run_fixing_for_slice<
         &config,
         language,
         &instantiated_rules,
-        get_from_file_run_context_instance_provider,
+        from_file_run_context_instance_provider_factory,
     );
     violations
 }
 
-fn get_tree_sitter_grep_args(
-    aggregated_queries: &AggregatedQueries<impl FromFileRunContextInstanceProvider>,
+fn get_tree_sitter_grep_args<'a>(
+    aggregated_queries: &AggregatedQueries<'a, impl FromFileRunContextInstanceProviderFactory>,
     language: Option<SupportedLanguage>,
 ) -> tree_sitter_grep::Args {
     tree_sitter_grep::ArgsBuilder::default()

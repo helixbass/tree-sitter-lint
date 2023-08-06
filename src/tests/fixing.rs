@@ -24,7 +24,7 @@ macro_rules! assert_fixed_content {
                 .build()
                 .unwrap(),
             $crate::tree_sitter_grep::SupportedLanguage::Rust,
-            $crate::rule_tester::get_dummy_from_file_run_context_instance_provider,
+            &$crate::rule_tester::DummyFromFileRunContextInstanceProviderFactory,
         );
         assert_eq!(
             std::str::from_utf8(&file_contents).unwrap().trim(),
@@ -125,7 +125,7 @@ fn test_multiple_nonconflicting_fixes_from_different_rules() {
 }
 
 fn create_identifier_replacing_rule<
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProvider: for<'a> FromFileRunContextInstanceProvider<'a>,
 >(
     name: impl Into<String>,
     replacement: impl Into<String>,

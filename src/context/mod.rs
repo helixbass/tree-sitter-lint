@@ -31,26 +31,35 @@ use crate::{
 pub struct FileRunContext<
     'a,
     'b,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 > {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
-    pub config: &'a Config<TFromFileRunContextInstanceProvider>,
+    pub config: &'a Config<TFromFileRunContextInstanceProviderFactory>,
     pub language: SupportedLanguage,
-    pub(crate) aggregated_queries: &'a AggregatedQueries<'a, TFromFileRunContextInstanceProvider>,
+    pub(crate) aggregated_queries:
+        &'a AggregatedQueries<'a, TFromFileRunContextInstanceProviderFactory>,
     pub(crate) query: &'a Arc<Query>,
-    pub(crate) instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
-    from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProvider,
+    pub(crate) instantiated_rules:
+        &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+    from_file_run_context_instance_provider:
+        &'b TFromFileRunContextInstanceProviderFactory::Provider<'b>,
 }
 
-impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> Copy
-    for FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+impl<
+        'a,
+        'b,
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+    > Copy for FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
 {
 }
 
-impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> Clone
-    for FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+impl<
+        'a,
+        'b,
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+    > Clone for FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
 {
     fn clone(&self) -> Self {
         Self {
@@ -67,20 +76,23 @@ impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProv
     }
 }
 
-impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
-    FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>
+impl<
+        'a,
+        'b,
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+    > FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
-        config: &'a Config<TFromFileRunContextInstanceProvider>,
+        config: &'a Config<TFromFileRunContextInstanceProviderFactory>,
         language: SupportedLanguage,
-        aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProvider>,
+        aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
         query: &'a Arc<Query>,
-        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
-        from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProvider,
+        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+        from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProviderFactory::Provider<'b>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -102,36 +114,50 @@ impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProv
 //         -> Option<&dyn Tid>;
 // }
 
-pub trait FromFileRunContextInstanceProvider: Sized {
-    fn get<'a, T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+pub trait FromFileRunContextInstanceProvider<'a>: Sized {
+    type Parent: FromFileRunContextInstanceProviderFactory<Provider<'a> = Self>;
+
+    fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
         &self,
-        file_run_context: FileRunContext<'a, '_, Self>,
+        file_run_context: FileRunContext<'_, 'a, Self::Parent>,
     ) -> Option<&T>;
+}
+
+pub trait FromFileRunContextInstanceProviderFactory: Send + Sync {
+    type Provider<'a>: FromFileRunContextInstanceProvider<'a, Parent = Self>;
+
+    fn create<'a>(&self) -> Self::Provider<'a>;
 }
 
 pub trait FromFileRunContext<'a> {
     fn from_file_run_context(
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProvider>,
+        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
     ) -> Self;
 }
 
 pub struct QueryMatchContext<
     'a,
     'b,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 > {
-    pub file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
-    pub(crate) rule: &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
+    pub file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
+    pub(crate) rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     pending_fixes: RefCell<Option<Vec<PendingFix>>>,
     pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
-    QueryMatchContext<'a, 'b, TFromFileRunContextInstanceProvider>
+impl<
+        'a,
+        'b,
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory<
+            Provider<'b> = TFromFileRunContextInstanceProvider,
+        >,
+        TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider<'b, Parent = TFromFileRunContextInstanceProviderFactory>,
+    > QueryMatchContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
 {
     pub fn new(
-        file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProvider>,
-        rule: &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
+        file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
+        rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     ) -> Self {
         Self {
             file_run_context,
@@ -418,7 +444,7 @@ impl<'a, 'b, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProv
         self.file_run_context.language
     }
 
-    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + for<'c> TidAble<'c>>(
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'b> + for<'c> TidAble<'c>>(
         &self,
     ) -> &TFromFileRunContext {
         self.file_run_context

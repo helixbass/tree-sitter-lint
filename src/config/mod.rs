@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::{
     rule::{InstantiatedRule, Rule, RuleOptions},
-    FromFileRunContextInstanceProvider, Plugin,
+    FromFileRunContextInstanceProviderFactory, Plugin,
 };
 
 mod config_file;
@@ -34,12 +34,12 @@ pub struct Args {
 
 impl Args {
     pub fn load_config_file_and_into_config<
-        TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
     >(
         self,
-        all_plugins: Vec<Plugin<TFromFileRunContextInstanceProvider>>,
-        all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProvider>>>,
-    ) -> Config<TFromFileRunContextInstanceProvider> {
+        all_plugins: Vec<Plugin<TFromFileRunContextInstanceProviderFactory>>,
+        all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>>,
+    ) -> Config<TFromFileRunContextInstanceProviderFactory> {
         let ParsedConfigFile {
             path: config_file_path,
             content: config_file_content,
@@ -68,14 +68,16 @@ pub type PluginIndex = usize;
 
 #[derive(Builder)]
 #[builder(setter(strip_option, into), pattern = "owned")]
-pub struct Config<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider> {
+pub struct Config<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+> {
     #[builder(default)]
     pub rule: Option<String>,
 
-    all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProvider>>>,
+    all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>>,
 
     #[builder(default)]
-    all_plugins: Vec<Plugin<TFromFileRunContextInstanceProvider>>,
+    all_plugins: Vec<Plugin<TFromFileRunContextInstanceProviderFactory>>,
 
     #[builder(default)]
     pub fix: bool,
@@ -94,7 +96,7 @@ pub struct Config<TFromFileRunContextInstanceProvider: FromFileRunContextInstanc
         HashMap<
             String,
             (
-                Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+                Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
                 Option<PluginIndex>,
             ),
         >,
@@ -104,15 +106,15 @@ pub struct Config<TFromFileRunContextInstanceProvider: FromFileRunContextInstanc
     pub force_rebuild: bool,
 }
 
-impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
-    Config<TFromFileRunContextInstanceProvider>
+impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
+    Config<TFromFileRunContextInstanceProviderFactory>
 {
     fn get_rules_by_plugin_prefixed_name(
         &self,
     ) -> &HashMap<
         String,
         (
-            Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+            Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
             Option<PluginIndex>,
         ),
     > {
@@ -120,7 +122,7 @@ impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
             let mut rules_by_plugin_prefixed_name: HashMap<
                 String,
                 (
-                    Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+                    Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
                     Option<PluginIndex>,
                 ),
             > = self
@@ -147,7 +149,7 @@ impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
     fn get_active_rules_and_associated_plugins_and_options(
         &self,
     ) -> Vec<(
-        Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+        Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
         Option<PluginIndex>,
         &RuleConfiguration,
     )> {
@@ -168,12 +170,12 @@ impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
     fn filter_based_on_rule_argument<'a>(
         &self,
         active_rules_and_associated_plugins_and_options: Vec<(
-            Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+            Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
             Option<PluginIndex>,
             &'a RuleConfiguration,
         )>,
     ) -> Vec<(
-        Arc<dyn Rule<TFromFileRunContextInstanceProvider>>,
+        Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
         Option<PluginIndex>,
         &'a RuleConfiguration,
     )> {
@@ -206,7 +208,7 @@ impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
 
     pub fn get_instantiated_rules(
         &self,
-    ) -> Vec<InstantiatedRule<TFromFileRunContextInstanceProvider>> {
+    ) -> Vec<InstantiatedRule<TFromFileRunContextInstanceProviderFactory>> {
         let active_rules_and_associated_plugins_and_options =
             self.get_active_rules_and_associated_plugins_and_options();
         if active_rules_and_associated_plugins_and_options.is_empty() {
@@ -227,8 +229,8 @@ impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
     }
 }
 
-impl<TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
-    ConfigBuilder<TFromFileRunContextInstanceProvider>
+impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
+    ConfigBuilder<TFromFileRunContextInstanceProviderFactory>
 {
     pub fn default_rule_configurations(mut self) -> Self {
         self.rule_configurations = Some(
@@ -251,7 +253,9 @@ pub struct RuleConfiguration {
 }
 
 impl RuleConfiguration {
-    pub fn default_for_rule(rule: &Arc<dyn Rule<impl FromFileRunContextInstanceProvider>>) -> Self {
+    pub fn default_for_rule(
+        rule: &Arc<dyn Rule<impl FromFileRunContextInstanceProviderFactory>>,
+    ) -> Self {
         Self {
             name: rule.meta().name,
             level: ErrorLevel::Error,

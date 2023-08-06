@@ -40,7 +40,7 @@ fn test_per_file_run_state() {
 }
 
 fn no_more_than_5_uses_of_foo_rule<
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProvider: for<'a> FromFileRunContextInstanceProvider<'a>,
 >() -> Arc<dyn Rule<TFromFileRunContextInstanceProvider>> {
     rule! {
         name => "no_more_than_5_uses_of_foo",

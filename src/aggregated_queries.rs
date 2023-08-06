@@ -4,7 +4,7 @@ use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
 use crate::{
     rule::{InstantiatedRule, ResolvedMatchBy},
-    FromFileRunContextInstanceProvider, ROOT_EXIT,
+    FromFileRunContextInstanceProviderFactory, ROOT_EXIT,
 };
 
 type RuleIndex = usize;
@@ -42,18 +42,18 @@ impl AggregatedQueriesPerLanguageBuilder {
 
 pub struct AggregatedQueries<
     'a,
-    TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
 > {
-    pub instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
+    pub instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
     pub per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguage>,
     pub instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize>,
 }
 
-impl<'a, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider>
-    AggregatedQueries<'a, TFromFileRunContextInstanceProvider>
+impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
+    AggregatedQueries<'a, TFromFileRunContextInstanceProviderFactory>
 {
     pub fn new(
-        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProvider>],
+        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
     ) -> Self {
         let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
             Default::default();
@@ -119,7 +119,7 @@ impl<'a, TFromFileRunContextInstanceProvider: FromFileRunContextInstanceProvider
         language: SupportedLanguage,
         pattern_index: usize,
     ) -> (
-        &'a InstantiatedRule<TFromFileRunContextInstanceProvider>,
+        &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
         usize,
         CaptureIndexIfPerCapture,
     ) {
