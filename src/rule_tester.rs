@@ -385,7 +385,7 @@ pub struct DummyFromFileRunContextInstanceProvider<'a> {
 impl<'a> FromFileRunContextInstanceProvider<'a> for DummyFromFileRunContextInstanceProvider<'a> {
     type Parent = DummyFromFileRunContextInstanceProviderFactory;
 
-    fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
         &self,
         _file_run_context: FileRunContext<'a, '_, Self::Parent>,
     ) -> Option<&T> {

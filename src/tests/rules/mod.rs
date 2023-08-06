@@ -330,7 +330,7 @@ fn test_retrieve() {
     impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
         type Parent = FooProviderFactory;
 
-        fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
+        fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
             &self,
             file_run_context: FileRunContext<'a, '_, Self::Parent>,
         ) -> Option<&T> {
@@ -365,9 +365,7 @@ fn test_retrieve() {
                 r#"(
                   (use_declaration) @c
                 )"# => |node, context| {
-                    if context.get_comments_after(
-                        node
-                    ).count() == 2 {
+                    if context.retrieve::<Foo<'a>>().text == "use " {
                         context.report(violation! {
                             node => node,
                             message => "whee",
@@ -379,27 +377,11 @@ fn test_retrieve() {
         },
         rule_tests! {
             valid => [
-                r#"
-                    use foo::bar::baz;
-                "#,
-                r#"
-                    use foo::bar::baz;
-                    // one comment
-                "#,
-                r#"
-                    use foo::bar::baz;
-                    // one comment
-                    /* two comments */
-                    // three comments
-                "#,
+                r#"fn whee() {}"#,
             ],
             invalid => [
                 {
-                    code => r#"
-                        use foo::bar;
-                        // one comment
-                        /* two comments */
-                    "#,
+                    code => r#"use foo::bar;"#,
                     errors => [{ message => "whee" }],
                 },
             ]

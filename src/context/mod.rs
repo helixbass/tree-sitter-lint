@@ -421,7 +421,7 @@ impl<
         self.file_run_context.language
     }
 
-    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + for<'d> TidAble<'d>>(
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
         &self,
     ) -> &TFromFileRunContext {
         self.file_run_context

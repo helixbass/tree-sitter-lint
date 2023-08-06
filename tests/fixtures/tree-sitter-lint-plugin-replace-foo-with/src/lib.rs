@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
 use tree_sitter_lint::{
-    better_any::{tid, TidAble},
-    rule,
-    tree_sitter_grep::RopeOrSlice,
-    violation, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProviderFactory,
-    Plugin, Rule,
+    better_any::tid, rule, tree_sitter_grep::RopeOrSlice, violation, FileRunContext,
+    FromFileRunContext, FromFileRunContextInstanceProviderFactory, Plugin, Rule,
 };
 
 // pub type ProvidedTypes<'a> = ();
