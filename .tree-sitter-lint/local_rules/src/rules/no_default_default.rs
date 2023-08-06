@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use tree_sitter_lint::{rule, violation, Rule};
+use tree_sitter_lint::{rule, violation, FromFileRunContextInstanceProviderFactory, Rule};
 
-pub fn no_default_default_rule() -> Arc<dyn Rule> {
+pub fn no_default_default_rule<T: FromFileRunContextInstanceProviderFactory>() -> Arc<dyn Rule<T>> {
     rule! {
         name => "no-default-default",
         fixable => true,

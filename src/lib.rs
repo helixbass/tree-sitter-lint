@@ -533,6 +533,7 @@ pub fn run_fixing_for_slice<
     if pending_fixes.is_empty() {
         return violations;
     }
+    drop(from_file_run_context_instance_provider);
     run_fixing_loop(
         &mut violations,
         file_contents,
