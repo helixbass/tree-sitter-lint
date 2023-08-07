@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
@@ -77,7 +80,8 @@ pub struct AggregatedQueries<
 > {
     pub instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
     pub per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguage>,
-    pub instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize>,
+    pub instantiated_rule_root_exit_rule_listener_indices: HashMap<RuleIndex, RuleListenerIndex>,
+    pub isolated_to_query_subtrees_instantiated_rules: HashSet<RuleIndex>,
 }
 
 impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
@@ -89,12 +93,20 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
     ) -> Self {
         let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
             Default::default();
-        let mut instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize> =
+        let mut instantiated_rule_root_exit_rule_listener_indices: HashMap<
+            RuleIndex,
+            RuleListenerIndex,
+        > = Default::default();
+        let mut isolated_to_query_subtrees_instantiated_rules: HashSet<RuleIndex> =
             Default::default();
 
         let span = trace_span!("resolve individual rule listener queries").entered();
 
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
+            if instantiated_rule.meta.isolated_to_query_subtrees {
+                isolated_to_query_subtrees_instantiated_rules.insert(rule_index);
+            }
+
             for &language in &instantiated_rule.meta.languages {
                 let per_language_builder = per_language.entry(language).or_default();
                 for (rule_listener_index, rule_listener_query) in instantiated_rule
@@ -160,6 +172,7 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
                 per_language
             },
             instantiated_rule_root_exit_rule_listener_indices,
+            isolated_to_query_subtrees_instantiated_rules,
         }
     }
 
@@ -169,7 +182,8 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
         pattern_index: usize,
     ) -> (
         &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
-        usize,
+        RuleIndex,
+        RuleListenerIndex,
         CaptureIndexIfPerCapture,
     ) {
         let (rule_index, rule_listener_index, capture_index_if_per_capture) = self
@@ -180,6 +194,7 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
         let instantiated_rule = &self.instantiated_rules[rule_index];
         (
             instantiated_rule,
+            rule_index,
             rule_listener_index,
             capture_index_if_per_capture,
         )

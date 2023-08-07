@@ -263,12 +263,12 @@ fn run_per_file<
         run_match(
             file_run_context,
             query_match,
-            file_run_context.aggregated_queries,
             &mut instantiated_per_file_rules,
             &mut on_found_violations,
             |pending_fixes, instantiated_rule| {
                 on_found_pending_fixes(pending_fixes, instantiated_rule)
             },
+            false,
         );
     });
 
@@ -306,7 +306,6 @@ fn run_match<
 >(
     file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
     query_match: &'c QueryMatch<'a, 'a>,
-    aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
     instantiated_per_file_rules: &mut HashMap<
         RuleName,
         Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>,
@@ -316,12 +315,24 @@ fn run_match<
         Vec<PendingFix>,
         &InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     ),
+    is_isolated_to_query_subtrees_run: bool,
 ) {
-    let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = aggregated_queries
-        .get_rule_and_listener_index_and_capture_index(
-            file_run_context.language,
-            query_match.pattern_index,
-        );
+    let (instantiated_rule, rule_index, rule_listener_index, capture_index_if_per_capture) =
+        file_run_context
+            .aggregated_queries
+            .get_rule_and_listener_index_and_capture_index(
+                file_run_context.language,
+                query_match.pattern_index,
+            );
+
+    if is_isolated_to_query_subtrees_run
+        != file_run_context
+            .aggregated_queries
+            .isolated_to_query_subtrees_instantiated_rules
+            .contains(&rule_index)
+    {
+        return;
+    }
 
     trace!(
         rule_name = instantiated_rule.meta.name,
@@ -356,7 +367,9 @@ fn run_match<
                 rule_listener_index,
                 Captures::new(
                     query_match,
-                    aggregated_queries.get_query_for_language(file_run_context.language),
+                    file_run_context
+                        .aggregated_queries
+                        .get_query_for_language(file_run_context.language),
                 )
                 .into(),
                 on_found_violations,

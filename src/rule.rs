@@ -16,6 +16,7 @@ pub struct RuleMeta {
     pub fixable: bool,
     pub languages: Vec<SupportedLanguage>,
     pub messages: Option<HashMap<String, String>>,
+    pub isolated_to_query_subtrees: bool,
 }
 
 pub trait Rule<
