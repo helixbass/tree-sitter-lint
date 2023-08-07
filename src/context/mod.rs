@@ -7,6 +7,7 @@ use std::{
 };
 
 use better_any::TidAble;
+use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
 };
@@ -144,7 +145,10 @@ impl<
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn report(&self, violation: Violation) {
+        debug!("reporting violation");
+
         let mut had_fixes = false;
         if self.file_run_context.config.fix {
             if let Some(fix) = violation.fix.as_ref() {

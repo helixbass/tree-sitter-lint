@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::Deserialize;
+use tracing::instrument;
 
 use super::{ErrorLevel, RuleConfiguration};
 use crate::rule::RuleOptions;
@@ -66,6 +67,7 @@ pub fn load_config_file() -> ParsedConfigFile {
 
 const CONFIG_FILENAME: &str = ".tree-sitter-lint.yml";
 
+#[instrument]
 pub fn find_config_file() -> PathBuf {
     find_filename_in_ancestor_directory(
         CONFIG_FILENAME,

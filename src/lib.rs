@@ -52,7 +52,7 @@ pub use rule_tester::{
 };
 pub use slice::MutRopeOrSlice;
 use squalid::EverythingExt;
-use tracing::{debug, debug_span, info_span, instrument};
+use tracing::{debug, debug_span, info_span, instrument, trace};
 use tree_sitter::Tree;
 use tree_sitter_grep::{
     get_matches, get_parser, streaming_iterator::StreamingIterator, tree_sitter::QueryMatch,
@@ -80,7 +80,7 @@ pub fn run_and_output<
         process::exit(0);
     }
 
-    let _span = info_span!("printing violations").entered();
+    let _span = info_span!("printing violations", num_violations = violations.len()).entered();
 
     for violation in violations {
         violation.print(&config);
@@ -302,6 +302,14 @@ fn run_match<
             file_run_context.language,
             query_match.pattern_index,
         );
+
+    trace!(
+        rule_name = instantiated_rule.meta.name,
+        rule_listener_index,
+        capture_index_if_per_capture,
+        "found query match"
+    );
+
     match capture_index_if_per_capture {
         Some(capture_index) => {
             query_match
@@ -356,6 +364,8 @@ fn run_single_on_query_match_callback<
     on_found_violations: impl FnOnce(Vec<ViolationWithContext>),
     on_found_pending_fixes: impl FnOnce(Vec<PendingFix>),
 ) {
+    trace!("running single on query match callback");
+
     let mut query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
     instantiated_per_file_rules
         .entry(instantiated_rule.meta.name.clone())

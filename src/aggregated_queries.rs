@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tracing::instrument;
+use tracing::{instrument, trace};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
 use crate::{
@@ -11,7 +11,9 @@ use crate::{
 type RuleIndex = usize;
 type RuleListenerIndex = usize;
 type CaptureIndexIfPerCapture = Option<u32>;
+type CaptureNameIfPerCapture = Option<String>;
 
+#[derive(Debug)]
 pub struct AggregatedQueriesPerLanguage {
     pub pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureIndexIfPerCapture)>,
     pub query: Arc<Query>,
@@ -19,9 +21,9 @@ pub struct AggregatedQueriesPerLanguage {
     pub query_text: String,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct AggregatedQueriesPerLanguageBuilder {
-    pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureIndexIfPerCapture)>,
+    pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureNameIfPerCapture)>,
     query_text: String,
 }
 
@@ -34,7 +36,20 @@ impl AggregatedQueriesPerLanguageBuilder {
         let query = Arc::new(Query::new(language.language(), &query_text).unwrap());
         assert!(query.pattern_count() == pattern_index_lookup.len());
         AggregatedQueriesPerLanguage {
-            pattern_index_lookup,
+            pattern_index_lookup: pattern_index_lookup
+                .into_iter()
+                .map(
+                    |(rule_index, rule_listener_index, capture_name_if_per_capture)| {
+                        (
+                            rule_index,
+                            rule_listener_index,
+                            capture_name_if_per_capture.map(|capture_name| {
+                                query.capture_index_for_name(&capture_name).unwrap()
+                            }),
+                        )
+                    },
+                )
+                .collect(),
             query,
             query_text,
         }
@@ -83,9 +98,11 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
                         ))
                     })
                 {
-                    let capture_index_if_per_capture: CaptureIndexIfPerCapture =
+                    let capture_name_if_per_capture: CaptureNameIfPerCapture =
                         match &rule_listener_query.match_by {
-                            ResolvedMatchBy::PerCapture { capture_index } => Some(*capture_index),
+                            ResolvedMatchBy::PerCapture { capture_name } => {
+                                Some(capture_name.clone())
+                            }
                             _ => None,
                         };
 
@@ -93,7 +110,7 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
                         per_language_builder.pattern_index_lookup.push((
                             rule_index,
                             rule_listener_index,
-                            capture_index_if_per_capture,
+                            capture_name_if_per_capture.clone(),
                         ));
                     }
                     per_language_builder
@@ -106,12 +123,18 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
 
         Self {
             instantiated_rules,
-            per_language: per_language
-                .into_iter()
-                .map(|(language, per_language_value)| {
-                    (language, per_language_value.build(language))
-                })
-                .collect(),
+            per_language: {
+                let per_language = per_language
+                    .into_iter()
+                    .map(|(language, per_language_value)| {
+                        (language, per_language_value.build(language))
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                trace!(?per_language, "aggregated per-language queries");
+
+                per_language
+            },
             instantiated_rule_root_exit_rule_listener_indices,
         }
     }

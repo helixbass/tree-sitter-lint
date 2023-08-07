@@ -7,6 +7,7 @@ use std::{
 use clap::Parser;
 use inflector::Inflector;
 use quote::{format_ident, quote};
+use tracing::{debug, debug_span, instrument};
 
 use crate::{
     config::{find_config_file, load_config_file, ParsedConfigFile},
@@ -19,6 +20,7 @@ const LOCAL_BINARY_PROJECT_NAME: &str = "tree-sitter-lint-local";
 
 const LOCAL_BINARY_LSP_NAME: &str = "tree-sitter-lint-local-lsp";
 
+#[instrument]
 pub fn bootstrap_cli() {
     let config_file_path = find_config_file();
     let project_directory = config_file_path.parent().unwrap();
@@ -27,25 +29,36 @@ pub fn bootstrap_cli() {
     let path_to_local_release_binary =
         local_binary_project_directory.join(format!("target/release/{LOCAL_BINARY_PROJECT_NAME}"));
     let command_line_args = env::args_os().collect::<Vec<_>>();
+
+    let span = debug_span!("parse args").entered();
+
     let args = Args::parse_from(command_line_args.iter().cloned());
+
+    span.exit();
+
     if should_regenerate_local_binary(&config_file_path, &path_to_local_release_binary, &args) {
         regenerate_local_binary(&local_binary_project_directory, &Path::new("..").join(".."));
     }
-    let mut handle = Command::new(path_to_local_release_binary)
-        .args(command_line_args.into_iter().skip(1))
-        .spawn()
-        .unwrap();
+    let mut command = Command::new(path_to_local_release_binary);
+    command.args(command_line_args.into_iter().skip(1));
+    if let Ok(rust_log) = env::var("RUST_LOG") {
+        command.env("RUST_LOG", rust_log);
+    }
+    let mut handle = command.spawn().unwrap();
     process::exit(handle.wait().unwrap().code().unwrap_or(1));
 }
 
+#[instrument]
 fn should_regenerate_local_binary(
     config_file_path: &Path,
     path_to_local_release_binary: &Path,
     args: &Args,
 ) -> bool {
     if args.force_rebuild {
+        debug!("force rebuild");
         return true;
     }
+
     let local_release_binary_modified_timestamp = match path_to_local_release_binary
         .metadata()
         .ok()
@@ -64,6 +77,7 @@ fn should_regenerate_local_binary(
 
 const LOCAL_RULES_DIR_NAME: &str = "local_rules";
 
+#[instrument]
 fn regenerate_local_binary(
     local_binary_project_directory: &Path,
     relative_path_from_local_binary_project_directory_to_project_directory: &Path,
