@@ -107,7 +107,7 @@ impl<'a, 'b> Captures<'a, 'b> {
         Some(first_node)
     }
 
-    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
+    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node<'a>> + 'b {
         self.query_match
             .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap())
     }
