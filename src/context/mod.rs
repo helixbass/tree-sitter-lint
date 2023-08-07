@@ -9,7 +9,9 @@ use std::{
 use better_any::TidAble;
 use tracing::{debug, instrument};
 use tree_sitter_grep::{
-    streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
+    streaming_iterator::StreamingIterator,
+    tree_sitter::{Range, Tree},
+    RopeOrSlice, SupportedLanguage,
 };
 
 mod backward_tokens;
@@ -50,6 +52,7 @@ pub struct FileRunContext<
     pub(crate) query: &'a Arc<Query>,
     pub(crate) instantiated_rules:
         &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+    changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider:
         &'b TFromFileRunContextInstanceProviderFactory::Provider<'a>,
 }
@@ -78,6 +81,7 @@ impl<
             aggregated_queries: self.aggregated_queries,
             query: self.query,
             instantiated_rules: self.instantiated_rules,
+            changed_ranges: self.changed_ranges,
             from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
         }
     }
@@ -99,6 +103,7 @@ impl<
         aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
         query: &'a Arc<Query>,
         instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+        changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProviderFactory::Provider<'a>,
     ) -> Self {
         let file_contents = file_contents.into();
@@ -111,6 +116,7 @@ impl<
             aggregated_queries,
             query,
             instantiated_rules,
+            changed_ranges,
             from_file_run_context_instance_provider,
         }
     }
