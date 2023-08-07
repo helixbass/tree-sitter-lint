@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use tracing::instrument;
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
 use crate::{
@@ -52,6 +53,7 @@ pub struct AggregatedQueries<
 impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
     AggregatedQueries<'a, TFromFileRunContextInstanceProviderFactory>
 {
+    #[instrument(level = "debug", skip_all)]
     pub fn new(
         instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
     ) -> Self {
