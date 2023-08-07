@@ -13,8 +13,6 @@ use tree_sitter_lint::{
 };
 
 pub fn run_and_output() {
-    tracing_subscriber::fmt::init();
-
     tree_sitter_lint::run_and_output(
         args_to_config(Args::parse()),
         FromFileRunContextInstanceProviderFactoryLocal,

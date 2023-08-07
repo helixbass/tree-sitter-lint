@@ -80,11 +80,14 @@ pub fn run_and_output<
         process::exit(0);
     }
 
-    let _span = info_span!("printing violations", num_violations = violations.len()).entered();
+    let span = info_span!("printing violations", num_violations = violations.len()).entered();
 
     for violation in violations {
         violation.print(&config);
     }
+
+    span.exit();
+
     process::exit(1);
 }
 

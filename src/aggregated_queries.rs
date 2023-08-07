@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tracing::{instrument, trace};
+use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
 use crate::{
@@ -28,28 +28,43 @@ struct AggregatedQueriesPerLanguageBuilder {
 }
 
 impl AggregatedQueriesPerLanguageBuilder {
+    #[instrument(level = "trace")]
     pub fn build(self, language: SupportedLanguage) -> AggregatedQueriesPerLanguage {
         let Self {
             pattern_index_lookup,
             query_text,
         } = self;
+
+        let span = trace_span!("parse aggregated query").entered();
+
         let query = Arc::new(Query::new(language.language(), &query_text).unwrap());
+
+        span.exit();
+
         assert!(query.pattern_count() == pattern_index_lookup.len());
         AggregatedQueriesPerLanguage {
-            pattern_index_lookup: pattern_index_lookup
-                .into_iter()
-                .map(
-                    |(rule_index, rule_listener_index, capture_name_if_per_capture)| {
-                        (
-                            rule_index,
-                            rule_listener_index,
-                            capture_name_if_per_capture.map(|capture_name| {
-                                query.capture_index_for_name(&capture_name).unwrap()
-                            }),
-                        )
-                    },
-                )
-                .collect(),
+            pattern_index_lookup: {
+                let span = trace_span!("resolve capture indexes").entered();
+
+                let pattern_index_lookup = pattern_index_lookup
+                    .into_iter()
+                    .map(
+                        |(rule_index, rule_listener_index, capture_name_if_per_capture)| {
+                            (
+                                rule_index,
+                                rule_listener_index,
+                                capture_name_if_per_capture.map(|capture_name| {
+                                    query.capture_index_for_name(&capture_name).unwrap()
+                                }),
+                            )
+                        },
+                    )
+                    .collect::<Vec<_>>();
+
+                span.exit();
+
+                pattern_index_lookup
+            },
             query,
             query_text,
         }
@@ -76,6 +91,9 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
             Default::default();
         let mut instantiated_rule_root_exit_rule_listener_indices: HashMap<usize, usize> =
             Default::default();
+
+        let span = trace_span!("resolve individual rule listener queries").entered();
+
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for &language in &instantiated_rule.meta.languages {
                 let per_language_builder = per_language.entry(language).or_default();
@@ -121,9 +139,13 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
             }
         }
 
+        span.exit();
+
         Self {
             instantiated_rules,
             per_language: {
+                let span = trace_span!("aggregating per-language queries").entered();
+
                 let per_language = per_language
                     .into_iter()
                     .map(|(language, per_language_value)| {
@@ -132,6 +154,8 @@ impl<'a, TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceP
                     .collect::<HashMap<_, _>>();
 
                 trace!(?per_language, "aggregated per-language queries");
+
+                span.exit();
 
                 per_language
             },

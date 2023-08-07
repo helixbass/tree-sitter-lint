@@ -1,5 +1,6 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
+use tracing::{instrument, trace_span};
 use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
 use crate::{
@@ -147,19 +148,29 @@ pub trait RuleInstancePerFile<
     fn rule_instance(&self) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
 }
 
+#[derive(Debug)]
 pub enum MatchBy {
     PerCapture { capture_name: Option<String> },
     PerMatch,
 }
 
+#[derive(Debug)]
 pub struct RuleListenerQuery {
     pub query: String,
     pub match_by: MatchBy,
 }
 
 impl RuleListenerQuery {
+    #[instrument(level = "trace")]
     pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
+        let span = trace_span!("parse individual rule listener query").entered();
+
         let query = Query::new(language, &self.query).unwrap();
+
+        span.exit();
+
+        let span = trace_span!("resolve capture name").entered();
+
         let resolved_match_by = match &self.match_by {
             MatchBy::PerCapture { capture_name } => ResolvedMatchBy::PerCapture {
                 capture_name: match capture_name.as_ref() {
@@ -173,6 +184,9 @@ impl RuleListenerQuery {
             },
             MatchBy::PerMatch => ResolvedMatchBy::PerMatch,
         };
+
+        span.exit();
+
         ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
