@@ -182,7 +182,6 @@ struct Rule {
     are_options_required: bool,
     languages: Vec<Ident>,
     messages: Option<HashMap<Expr, Expr>>,
-    isolated_to_query_subtrees: Option<Expr>,
 }
 
 impl Rule {
@@ -220,7 +219,6 @@ impl Parse for Rule {
         let mut languages: Option<Vec<Ident>> = Default::default();
         let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         let mut are_options_required: bool = Default::default();
-        let mut isolated_to_query_subtrees: Option<Expr> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             if key.to_string() == "options_type" {
@@ -286,13 +284,6 @@ impl Parse for Rule {
                         }
                     }
                 }
-                "isolated_to_query_subtrees" => {
-                    assert!(
-                        isolated_to_query_subtrees.is_none(),
-                        "Already saw 'isolated_to_query_subtrees' key"
-                    );
-                    isolated_to_query_subtrees = Some(input.parse()?);
-                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -308,7 +299,6 @@ impl Parse for Rule {
             languages: languages.expect("Expected 'languages'"),
             messages,
             are_options_required,
-            isolated_to_query_subtrees,
         })
     }
 }
@@ -522,10 +512,6 @@ fn get_rule_rule_impl(
         }
         None => quote!(None),
     };
-    let isolated_to_query_subtrees = match rule.isolated_to_query_subtrees.as_ref() {
-        Some(isolated_to_query_subtrees) => quote!(#isolated_to_query_subtrees),
-        None => quote!(false),
-    };
     quote! {
         impl<TFr: #crate_name::FromFileRunContextInstanceProviderFactory> #crate_name::Rule<TFr> for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
@@ -534,7 +520,6 @@ fn get_rule_rule_impl(
                     fixable: #fixable,
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
                     messages: #messages,
-                    isolated_to_query_subtrees: #isolated_to_query_subtrees,
                 }
             }
 

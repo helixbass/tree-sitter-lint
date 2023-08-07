@@ -268,7 +268,6 @@ fn run_per_file<
             |pending_fixes, instantiated_rule| {
                 on_found_pending_fixes(pending_fixes, instantiated_rule)
             },
-            false,
         );
     });
 
@@ -315,24 +314,13 @@ fn run_match<
         Vec<PendingFix>,
         &InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
     ),
-    is_isolated_to_query_subtrees_run: bool,
 ) {
-    let (instantiated_rule, rule_index, rule_listener_index, capture_index_if_per_capture) =
-        file_run_context
-            .aggregated_queries
-            .get_rule_and_listener_index_and_capture_index(
-                file_run_context.language,
-                query_match.pattern_index,
-            );
-
-    if is_isolated_to_query_subtrees_run
-        != file_run_context
-            .aggregated_queries
-            .isolated_to_query_subtrees_instantiated_rules
-            .contains(&rule_index)
-    {
-        return;
-    }
+    let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = file_run_context
+        .aggregated_queries
+        .get_rule_and_listener_index_and_capture_index(
+            file_run_context.language,
+            query_match.pattern_index,
+        );
 
     trace!(
         rule_name = instantiated_rule.meta.name,
