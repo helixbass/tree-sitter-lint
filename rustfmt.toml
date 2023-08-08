@@ -4,3 +4,4 @@ format_macro_matchers = true
 group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
 wrap_comments = true
+edition = "2021"
