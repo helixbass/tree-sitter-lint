@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 tree-sitter-lint = { path = "../.." }
+
+[patch.crates-io]
+tree-sitter = { git = "https://github.com/helixbass/tree-sitter", rev = "57e98fb0" }
