@@ -40,7 +40,8 @@ impl RuleTester {
             "tmp.rs",
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
-                .rules([self.rule.clone()])
+                .all_rules([self.rule.clone()])
+                .default_rule_configurations()
                 .build()
                 .unwrap(),
         );
@@ -54,7 +55,8 @@ impl RuleTester {
             "tmp.rs",
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
-                .rules([self.rule.clone()])
+                .all_rules([self.rule.clone()])
+                .default_rule_configurations()
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()
