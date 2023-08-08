@@ -15,10 +15,11 @@ use tower_lsp::{
     Client, LanguageServer, LspService, Server,
 };
 use tree_sitter_grep::{ropey::Rope, RopeOrSlice};
+
 use crate::{
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
-    ArgsBuilder, ViolationWithContext, Args, MutRopeOrSlice,
+    Args, ArgsBuilder, MutRopeOrSlice, ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -30,6 +31,7 @@ pub trait LocalLinter: Send + Sync {
         tree: Option<&Tree>,
         path: impl AsRef<Path>,
         args: Args,
+        language: SupportedLanguage,
     ) -> Vec<ViolationWithContext>;
 
     fn run_fixing_for_slice<'a>(
@@ -38,6 +40,7 @@ pub trait LocalLinter: Send + Sync {
         tree: Option<&Tree>,
         path: impl AsRef<Path>,
         args: Args,
+        language: SupportedLanguage,
     ) -> Vec<ViolationWithContext>;
 }
 
@@ -64,6 +67,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
             Some(&per_file_state.tree),
             "dummy_path",
             Default::default(),
+            SupportedLanguage::Rust,
         );
         self.client
             .publish_diagnostics(
@@ -95,6 +99,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
             Some(&per_file_state.tree),
             "dummy_path",
             ArgsBuilder::default().fix(true).build().unwrap(),
+            SupportedLanguage::Rust,
         );
         self.client
             .apply_edit(WorkspaceEdit {

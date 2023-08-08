@@ -31,7 +31,8 @@ pub fn no_default_default_rule() -> Arc<dyn Rule> {
                     );
                 }
             }
-        ]
+        ],
+        languages => [Rust],
     }
 }
 

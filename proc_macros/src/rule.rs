@@ -170,6 +170,7 @@ struct Rule {
     state: Option<RuleStateSpec>,
     listeners: Vec<RuleListenerSpec>,
     options_type: Option<Type>,
+    languages: Vec<Ident>,
 }
 
 impl Rule {
@@ -204,6 +205,7 @@ impl Parse for Rule {
         let mut state: Option<RuleStateSpec> = Default::default();
         let mut listeners: Option<Vec<RuleListenerSpec>> = Default::default();
         let mut options_type: Option<Type> = Default::default();
+        let mut languages: Option<Vec<Ident>> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=>]>()?;
@@ -237,6 +239,18 @@ impl Parse for Rule {
                     assert!(options_type.is_none(), "Already saw 'options_type' key");
                     options_type = Some(input.parse()?);
                 }
+                "languages" => {
+                    assert!(languages.is_none(), "Already saw 'languages' key");
+                    let languages_content;
+                    bracketed!(languages_content in input);
+                    let languages = languages.get_or_insert_with(|| Default::default());
+                    while !languages_content.is_empty() {
+                        languages.push(languages_content.parse()?);
+                        if !languages_content.is_empty() {
+                            languages_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -249,6 +263,7 @@ impl Parse for Rule {
             state,
             listeners: listeners.expect("Expected 'listeners'"),
             options_type,
+            languages: languages.expect("Expected 'languages'"),
         })
     }
 }
@@ -410,13 +425,14 @@ fn get_rule_rule_impl(
             }
         }
     };
+    let languages = &rule.languages;
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
                 #crate_name::RuleMeta {
                     name: #name.into(),
                     fixable: #fixable,
-                    languages: vec![#crate_name::tree_sitter_grep::SupportedLanguage::Rust],
+                    languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
                 }
             }
 

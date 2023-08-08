@@ -1,5 +1,7 @@
 use std::{iter, sync::Arc};
 
+use tree_sitter_grep::SupportedLanguage;
+
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
     rule::{Rule, RuleOptions},
@@ -10,6 +12,7 @@ use crate::{
 pub struct RuleTester {
     rule: Arc<dyn Rule>,
     rule_tests: RuleTests,
+    language: SupportedLanguage,
 }
 
 impl RuleTester {
@@ -22,7 +25,15 @@ impl RuleTester {
         {
             panic!("Specified 'output' for a non-fixable rule");
         }
-        Self { rule, rule_tests }
+        let languages = rule.meta().languages;
+        if languages.len() != 1 {
+            panic!("Only supporting single-language rules currently");
+        }
+        Self {
+            language: languages[0],
+            rule,
+            rule_tests,
+        }
     }
 
     pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
@@ -54,6 +65,7 @@ impl RuleTester {
                 }])
                 .build()
                 .unwrap(),
+            self.language,
         );
         assert!(violations.is_empty());
     }
@@ -76,6 +88,7 @@ impl RuleTester {
                 .report_fixed_violations(true)
                 .build()
                 .unwrap(),
+            self.language,
         );
         if let Some(expected_file_contents) = invalid_test.output.as_ref() {
             assert_eq!(&file_contents, expected_file_contents.as_bytes());

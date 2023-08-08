@@ -21,10 +21,9 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     process,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
 };
 
-use clap::Parser;
 pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
@@ -32,6 +31,7 @@ pub use context::QueryMatchContext;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
+use regex::Regex;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
 pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
@@ -64,20 +64,19 @@ const MAX_FIX_ITERATIONS: usize = 10;
 
 pub fn run(config: &Config) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
-    let language = SupportedLanguage::Rust;
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules, language);
-    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, None);
     let all_violations: Mutex<HashMap<PathBuf, Vec<ViolationWithContext>>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
     tree_sitter_grep::run_with_per_file_callback(
         tree_sitter_grep_args.clone(),
-        |_dir_entry, mut perform_search| {
+        |_dir_entry, language, mut perform_search| {
             let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
                 Default::default();
             perform_search(Box::new(
                 |capture_info: &CaptureInfo, file_contents, path| {
-                    let (instantiated_rule, rule_listener_index) =
-                        aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
+                    let (instantiated_rule, rule_listener_index) = aggregated_queries
+                        .get_rule_and_listener_index(language, capture_info.pattern_index);
                     let mut query_match_context = QueryMatchContext::new(
                         path,
                         file_contents,
@@ -113,6 +112,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
                             file_contents,
                             &instantiated_rule.meta.name,
                             fixes,
+                            language,
                         );
                     }
                 },
@@ -139,6 +139,7 @@ pub fn run(config: &Config) -> Vec<ViolationWithContext> {
                 PerFilePendingFixes {
                     mut file_contents,
                     pending_fixes,
+                    language,
                 },
             )| {
                 let mut violations: Vec<ViolationWithContext> = Default::default();
@@ -198,8 +199,8 @@ fn run_fixing_loop<'a>(
             None,
             tree_sitter_grep_args.clone(),
             |capture_info| {
-                let (instantiated_rule, rule_listener_index) =
-                    aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
+                let (instantiated_rule, rule_listener_index) = aggregated_queries
+                    .get_rule_and_listener_index(language, capture_info.pattern_index);
                 let mut query_match_context = QueryMatchContext::new(
                     path,
                     &file_contents,
@@ -243,6 +244,7 @@ pub fn run_for_slice<'a>(
     tree: Option<&Tree>,
     path: impl AsRef<Path>,
     config: Config,
+    language: SupportedLanguage,
 ) -> Vec<ViolationWithContext> {
     let file_contents = file_contents.into();
     let path = path.as_ref();
@@ -250,9 +252,8 @@ pub fn run_for_slice<'a>(
         panic!("Use run_fixing_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let language = SupportedLanguage::Rust;
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules, language);
-    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, Some(language));
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
         Default::default();
@@ -261,8 +262,8 @@ pub fn run_for_slice<'a>(
         tree,
         tree_sitter_grep_args,
         |capture_info| {
-            let (instantiated_rule, rule_listener_index) =
-                aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
+            let (instantiated_rule, rule_listener_index) = aggregated_queries
+                .get_rule_and_listener_index(language, capture_info.pattern_index);
             let mut query_match_context =
                 QueryMatchContext::new(path, file_contents, instantiated_rule, &config, language);
             instantiated_per_file_rules
@@ -293,6 +294,7 @@ pub fn run_fixing_for_slice<'a>(
     tree: Option<&Tree>,
     path: impl AsRef<Path>,
     config: Config,
+    language: SupportedLanguage,
 ) -> Vec<ViolationWithContext> {
     let file_contents = file_contents.into();
     let path = path.as_ref();
@@ -300,9 +302,8 @@ pub fn run_fixing_for_slice<'a>(
         panic!("Use run_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let language = SupportedLanguage::Rust;
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules, language);
-    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, Some(language));
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile>> =
@@ -312,8 +313,8 @@ pub fn run_fixing_for_slice<'a>(
         tree,
         tree_sitter_grep_args.clone(),
         |capture_info| {
-            let (instantiated_rule, rule_listener_index) =
-                aggregated_queries.get_rule_and_listener_index(capture_info.pattern_index);
+            let (instantiated_rule, rule_listener_index) = aggregated_queries
+                .get_rule_and_listener_index(language, capture_info.pattern_index);
             let mut query_match_context =
                 QueryMatchContext::new(path, &file_contents, instantiated_rule, &config, language);
             instantiated_per_file_rules
@@ -361,16 +362,22 @@ pub fn run_fixing_for_slice<'a>(
     violations
 }
 
-fn get_tree_sitter_grep_args(aggregated_queries: &AggregatedQueries) -> tree_sitter_grep::Args {
-    tree_sitter_grep::Args::parse_from([
-        "tree_sitter_grep",
-        "-q",
-        &aggregated_queries.query_text,
-        "-l",
-        "rust",
-        "--capture",
-        CAPTURE_NAME_FOR_TREE_SITTER_GREP,
-    ])
+fn get_tree_sitter_grep_args(
+    aggregated_queries: &AggregatedQueries,
+    language: Option<SupportedLanguage>,
+) -> tree_sitter_grep::Args {
+    tree_sitter_grep::ArgsBuilder::default()
+        .query_per_language(
+            aggregated_queries
+                .per_language
+                .iter()
+                .map(|(&language, aggregated_query)| (language, aggregated_query.query.clone()))
+                .collect::<HashMap<_, _>>(),
+        )
+        .capture_name(CAPTURE_NAME_FOR_TREE_SITTER_GREP)
+        .maybe_language(language)
+        .build()
+        .unwrap()
 }
 
 fn write_files<'a>(files_to_write: impl Iterator<Item = (&'a Path, &'a [u8])>) {
@@ -453,11 +460,12 @@ impl AllPendingFixes {
         file_contents: &[u8],
         rule_name: &str,
         fixes: Vec<PendingFix>,
+        language: SupportedLanguage,
     ) {
         self.lock()
             .unwrap()
             .entry(path.to_owned())
-            .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned()))
+            .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned(), language))
             .pending_fixes
             .entry(rule_name.to_owned())
             .or_default()
@@ -485,13 +493,15 @@ impl Deref for AllPendingFixes {
 struct PerFilePendingFixes {
     file_contents: Vec<u8>,
     pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+    language: SupportedLanguage,
 }
 
 impl PerFilePendingFixes {
-    fn new(file_contents: Vec<u8>) -> Self {
+    fn new(file_contents: Vec<u8>, language: SupportedLanguage) -> Self {
         Self {
             file_contents,
             pending_fixes: Default::default(),
+            language,
         }
     }
 }
@@ -499,58 +509,98 @@ impl PerFilePendingFixes {
 type RuleIndex = usize;
 type RuleListenerIndex = usize;
 
-struct AggregatedQueries<'a> {
+struct AggregatedQueriesPerLanguage {
     pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)>,
+    query: Arc<Query>,
     #[allow(dead_code)]
-    query: Query,
     query_text: String,
+}
+
+#[derive(Default)]
+struct AggregatedQueriesPerLanguageBuilder {
+    pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)>,
+    query_text: String,
+}
+
+impl AggregatedQueriesPerLanguageBuilder {
+    pub fn build(self, language: SupportedLanguage) -> AggregatedQueriesPerLanguage {
+        let Self {
+            pattern_index_lookup,
+            query_text,
+        } = self;
+        let query = Arc::new(Query::new(language.language(), &query_text).unwrap());
+        assert!(query.pattern_count() == pattern_index_lookup.len());
+        AggregatedQueriesPerLanguage {
+            pattern_index_lookup,
+            query,
+            query_text,
+        }
+    }
+}
+
+struct AggregatedQueries<'a> {
     instantiated_rules: &'a [InstantiatedRule],
+    per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguage>,
 }
 
 impl<'a> AggregatedQueries<'a> {
-    pub fn new(instantiated_rules: &'a [InstantiatedRule], language: SupportedLanguage) -> Self {
-        let mut pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex)> = Default::default();
-        let mut aggregated_query_text = String::new();
-        let language = language.language();
+    pub fn new(instantiated_rules: &'a [InstantiatedRule]) -> Self {
+        let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
+            Default::default();
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
-            for (rule_listener_index, rule_listener_query) in instantiated_rule
-                .rule_instance
-                .listener_queries()
-                .iter()
-                .map(|rule_listener_query| rule_listener_query.resolve(language))
-                .enumerate()
-            {
-                for _ in 0..rule_listener_query.query.pattern_count() {
-                    pattern_index_lookup.push((rule_index, rule_listener_index));
+            for &language in &instantiated_rule.meta.languages {
+                let per_language_builder = per_language.entry(language).or_default();
+                for (rule_listener_index, rule_listener_query) in instantiated_rule
+                    .rule_instance
+                    .listener_queries()
+                    .iter()
+                    .map(|rule_listener_query| rule_listener_query.resolve(language.language()))
+                    .enumerate()
+                {
+                    for _ in 0..rule_listener_query.query.pattern_count() {
+                        per_language_builder
+                            .pattern_index_lookup
+                            .push((rule_index, rule_listener_index));
+                    }
+                    let query_text_with_unified_capture_name =
+                        // TODO: cache these regexes (by capture name I guess?)
+                        Regex::new(&format!(r#"@{}\b"#, rule_listener_query.capture_name())).unwrap()
+                            .replace_all(
+                                &rule_listener_query.query_text,
+                                CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,
+                            );
+                    assert!(were_any_captures_replaced(
+                        &query_text_with_unified_capture_name,
+                        &rule_listener_query
+                    ));
+                    per_language_builder
+                        .query_text
+                        .push_str(&query_text_with_unified_capture_name);
+                    per_language_builder.query_text.push_str("\n\n");
                 }
-                let query_text_with_unified_capture_name =
-                    regex!(&format!(r#"@{}\b"#, rule_listener_query.capture_name())).replace_all(
-                        &rule_listener_query.query_text,
-                        CAPTURE_NAME_FOR_TREE_SITTER_GREP_WITH_LEADING_AT,
-                    );
-                assert!(were_any_captures_replaced(
-                    &query_text_with_unified_capture_name,
-                    &rule_listener_query
-                ));
-                aggregated_query_text.push_str(&query_text_with_unified_capture_name);
-                aggregated_query_text.push_str("\n\n");
             }
         }
-        let query = Query::new(language, &aggregated_query_text).unwrap();
-        assert!(query.pattern_count() == pattern_index_lookup.len());
         Self {
-            pattern_index_lookup,
-            query,
-            query_text: aggregated_query_text,
             instantiated_rules,
+            per_language: per_language
+                .into_iter()
+                .map(|(language, per_language_value)| {
+                    (language, per_language_value.build(language))
+                })
+                .collect(),
         }
     }
 
     pub fn get_rule_and_listener_index(
         &self,
+        language: SupportedLanguage,
         pattern_index: usize,
     ) -> (&'a InstantiatedRule, usize) {
-        let (rule_index, rule_listener_index) = self.pattern_index_lookup[pattern_index];
+        let (rule_index, rule_listener_index) = self
+            .per_language
+            .get(&language)
+            .unwrap()
+            .pattern_index_lookup[pattern_index];
         let instantiated_rule = &self.instantiated_rules[rule_index];
         (instantiated_rule, rule_listener_index)
     }

@@ -228,7 +228,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
         use std::{path::Path, sync::Arc};
 
         use tree_sitter_lint::{
-            clap::Parser, tree_sitter::Tree, tree_sitter_grep::RopeOrSlice, Args, Config, MutRopeOrSlice,
+            clap::Parser, tree_sitter::Tree, tree_sitter_grep::{RopeOrSlice, SupportedLanguage}, Args, Config, MutRopeOrSlice,
             Plugin, Rule, ViolationWithContext, lsp::{LocalLinter, self},
         };
 
@@ -241,8 +241,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             tree: Option<&Tree>,
             path: impl AsRef<Path>,
             args: Args,
+            language: SupportedLanguage,
         ) -> Vec<ViolationWithContext> {
-            tree_sitter_lint::run_for_slice(file_contents, tree, path, args_to_config(args))
+            tree_sitter_lint::run_for_slice(file_contents, tree, path, args_to_config(args), language)
         }
 
         pub fn run_fixing_for_slice<'a>(
@@ -250,8 +251,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             tree: Option<&Tree>,
             path: impl AsRef<Path>,
             args: Args,
+            language: SupportedLanguage,
         ) -> Vec<ViolationWithContext> {
-            tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args))
+            tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args), language)
         }
 
         struct LocalLinterConcrete;
@@ -263,8 +265,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 tree: Option<&Tree>,
                 path: impl AsRef<Path>,
                 args: Args,
+                language: SupportedLanguage,
             ) -> Vec<ViolationWithContext> {
-                run_for_slice(file_contents, tree, path, args)
+                run_for_slice(file_contents, tree, path, args, language)
             }
 
             fn run_fixing_for_slice<'a>(
@@ -273,8 +276,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 tree: Option<&Tree>,
                 path: impl AsRef<Path>,
                 args: Args,
+                language: SupportedLanguage,
             ) -> Vec<ViolationWithContext> {
-                run_fixing_for_slice(file_contents, tree, path, args)
+                run_fixing_for_slice(file_contents, tree, path, args, language)
             }
         }
 

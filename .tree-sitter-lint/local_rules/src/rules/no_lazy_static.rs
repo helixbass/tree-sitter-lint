@@ -18,6 +18,7 @@ pub fn no_lazy_static_rule() -> Arc<dyn Rule> {
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust],
     }
 }

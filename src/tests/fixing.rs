@@ -20,6 +20,7 @@ macro_rules! assert_fixed_content {
                 .fix(true)
                 .build()
                 .unwrap(),
+            $crate::tree_sitter_grep::SupportedLanguage::Rust,
         );
         assert_eq!(
             std::str::from_utf8(&file_contents).unwrap().trim(),
@@ -145,6 +146,7 @@ fn create_identifier_replacing_rule(
                     }
                 );
             }
-        ]
+        ],
+        languages => [Rust]
     }
 }
