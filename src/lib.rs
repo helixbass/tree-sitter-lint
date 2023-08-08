@@ -36,8 +36,8 @@ pub use rule::{
     RuleListenerQuery, RuleMeta,
 };
 pub use rule_tester::{
-    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestInvalid, RuleTestValid,
-    RuleTester, RuleTests,
+    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid,
+    RuleTestValid, RuleTester, RuleTests,
 };
 pub use slice::MutRopeOrSlice;
 use tree_sitter::{Query, Tree};

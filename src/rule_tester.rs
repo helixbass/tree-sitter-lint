@@ -19,10 +19,12 @@ pub struct RuleTester {
 impl RuleTester {
     fn new(rule: Arc<dyn Rule>, rule_tests: RuleTests) -> Self {
         if !rule.meta().fixable
-            && rule_tests
-                .invalid_tests
-                .iter()
-                .any(|invalid_test| invalid_test.output.is_some())
+            && rule_tests.invalid_tests.iter().any(|invalid_test| {
+                matches!(
+                    &invalid_test.output,
+                    Some(RuleTestExpectedOutput::Output(_))
+                )
+            })
         {
             panic!("Specified 'output' for a non-fixable rule");
         }
@@ -94,8 +96,17 @@ impl RuleTester {
                 .unwrap(),
             self.language,
         );
-        if let Some(expected_file_contents) = invalid_test.output.as_ref() {
-            assert_eq!(&file_contents, expected_file_contents.as_bytes());
+        match invalid_test.output.as_ref() {
+            Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
+                assert_eq!(&file_contents, expected_file_contents.as_bytes());
+            }
+            Some(RuleTestExpectedOutput::NoOutput) => {
+                assert!(
+                    !violations.iter().any(|violation| violation.was_fix),
+                    "Unexpected fixing violation was reported"
+                );
+            }
+            _ => (),
         }
         assert_that_violations_match_expected(&violations, invalid_test);
     }
@@ -191,10 +202,27 @@ impl From<&str> for RuleTestValid {
     }
 }
 
+pub enum RuleTestExpectedOutput {
+    Output(String),
+    NoOutput,
+}
+
+impl From<String> for RuleTestExpectedOutput {
+    fn from(value: String) -> Self {
+        Self::Output(value)
+    }
+}
+
+impl From<&str> for RuleTestExpectedOutput {
+    fn from(value: &str) -> Self {
+        Self::Output(value.to_owned())
+    }
+}
+
 pub struct RuleTestInvalid {
     code: String,
     errors: Vec<RuleTestExpectedError>,
-    output: Option<String>,
+    output: Option<RuleTestExpectedOutput>,
     options: Option<RuleOptions>,
 }
 
@@ -202,7 +230,7 @@ impl RuleTestInvalid {
     pub fn new(
         code: impl Into<String>,
         errors: impl IntoIterator<Item = impl Into<RuleTestExpectedError>>,
-        output: Option<impl Into<String>>,
+        output: Option<impl Into<RuleTestExpectedOutput>>,
         options: Option<RuleOptions>,
     ) -> Self {
         Self {

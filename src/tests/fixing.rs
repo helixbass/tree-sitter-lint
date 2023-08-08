@@ -2,9 +2,12 @@
 
 use std::sync::Arc;
 
-use proc_macros::{rule_crate_internal as rule, violation_crate_internal as violation};
+use proc_macros::{
+    rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
+    violation_crate_internal as violation,
+};
 
-use crate::rule::Rule;
+use crate::{rule::Rule, RuleTester};
 
 #[macro_export]
 macro_rules! assert_fixed_content {
@@ -149,4 +152,44 @@ fn create_identifier_replacing_rule(
         ],
         languages => [Rust]
     }
+}
+
+#[test]
+fn test_rule_tests_output_none() {
+    RuleTester::run(
+        rule! {
+            name => "non-fixable",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "whee",
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => [
+                        {
+                            message => "whee",
+                        }
+                    ],
+                    output => None,
+                },
+            ]
+        },
+    );
 }

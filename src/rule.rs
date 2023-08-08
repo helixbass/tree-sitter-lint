@@ -75,6 +75,7 @@ impl<'a> From<Captures<'a>> for NodeOrCaptures<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct Captures<'a> {
     pub query_match: &'a QueryMatch<'a, 'a>,
     pub query: Arc<Query>,
@@ -96,7 +97,7 @@ impl<'a> Captures<'a> {
         Some(first_node)
     }
 
-    pub fn all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
+    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
         self.query_match
             .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap())
     }

@@ -260,6 +260,16 @@ impl ToTokens for InvalidRuleTestErrorSpec {
     }
 }
 
+fn expr_is_ident(expr: &Expr, ident_name: &str) -> bool {
+    matches!(
+        expr,
+        Expr::Path(expr_path) if matches!(
+            expr_path.path.get_ident(),
+            Some(ident) if ident.to_string() == ident_name
+        )
+    )
+}
+
 struct InvalidRuleTestSpec {
     code: Expr,
     errors: Vec<InvalidRuleTestErrorSpec>,
@@ -319,12 +329,13 @@ impl ToTokens for InvalidRuleTestSpec {
         let code = &self.code;
         let errors = self.errors.iter().map(|error| quote!(#error));
         let output = match self.output.as_ref() {
+            Some(output) if expr_is_ident(output, "None") => quote! {
+                Some(tree_sitter_lint::RuleTestExpectedOutput::NoOutput)
+            },
             Some(output) => quote! {
                 Some(#output)
             },
-            None => quote! {
-                Option::<String>::None
-            },
+            None => quote!(Option::<tree_sitter_lint::RuleTestExpectedOutput>::None),
         };
         let options = match self.options.as_ref() {
             Some(options) => quote! {
