@@ -4,9 +4,12 @@ mod builder_args;
 mod helpers;
 mod rule;
 mod rule_tests;
+mod shared;
+mod violation;
 
 use helpers::ArrowSeparatedKeyValuePairs;
 use rule::rule_with_crate_name;
+use violation::violation_with_crate_name;
 
 #[proc_macro]
 pub fn builder_args(input: TokenStream) -> TokenStream {
@@ -31,4 +34,14 @@ pub fn rule(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn rule_crate_internal(input: TokenStream) -> TokenStream {
     rule_with_crate_name(input, "crate")
+}
+
+#[proc_macro]
+pub fn violation(input: TokenStream) -> TokenStream {
+    violation_with_crate_name(input, "tree_sitter_lint")
+}
+
+#[proc_macro]
+pub fn violation_crate_internal(input: TokenStream) -> TokenStream {
+    violation_with_crate_name(input, "crate")
 }

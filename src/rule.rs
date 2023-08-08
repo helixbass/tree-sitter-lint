@@ -1,4 +1,4 @@
-use std::{ops, sync::Arc};
+use std::{collections::HashMap, ops, sync::Arc};
 
 use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
@@ -9,11 +9,12 @@ use crate::{
     Config,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RuleMeta {
     pub name: String,
     pub fixable: bool,
     pub languages: Vec<SupportedLanguage>,
+    pub messages: Option<HashMap<String, String>>,
 }
 
 pub trait Rule: Send + Sync {

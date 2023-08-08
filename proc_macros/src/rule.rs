@@ -10,7 +10,7 @@ use syn::{
     punctuated::Punctuated,
     token,
     visit_mut::{self, VisitMut},
-    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, Token, Type,
+    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
 };
 
 use crate::ArrowSeparatedKeyValuePairs;
@@ -180,6 +180,7 @@ struct Rule {
     listeners: Vec<RuleListenerSpec>,
     options_type: Option<Type>,
     languages: Vec<Ident>,
+    messages: Option<HashMap<Expr, Expr>>,
 }
 
 impl Rule {
@@ -215,6 +216,7 @@ impl Parse for Rule {
         let mut listeners: Option<Vec<RuleListenerSpec>> = Default::default();
         let mut options_type: Option<Type> = Default::default();
         let mut languages: Option<Vec<Ident>> = Default::default();
+        let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=>]>()?;
@@ -260,6 +262,21 @@ impl Parse for Rule {
                         }
                     }
                 }
+                "messages" => {
+                    assert!(messages.is_none(), "Already saw 'messages' key");
+                    let messages_content;
+                    bracketed!(messages_content in input);
+                    let messages = messages.get_or_insert_with(|| Default::default());
+                    while !messages_content.is_empty() {
+                        let key: Expr = messages_content.parse()?;
+                        messages_content.parse::<Token![=>]>()?;
+                        let value: Expr = messages_content.parse()?;
+                        messages.insert(key, value);
+                        if !messages_content.is_empty() {
+                            messages_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -273,6 +290,7 @@ impl Parse for Rule {
             listeners: listeners.expect("Expected 'listeners'"),
             options_type,
             languages: languages.expect("Expected 'languages'"),
+            messages,
         })
     }
 }
@@ -395,6 +413,19 @@ fn get_rule_struct_definition(
     }
 }
 
+fn is_option_type(type_: &Type) -> bool {
+    match type_ {
+        Type::Path(type_path) => matches!(
+            type_path.path.segments.first(),
+            Some(first_segment) if matches!(
+                &first_segment.arguments,
+                PathArguments::AngleBracketed(_)
+            ) && first_segment.ident.to_string() == "Option"
+        ),
+        _ => false,
+    }
+}
+
 fn get_rule_rule_impl(
     rule: &Rule,
     rule_struct_name: &Ident,
@@ -435,14 +466,35 @@ fn get_rule_rule_impl(
     let maybe_deserialize_options = match rule.options_type.as_ref() {
         None => quote!(),
         Some(options_type) => {
-            quote! {
-                let options: #options_type = options.map(|options| {
-                    #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
-                }).unwrap();
+            if is_option_type(options_type) {
+                quote! {
+                    let options: #options_type = options.map(|options| {
+                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                    });
+                }
+            } else {
+                quote! {
+                    let options: #options_type = options.map(|options| {
+                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                    }).unwrap();
+                }
             }
         }
     };
     let languages = &rule.languages;
+    let messages = match rule.messages.as_ref() {
+        Some(messages) => {
+            let message_keys = messages.keys().map(|key| match key {
+                Expr::Path(key) if key.path.get_ident().is_some() => quote!(stringify!(#key)),
+                _ => quote!(#key),
+            });
+            let message_values = messages.values();
+            quote! {
+                Some([#((String::from(#message_keys), String::from(#message_values))),*].into())
+            }
+        }
+        None => quote!(None),
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
             fn meta(&self) -> #crate_name::RuleMeta {
@@ -450,6 +502,7 @@ fn get_rule_rule_impl(
                     name: #name.into(),
                     fixable: #fixable,
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
+                    messages: #messages,
                 }
             }
 

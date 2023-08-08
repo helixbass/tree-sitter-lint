@@ -28,14 +28,17 @@ pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::QueryMatchContext;
 pub use plugin::Plugin;
-pub use proc_macros::{builder_args, rule, rule_tests};
+pub use proc_macros::{builder_args, rule, rule_tests, violation};
 use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{
     FileRunInfo, MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile,
     RuleListenerQuery, RuleMeta,
 };
-pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
+pub use rule_tester::{
+    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestInvalid, RuleTestValid,
+    RuleTester, RuleTests,
+};
 pub use slice::MutRopeOrSlice;
 use tree_sitter::{Query, Tree};
 use tree_sitter_grep::{tree_sitter::QueryMatch, RopeOrSlice, SupportedLanguage};
