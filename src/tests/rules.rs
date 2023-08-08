@@ -131,3 +131,63 @@ fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
         languages => [Rust],
     }
 }
+
+#[test]
+fn test_rule_per_match_callback() {
+    RuleTester::run(
+        rule! {
+            name => "per-match-callback",
+            listeners => [
+                r#"(
+                  (use_declaration
+                    argument: (scoped_identifier
+                      path: (identifier) @first
+                      name: (identifier) @second
+                    )
+                  )
+                )"# => |captures, context| {
+                    let first = captures["first"];
+                    if context.get_node_text(first) != "foo" {
+                        context.report(violation! {
+                            node => first,
+                            message => "Not foo",
+                        });
+                    }
+
+                    let second = captures["second"];
+                    if context.get_node_text(second) != "bar" {
+                        context.report(violation! {
+                            node => second,
+                            message => "Not bar",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                r#"
+                    fn whee() {}
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::something_else;
+                    "#,
+                    errors => [r#"Not bar"#],
+                },
+                {
+                    code => r#"
+                        use something_else::bar;
+                    "#,
+                    errors => [r#"Not foo"#],
+                },
+            ]
+        },
+    );
+}
