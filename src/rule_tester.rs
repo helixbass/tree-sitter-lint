@@ -180,8 +180,6 @@ fn assert_that_violations_match_expected(
         invalid_test.code
     );
     let mut violations = violations.to_owned();
-    // if https://github.com/tree-sitter/tree-sitter/pull/2460 gets merged then
-    // could restore this to `violations.sort_by_key(|violation| violation.range)`
     violations.sort_by(|a, b| compare_ranges(a.range, b.range));
     for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
         assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
