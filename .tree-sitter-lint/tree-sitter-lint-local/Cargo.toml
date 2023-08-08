@@ -9,7 +9,7 @@ local_rules = { path = "../local_rules" }
 tree-sitter-lint-plugin-replace-foo-with = { path = "../.././tests/fixtures/tree-sitter-lint-plugin-replace-foo-with" }
 
 [patch.crates-io]
-tree-sitter = { git = "https://github.com/helixbass/tree-sitter", rev = "57e98fb0" }
+tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "c16b90d" }
 
 [[bin]]
 name = "tree-sitter-lint-local"

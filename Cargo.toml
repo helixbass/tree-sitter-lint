@@ -23,11 +23,12 @@ clap = "4.3.17"
 derive_builder = "0.12.0"
 proc_macros = { package = "tree_sitter_lint_proc_macros", path = "proc_macros", version = "0.0.1-dev.0" }
 regex = "1.9.1"
-tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", git = "https://github.com/helixbass/tree-sitter-grep", rev = "c5f3fa2", version = "0.1.0" }
+tree-sitter-grep = { package = "tree_sitter_lint_tree-sitter-grep", git = "https://github.com/helixbass/tree-sitter-grep", rev = "2061904", version = "0.1.0" }
 rayon = "1.7.0"
 serde = "1.0.175"
 serde_yaml = "0.9.25"
 serde_json = "1.0.103"
+squalid = { git = "https://github.com/helixbass/squalid", rev = "54c72dc" }
 quote = "1.0.32"
 Inflector = "0.11.4"
 dashmap = "5.5.0"
@@ -36,7 +37,7 @@ tower-lsp = "0.19.0"
 tokio = { version = "1.29.1", features = ["full"] }
 
 [patch.crates-io]
-tree-sitter = { git = "https://github.com/helixbass/tree-sitter", rev = "57e98fb0" }
+tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "c16b90d" }
 
 [[bin]]
 name = "tree-sitter-lint"

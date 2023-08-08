@@ -13,7 +13,7 @@ use syn::{
     Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
 };
 
-use crate::ArrowSeparatedKeyValuePairs;
+use crate::{helpers::ExprOrArrowSeparatedKeyValuePairs, ArrowSeparatedKeyValuePairs};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum RuleStateScope {
@@ -469,13 +469,17 @@ fn get_rule_rule_impl(
             if is_option_type(options_type) {
                 quote! {
                     let options: #options_type = options.map(|options| {
-                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                        #crate_name::serde_json::from_str(&options.to_string()).unwrap_or_else(|_| {
+                            panic!("Couldn't parse rule options: {:#?}", options.to_string());
+                        })
                     });
                 }
             } else {
                 quote! {
                     let options: #options_type = options.map(|options| {
-                        #crate_name::serde_json::from_str(&options.to_string()).expect("Couldn't parse rule options")
+                        #crate_name::serde_json::from_str(&options.to_string()).unwrap_or_else(|_| {
+                            panic!("Couldn't parse rule options: {:#?}", options.to_string());
+                        })
                     }).unwrap();
                 }
             }
@@ -558,12 +562,13 @@ fn get_rule_instance_rule_instance_impl(
         });
     quote! {
         impl #crate_name::RuleInstance for #rule_instance_struct_name {
-            fn instantiate_per_file(
+            fn instantiate_per_file<'a>(
                 self: std::sync::Arc<Self>,
-                _file_run_info: &#crate_name::FileRunInfo,
-            ) -> Box<dyn #crate_name::RuleInstancePerFile> {
+                _file_run_info: &#crate_name::FileRunInfo<'a>,
+            ) -> Box<dyn #crate_name::RuleInstancePerFile<'a> + 'a> {
                 Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,
+                    _phantom_data: std::marker::PhantomData,
                     #(#rule_instance_per_file_state_field_names: #rule_instance_per_file_state_field_initializers),*
                 })
             }
@@ -591,13 +596,15 @@ fn get_rule_instance_per_file_struct_definition(
         .iter()
         .map(|field| &field.type_);
     quote! {
-        struct #rule_instance_per_file_struct_name {
+        struct #rule_instance_per_file_struct_name<'a> {
             rule_instance: std::sync::Arc<#rule_instance_struct_name>,
+            _phantom_data: std::marker::PhantomData<&'a ()>,
             #(#state_field_names: #state_field_types),*
         }
     }
 }
 
+#[derive(Copy, Clone)]
 struct SelfAccessRewriter<'a> {
     rule: &'a Rule,
 }
@@ -637,17 +644,17 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                     #(#rewritten_macro_args),*
                 }
             }
-            _ => match syn::parse2::<ArrowSeparatedKeyValuePairs>(node.mac.tokens.clone()) {
-                Ok(ArrowSeparatedKeyValuePairs { keys_and_values }) => {
-                    let rewritten_macro_args = keys_and_values
-                        .into_iter()
-                        .map(|(key, mut value)| {
-                            SelfAccessRewriter { rule: self.rule }.visit_expr_mut(&mut value);
-                            (key, value)
-                        })
-                        .collect::<HashMap<_, _>>();
-                    let keys = rewritten_macro_args.keys();
-                    let values = rewritten_macro_args.values();
+            _ => match syn::parse2::<
+                ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
+            >(node.mac.tokens.clone())
+            {
+                Ok(mut arrow_separated_key_value_pairs) => {
+                    rewrite_self_accesses_in_arrow_separated_key_value_pairs(
+                        *self,
+                        &mut arrow_separated_key_value_pairs,
+                    );
+                    let keys = arrow_separated_key_value_pairs.keys_and_values.keys();
+                    let values = arrow_separated_key_value_pairs.keys_and_values.values();
                     quote! {
                         #(#keys => #values),*
                     }
@@ -658,6 +665,26 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
         node.mac.tokens = rewritten_macro_args;
         visit_mut::visit_expr_macro_mut(self, node);
     }
+}
+
+fn rewrite_self_accesses_in_arrow_separated_key_value_pairs(
+    mut rewriter: SelfAccessRewriter,
+    arrow_separated_key_value_pairs: &mut ArrowSeparatedKeyValuePairs<
+        Ident,
+        ExprOrArrowSeparatedKeyValuePairs,
+    >,
+) {
+    arrow_separated_key_value_pairs
+        .keys_and_values
+        .values_mut()
+        .for_each(|value| match value {
+            ExprOrArrowSeparatedKeyValuePairs::Expr(value) => {
+                rewriter.visit_expr_mut(value);
+            }
+            ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(value) => {
+                rewrite_self_accesses_in_arrow_separated_key_value_pairs(rewriter, value);
+            }
+        });
 }
 
 fn get_self_field_access_name(expr_field: &ExprField) -> Option<String> {
@@ -718,8 +745,8 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
         }
     });
     quote! {
-        impl #crate_name::RuleInstancePerFile for #rule_instance_per_file_struct_name {
-            fn on_query_match(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures, context: &mut #crate_name::QueryMatchContext) {
+        impl<'a> #crate_name::RuleInstancePerFile<'a> for #rule_instance_per_file_struct_name<'a> {
+            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a>) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks

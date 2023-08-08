@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, path::PathBuf, rc::Rc};
 
 use derive_builder::Builder;
+use tree_sitter_grep::tree_sitter::Range;
 
 use crate::{
     config::PluginIndex,
@@ -20,27 +21,31 @@ pub struct Violation<'a> {
     pub fix: Option<Rc<dyn Fn(&mut Fixer) + 'a>>,
     #[builder(default)]
     pub data: Option<ViolationData>,
+    #[builder(default)]
+    pub range: Option<Range>,
 }
 
 impl<'a> Violation<'a> {
     pub fn contextualize(
         self,
         query_match_context: &QueryMatchContext<'a>,
+        had_fixes: bool,
     ) -> ViolationWithContext {
         let Violation {
             message_or_message_id,
             node,
-            fix,
             data,
+            range,
+            ..
         } = self;
         ViolationWithContext {
             message_or_message_id,
-            range: node.range(),
+            range: range.unwrap_or_else(|| node.range()),
             kind: node.kind(),
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
             plugin_index: query_match_context.rule.plugin_index,
-            was_fix: fix.is_some(),
+            had_fixes,
             data,
         }
     }
@@ -80,7 +85,7 @@ pub struct ViolationWithContext {
     pub path: PathBuf,
     pub rule: RuleMeta,
     pub plugin_index: Option<PluginIndex>,
-    pub was_fix: bool,
+    pub had_fixes: bool,
     pub kind: &'static str,
     pub data: Option<ViolationData>,
 }

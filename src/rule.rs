@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops, sync::Arc};
+use std::{collections::HashMap, ops, path::Path, sync::Arc};
 
 use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
@@ -27,10 +27,10 @@ pub trait Rule: Send + Sync {
 }
 
 pub trait RuleInstance: Send + Sync {
-    fn instantiate_per_file(
+    fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_info: &FileRunInfo,
-    ) -> Box<dyn RuleInstancePerFile>;
+        file_run_info: &FileRunInfo<'a>,
+    ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
     fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
@@ -58,31 +58,31 @@ impl InstantiatedRule {
     }
 }
 
-pub enum NodeOrCaptures<'a> {
+pub enum NodeOrCaptures<'a, 'b> {
     Node(Node<'a>),
-    Captures(Captures<'a>),
+    Captures(Captures<'a, 'b>),
 }
 
-impl<'a> From<Node<'a>> for NodeOrCaptures<'a> {
+impl<'a, 'b> From<Node<'a>> for NodeOrCaptures<'a, 'b> {
     fn from(value: Node<'a>) -> Self {
         Self::Node(value)
     }
 }
 
-impl<'a> From<Captures<'a>> for NodeOrCaptures<'a> {
-    fn from(value: Captures<'a>) -> Self {
+impl<'a, 'b> From<Captures<'a, 'b>> for NodeOrCaptures<'a, 'b> {
+    fn from(value: Captures<'a, 'b>) -> Self {
         Self::Captures(value)
     }
 }
 
 #[derive(Debug)]
-pub struct Captures<'a> {
-    pub query_match: &'a QueryMatch<'a, 'a>,
+pub struct Captures<'a, 'b> {
+    pub query_match: &'b QueryMatch<'a, 'a>,
     pub query: Arc<Query>,
 }
 
-impl<'a> Captures<'a> {
-    pub fn new(query_match: &'a QueryMatch<'a, 'a>, query: Arc<Query>) -> Self {
+impl<'a, 'b> Captures<'a, 'b> {
+    pub fn new(query_match: &'b QueryMatch<'a, 'a>, query: Arc<Query>) -> Self {
         Self { query_match, query }
     }
 
@@ -103,7 +103,7 @@ impl<'a> Captures<'a> {
     }
 }
 
-impl<'a> ops::Index<&str> for Captures<'a> {
+impl<'a, 'b> ops::Index<&str> for Captures<'a, 'b> {
     type Output = Node<'a>;
 
     fn index(&self, capture_name: &str) -> &Self::Output {
@@ -123,17 +123,19 @@ impl<'a> ops::Index<&str> for Captures<'a> {
     }
 }
 
-pub trait RuleInstancePerFile: Send + Sync {
-    fn on_query_match(
+pub trait RuleInstancePerFile<'a> {
+    fn on_query_match<'b>(
         &mut self,
         listener_index: usize,
-        node_or_captures: NodeOrCaptures,
-        context: &mut QueryMatchContext,
+        node_or_captures: NodeOrCaptures<'a, 'b>,
+        context: &mut QueryMatchContext<'a>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
 
-pub struct FileRunInfo {}
+pub struct FileRunInfo<'a> {
+    pub path: &'a Path,
+}
 
 pub enum MatchBy {
     PerCapture { capture_name: Option<String> },
@@ -191,3 +193,5 @@ impl ResolvedRuleListenerQuery {
 }
 
 pub type RuleOptions = serde_json::Value;
+
+pub const ROOT_EXIT: &str = "__tree_sitter_lint_program_exit";

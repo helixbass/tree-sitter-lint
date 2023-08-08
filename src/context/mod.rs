@@ -1,9 +1,20 @@
-use std::{ops, path::Path};
-
-use tree_sitter_grep::{
-    streaming_iterator::StreamingIterator, tree_sitter::TreeCursor, RopeOrSlice, SupportedLanguage,
+use std::{
+    borrow::Cow,
+    cell::{Ref, RefCell},
+    ops,
+    path::Path,
 };
 
+use derive_builder::Builder;
+use squalid::{IsEmpty, OptionExt};
+use tree_sitter_grep::{streaming_iterator::StreamingIterator, RopeOrSlice, SupportedLanguage};
+
+mod backward_tokens;
+mod get_tokens;
+
+use get_tokens::get_tokens;
+
+use self::{backward_tokens::get_backward_tokens, get_tokens::get_tokens_after_node};
 use crate::{
     rule::InstantiatedRule,
     tree_sitter::{Language, Node, Query},
@@ -17,8 +28,8 @@ pub struct QueryMatchContext<'a> {
     pub rule: &'a InstantiatedRule,
     config: &'a Config,
     pub language: SupportedLanguage,
-    pending_fixes: Option<Vec<PendingFix>>,
-    pub violations: Option<Vec<ViolationWithContext>>,
+    pending_fixes: RefCell<Option<Vec<PendingFix>>>,
+    pub violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
 impl<'a> QueryMatchContext<'a> {
@@ -41,7 +52,8 @@ impl<'a> QueryMatchContext<'a> {
         }
     }
 
-    pub fn report(&mut self, violation: Violation) {
+    pub fn report(&self, violation: Violation) {
+        let mut had_fixes = false;
         if self.config.fix {
             if let Some(fix) = violation.fix.as_ref() {
                 if !self.rule.meta.fixable {
@@ -50,7 +62,9 @@ impl<'a> QueryMatchContext<'a> {
                 let mut fixer = Fixer::default();
                 fix(&mut fixer);
                 if let Some(pending_fixes) = fixer.into_pending_fixes() {
+                    had_fixes = true;
                     self.pending_fixes
+                        .borrow_mut()
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
@@ -59,13 +73,14 @@ impl<'a> QueryMatchContext<'a> {
                 }
             }
         }
-        let violation = violation.contextualize(self);
+        let violation = violation.contextualize(self, had_fixes);
         self.violations
+            .borrow_mut()
             .get_or_insert_with(Default::default)
             .push(violation);
     }
 
-    pub fn get_node_text(&self, node: Node) -> &'a str {
+    pub fn get_node_text(&self, node: Node) -> Cow<'a, str> {
         get_node_text(node, self.file_contents)
     }
 
@@ -126,12 +141,12 @@ impl<'a> QueryMatchContext<'a> {
         .count()
     }
 
-    pub fn pending_fixes(&self) -> Option<&[PendingFix]> {
-        self.pending_fixes.as_deref()
+    pub fn pending_fixes(&self) -> Ref<Option<Vec<PendingFix>>> {
+        self.pending_fixes.borrow()
     }
 
     pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
-        self.pending_fixes
+        self.pending_fixes.into_inner()
     }
 
     pub fn has_named_child_of_kind(&self, node: Node, kind: &str) -> bool {
@@ -142,8 +157,132 @@ impl<'a> QueryMatchContext<'a> {
         ret
     }
 
-    pub fn get_tokens(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+    pub fn get_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        let language = self.language;
         get_tokens(node)
+            .skip(skip_options.skip())
+            .filter(move |node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
+    pub fn get_text_slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        get_text_slice(self.file_contents, range)
+    }
+
+    pub fn maybe_get_token_after<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Option<Node<'a>> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_tokens_after_node(node)
+            .skip(skip_options.skip())
+            .find(|node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
+    pub fn get_token_after<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node<'a> {
+        self.maybe_get_token_after(node, skip_options).unwrap()
+    }
+
+    pub fn get_last_token<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Node<'a> {
+        let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
+        get_backward_tokens(node)
+            .skip(skip_options.skip())
+            .find(|node| {
+                skip_options.filter().map_or(true, |filter| filter(*node))
+                    && if skip_options.include_comments() {
+                        true
+                    } else {
+                        !self.language.comment_kinds().contains(node.kind())
+                    }
+            })
+            .unwrap()
+    }
+
+    pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
+        let comment_kinds = self.language.comment_kinds();
+        let end = end.start_byte();
+        get_tokens_after_node(start)
+            .take_while(|node| node.start_byte() < end)
+            .any(|node| comment_kinds.contains(node.kind()))
+    }
+}
+
+#[derive(Builder)]
+#[builder(default, setter(strip_option))]
+pub struct SkipOptions<TFilter: FnMut(Node) -> bool> {
+    skip: Option<usize>,
+    include_comments: Option<bool>,
+    filter: Option<TFilter>,
+}
+
+impl<TFilter: FnMut(Node) -> bool> SkipOptions<TFilter> {
+    pub fn skip(&self) -> usize {
+        self.skip.unwrap_or_default()
+    }
+
+    pub fn include_comments(&self) -> bool {
+        self.include_comments.unwrap_or_default()
+    }
+
+    pub fn filter(&mut self) -> Option<&mut TFilter> {
+        self.filter.as_mut()
+    }
+}
+
+impl<TFilter: FnMut(Node) -> bool> Default for SkipOptions<TFilter> {
+    fn default() -> Self {
+        Self {
+            skip: Default::default(),
+            include_comments: Default::default(),
+            filter: Default::default(),
+        }
+    }
+}
+
+impl From<usize> for SkipOptions<fn(Node) -> bool> {
+    fn from(value: usize) -> Self {
+        Self {
+            skip: Some(value),
+            include_comments: Default::default(),
+            filter: Default::default(),
+        }
+    }
+}
+
+impl<TFilter: FnMut(Node) -> bool> From<TFilter> for SkipOptions<TFilter> {
+    fn from(value: TFilter) -> Self {
+        Self {
+            skip: Default::default(),
+            include_comments: Default::default(),
+            filter: Some(value),
+        }
     }
 }
 
@@ -229,8 +368,26 @@ impl Fixer {
             .push(PendingFix::new(node.byte_range(), replacement.into()));
     }
 
-    pub fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
+    pub(crate) fn into_pending_fixes(self) -> Option<Vec<PendingFix>> {
         self.pending_fixes
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pending_fixes
+            .as_ref()
+            .is_none_or_matches(|pending_fixes| pending_fixes.is_empty())
+    }
+
+    pub fn remove_range(&mut self, range: ops::Range<usize>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(range, Default::default()));
+    }
+}
+
+impl IsEmpty for Fixer {
+    fn _is_empty(&self) -> bool {
+        self.is_empty()
     }
 }
 
@@ -246,185 +403,13 @@ impl PendingFix {
     }
 }
 
-fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> &'a str {
+fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> Cow<'a, str> {
+    get_text_slice(file_contents, node.byte_range())
+}
+
+fn get_text_slice(file_contents: RopeOrSlice, range: ops::Range<usize>) -> Cow<'_, str> {
     match file_contents {
-        RopeOrSlice::Slice(file_contents) => node.utf8_text(file_contents).unwrap(),
-        RopeOrSlice::Rope(_) => unimplemented!(),
-    }
-}
-
-macro_rules! move_to_next_sibling_or_go_to_parent_and_loop {
-    ($self:expr) => {
-        if !$self.cursor.goto_next_sibling() {
-            $self.cursor.goto_parent();
-            $self.state = JustReturnedToParent;
-            continue;
-        }
-    };
-}
-
-macro_rules! loop_landed_on_comment_or_node {
-    ($self:expr) => {
-        loop_if_on_comment!($self);
-        loop_landed_on_node!($self);
-    };
-}
-
-macro_rules! loop_if_on_comment {
-    ($self:expr) => {
-        if $self.cursor.node().kind() == "comment" {
-            $self.state = OnComment;
-            continue;
-        }
-    };
-}
-
-macro_rules! loop_landed_on_node {
-    ($self:expr) => {
-        $self.state = LandedOnNonCommentNode;
-        continue;
-    };
-}
-
-macro_rules! loop_done {
-    ($self:expr) => {
-        $self.state = Done;
-        continue;
-    };
-}
-
-fn get_tokens(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalker::new(node)
-}
-
-struct TokenWalker<'a> {
-    state: TokenWalkerState,
-    cursor: TreeCursor<'a>,
-    original_node: Node<'a>,
-}
-
-impl<'a> TokenWalker<'a> {
-    pub fn new(node: Node<'a>) -> Self {
-        Self {
-            state: TokenWalkerState::Initial,
-            cursor: node.walk(),
-            original_node: node,
-        }
-    }
-}
-
-impl<'a> Iterator for TokenWalker<'a> {
-    type Item = Node<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use TokenWalkerState::*;
-
-        loop {
-            match self.state {
-                Done => {
-                    return None;
-                }
-                Initial => {
-                    if self.cursor.node().kind() == "comment" {
-                        loop_done!(self);
-                    }
-                    if !self.cursor.goto_first_child() {
-                        self.state = Done;
-                        return Some(self.cursor.node());
-                    }
-                    loop_landed_on_comment_or_node!(self);
-                }
-                ReturnedCurrentNode => {
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                OnComment => {
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-                LandedOnNonCommentNode => {
-                    if !self.cursor.goto_first_child() {
-                        self.state = ReturnedCurrentNode;
-                        return Some(self.cursor.node());
-                    }
-                    loop_landed_on_comment_or_node!(self);
-                }
-                JustReturnedToParent => {
-                    if self.cursor.node() == self.original_node {
-                        loop_done!(self);
-                    }
-                    move_to_next_sibling_or_go_to_parent_and_loop!(self);
-                    loop_landed_on_comment_or_node!(self);
-                }
-            }
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum TokenWalkerState {
-    Initial,
-    OnComment,
-    ReturnedCurrentNode,
-    JustReturnedToParent,
-    LandedOnNonCommentNode,
-    Done,
-}
-
-#[cfg(test)]
-mod tests {
-    use tree_sitter_grep::tree_sitter::Parser;
-
-    use super::*;
-
-    fn test_all_tokens_text(text: &str, all_tokens_text: &[&str]) {
-        let mut parser = Parser::new();
-        parser
-            .set_language(SupportedLanguage::Javascript.language())
-            .unwrap();
-        let tree = parser.parse(text, None).unwrap();
-        assert_eq!(
-            get_tokens(tree.root_node())
-                .map(|node| node.utf8_text(text.as_bytes()).unwrap())
-                .collect::<Vec<_>>(),
-            all_tokens_text
-        );
-    }
-
-    #[test]
-    fn test_get_tokens_simple() {
-        test_all_tokens_text("const x = 5;", &["const", "x", "=", "5", ";"]);
-    }
-
-    #[test]
-    fn test_get_tokens_structured() {
-        test_all_tokens_text(
-            r#"
-            const whee = function(foo) {
-                for (let x = 1; x < 100; x++) {
-                    foo(x);
-                }
-            }
-        "#,
-            &[
-                "const", "whee", "=", "function", "(", "foo", ")", "{", "for", "(", "let", "x",
-                "=", "1", ";", "x", "<", "100", ";", "x", "++", ")", "{", "foo", "(", "x", ")",
-                ";", "}", "}",
-            ],
-        );
-    }
-
-    #[test]
-    fn test_get_tokens_omits_comments() {
-        test_all_tokens_text(
-            r#"
-            /*leading*/
-            const x = 5
-            /*hello*/ // whee
-            foo()
-            // trailing
-        "#,
-            &["const", "x", "=", "5", "foo", "(", ")"],
-        );
+        RopeOrSlice::Slice(slice) => std::str::from_utf8(&slice[range]).unwrap().into(),
+        RopeOrSlice::Rope(rope) => rope.byte_slice(range).into(),
     }
 }

@@ -13,6 +13,7 @@ struct Violation {
     message: Option<Expr>,
     message_id: Option<Expr>,
     node: Expr,
+    range: Option<Expr>,
     fix: Option<Expr>,
     data: Option<HashMap<ExprOrIdent, Expr>>,
 }
@@ -22,6 +23,7 @@ impl Parse for Violation {
         let mut message: Option<Expr> = Default::default();
         let mut message_id: Option<Expr> = Default::default();
         let mut node: Option<Expr> = Default::default();
+        let mut range: Option<Expr> = Default::default();
         let mut fix: Option<Expr> = Default::default();
         let mut data: Option<HashMap<ExprOrIdent, Expr>> = Default::default();
 
@@ -40,6 +42,10 @@ impl Parse for Violation {
                 "node" => {
                     assert!(node.is_none(), "Already saw 'node'");
                     node = Some(input.parse()?);
+                }
+                "range" => {
+                    assert!(range.is_none(), "Already saw 'range'");
+                    range = Some(input.parse()?);
                 }
                 "fix" => {
                     assert!(fix.is_none(), "Already saw 'fix'");
@@ -61,6 +67,7 @@ impl Parse for Violation {
             message,
             message_id,
             node: node.expect("Expected 'node' key"),
+            range,
             fix,
             data,
         })
@@ -106,12 +113,18 @@ pub fn violation_with_crate_name(input: TokenStream, crate_name: &str) -> TokenS
 
     let node = &violation.node;
 
+    let range = match violation.range.as_ref() {
+        Some(range) => quote!(.range(#range)),
+        None => quote!(),
+    };
+
     quote! {
         #crate_name::ViolationBuilder::default()
             #message
             #message_id
             #fix
             .node(#node)
+            #range
             #data
             .build().unwrap()
     }
