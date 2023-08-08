@@ -7,3 +7,6 @@ edition = "2021"
 tree-sitter-lint = { path = "../.." }
 local_rules = { path = "../local_rules" }
 tree-sitter-lint-plugin-replace-foo-with = { path = "../.././tests/fixtures/tree-sitter-lint-plugin-replace-foo-with" }
+
+[[bin]]
+name = "tree-sitter-lint-local"

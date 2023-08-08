@@ -12,6 +12,7 @@ macro_rules! assert_fixed_content {
         let mut file_contents = $content.to_owned().into_bytes();
         $crate::run_fixing_for_slice(
             &mut file_contents,
+            None,
             "tmp.rs",
             $crate::ConfigBuilder::default()
                 .all_standalone_rules($rules)

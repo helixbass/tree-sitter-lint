@@ -42,6 +42,7 @@ impl RuleTester {
     fn run_valid_test(&self, valid_test: &RuleTestValid) {
         let violations = crate::run_for_slice(
             valid_test.code.as_bytes(),
+            None,
             "tmp.rs",
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
@@ -61,6 +62,7 @@ impl RuleTester {
         let mut file_contents = invalid_test.code.clone().into_bytes();
         let violations = crate::run_fixing_for_slice(
             &mut file_contents,
+            None,
             "tmp.rs",
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)

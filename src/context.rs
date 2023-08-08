@@ -1,17 +1,17 @@
 use std::{ops, path::Path};
 
-use tree_sitter::{Language, Node, Query, QueryCursor};
-use tree_sitter_grep::SupportedLanguage;
+use tree_sitter_grep::{RopeOrSlice, SupportedLanguage};
 
 use crate::{
     rule::InstantiatedRule,
+    tree_sitter::{Language, Node, Query, QueryCursor},
     violation::{Violation, ViolationWithContext},
     Config,
 };
 
 pub struct QueryMatchContext<'a> {
     pub path: &'a Path,
-    pub file_contents: &'a [u8],
+    pub file_contents: RopeOrSlice<'a>,
     pub rule: &'a InstantiatedRule,
     config: &'a Config,
     language: SupportedLanguage,
@@ -22,11 +22,12 @@ pub struct QueryMatchContext<'a> {
 impl<'a> QueryMatchContext<'a> {
     pub fn new(
         path: &'a Path,
-        file_contents: &'a [u8],
+        file_contents: impl Into<RopeOrSlice<'a>>,
         rule: &'a InstantiatedRule,
         config: &'a Config,
         language: SupportedLanguage,
     ) -> Self {
+        let file_contents = file_contents.into();
         Self {
             path,
             file_contents,
@@ -63,7 +64,10 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_node_text(&self, node: Node) -> &str {
-        node.utf8_text(self.file_contents).unwrap()
+        match &self.file_contents {
+            RopeOrSlice::Slice(file_contents) => node.utf8_text(file_contents).unwrap(),
+            RopeOrSlice::Rope(_) => unimplemented!(),
+        }
     }
 
     pub fn maybe_get_single_matching_node_for_query<'query, 'enclosing_node>(

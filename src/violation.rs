@@ -1,12 +1,12 @@
 use std::{path::PathBuf, rc::Rc};
 
 use derive_builder::Builder;
-use tree_sitter::Node;
 
 use crate::{
     config::PluginIndex,
     context::{Fixer, QueryMatchContext},
     rule::RuleMeta,
+    tree_sitter::{self, Node},
     Config,
 };
 

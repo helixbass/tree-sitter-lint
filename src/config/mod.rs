@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    env, fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, OnceLock},
 };
 
@@ -14,7 +13,11 @@ use crate::{
     Plugin,
 };
 
-#[derive(Parser)]
+mod config_file;
+pub use config_file::{find_config_file, load_config_file, ParsedConfigFile};
+
+#[derive(Builder, Default, Parser)]
+#[builder(default, setter(into, strip_option))]
 pub struct Args {
     #[arg(long)]
     pub rule: Option<String>,
@@ -24,6 +27,9 @@ pub struct Args {
 
     #[arg(long)]
     pub report_fixed_violations: bool,
+
+    #[arg(long)]
+    pub force_rebuild: bool,
 }
 
 impl Args {
@@ -40,6 +46,7 @@ impl Args {
             rule,
             fix,
             report_fixed_violations,
+            force_rebuild,
         } = self;
         Config {
             rule,
@@ -50,6 +57,7 @@ impl Args {
             config_file_path: Some(config_file_path),
             rule_configurations: config_file_content.rules().collect(),
             rules_by_plugin_prefixed_name: Default::default(),
+            force_rebuild,
         }
     }
 }
@@ -81,6 +89,9 @@ pub struct Config {
     #[allow(clippy::type_complexity)]
     #[builder(setter(skip))]
     rules_by_plugin_prefixed_name: OnceLock<HashMap<String, (Arc<dyn Rule>, Option<PluginIndex>)>>,
+
+    #[builder(default)]
+    pub force_rebuild: bool,
 }
 
 impl Config {
@@ -200,56 +211,6 @@ impl ConfigBuilder {
 }
 
 #[derive(Clone)]
-pub struct ParsedConfigFile {
-    pub path: PathBuf,
-    pub content: ParsedConfigFileContent,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct ParsedConfigFileContent {
-    pub plugins: HashMap<String, PluginSpecValue>,
-    #[serde(rename = "rules")]
-    rules_by_name: HashMap<String, RuleConfigurationValue>,
-}
-
-impl ParsedConfigFileContent {
-    pub fn rules(&self) -> impl Iterator<Item = RuleConfiguration> + '_ {
-        self.rules_by_name
-            .iter()
-            .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
-    }
-}
-
-#[derive(Clone, Deserialize)]
-pub struct PluginSpecValue {
-    pub path: Option<PathBuf>,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ErrorLevel {
-    Error,
-    Off,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct RuleConfigurationValue {
-    pub level: ErrorLevel,
-    pub options: Option<RuleOptions>,
-}
-
-impl RuleConfigurationValue {
-    pub fn to_rule_configuration(&self, rule_name: impl Into<String>) -> RuleConfiguration {
-        let rule_name = rule_name.into();
-        RuleConfiguration {
-            name: rule_name,
-            level: self.level,
-            options: self.options.clone(),
-        }
-    }
-}
-
-#[derive(Clone)]
 pub struct RuleConfiguration {
     pub name: String,
     pub level: ErrorLevel,
@@ -266,45 +227,9 @@ impl RuleConfiguration {
     }
 }
 
-pub fn load_config_file() -> ParsedConfigFile {
-    let config_file_path = find_config_file();
-    let config_file_contents =
-        fs::read_to_string(&config_file_path).expect("Couldn't read config file contents");
-    let parsed = serde_yaml::from_str(&config_file_contents).expect("Couldn't parse config file");
-
-    ParsedConfigFile {
-        path: config_file_path,
-        content: parsed,
-    }
-}
-
-const CONFIG_FILENAME: &str = ".tree-sitter-lint.yml";
-
-pub fn find_config_file() -> PathBuf {
-    find_filename_in_ancestor_directory(
-        CONFIG_FILENAME,
-        env::current_dir().expect("Couldn't get current directory"),
-    )
-    .expect("Couldn't find config file")
-}
-
-// https://codereview.stackexchange.com/a/236771
-fn find_filename_in_ancestor_directory(
-    filename: impl AsRef<Path>,
-    starting_directory: PathBuf,
-) -> Option<PathBuf> {
-    let filename = filename.as_ref();
-    let mut current_path = starting_directory;
-
-    loop {
-        current_path.push(filename);
-
-        if current_path.is_file() {
-            return Some(current_path);
-        }
-
-        if !(current_path.pop() && current_path.pop()) {
-            return None;
-        }
-    }
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorLevel {
+    Error,
+    Off,
 }
