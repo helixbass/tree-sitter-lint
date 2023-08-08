@@ -14,7 +14,7 @@ macro_rules! assert_fixed_content {
             &mut file_contents,
             "tmp.rs",
             $crate::ConfigBuilder::default()
-                .all_rules($rules)
+                .all_standalone_rules($rules)
                 .default_rule_configurations()
                 .fix(true)
                 .build()

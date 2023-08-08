@@ -4,8 +4,10 @@ use derive_builder::Builder;
 use tree_sitter::Node;
 
 use crate::{
+    config::PluginIndex,
     context::{Fixer, QueryMatchContext},
     rule::RuleMeta,
+    Config,
 };
 
 #[derive(Builder)]
@@ -29,6 +31,7 @@ impl<'a> Violation<'a> {
             range: node.range(),
             path: query_match_context.path.to_owned(),
             rule: query_match_context.rule.meta.clone(),
+            plugin_index: query_match_context.rule.plugin_index,
             was_fix: fix.is_some(),
         }
     }
@@ -47,18 +50,26 @@ pub struct ViolationWithContext {
     pub range: tree_sitter::Range,
     pub path: PathBuf,
     pub rule: RuleMeta,
+    pub plugin_index: Option<PluginIndex>,
     pub was_fix: bool,
 }
 
 impl ViolationWithContext {
-    pub fn print(&self) {
+    pub fn print(&self, config: &Config) {
         println!(
             "{:?}:{}:{} {} {}",
             self.path,
             self.range.start_point.row + 1,
             self.range.start_point.column + 1,
             self.message,
-            self.rule.name,
+            match self.plugin_index {
+                None => self.rule.name.clone(),
+                Some(plugin_index) => format!(
+                    "{}/{}",
+                    config.get_plugin_name(plugin_index),
+                    self.rule.name
+                ),
+            }
         );
     }
 }

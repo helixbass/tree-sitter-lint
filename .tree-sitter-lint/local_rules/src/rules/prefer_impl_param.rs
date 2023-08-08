@@ -79,7 +79,7 @@ macro_rules! return_if_none {
 
 pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
     rule! {
-        name => "prefer_impl_param",
+        name => "prefer-impl-param",
         listeners => [
             r#"(
               (function_item
