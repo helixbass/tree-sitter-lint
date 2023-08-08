@@ -3,9 +3,7 @@ name = "tree-sitter-lint-local"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-local_rules = { path = "../local_rules" }
 tree-sitter-lint = { path = "../.." }
-tree-sitter-lint-plugin-replace-foo-with = { path = "../../tests/fixtures/tree-sitter-lint-plugin-replace-foo-with" }
+local_rules = { path = "../local_rules" }
+tree-sitter-lint-plugin-replace-foo-with = { path = "../.././tests/fixtures/tree-sitter-lint-plugin-replace-foo-with" }

@@ -1,6 +1,6 @@
 plugins:
-  replace-foo-with-bar:
-    path: ./examples/tree-sitter-lint-plugin-replace-foo-with-bar
+  replace-foo-with:
+    path: ./tests/fixtures/tree-sitter-lint-plugin-replace-foo-with
 rules:
   no-default-default:
     level: error
