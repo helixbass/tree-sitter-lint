@@ -24,7 +24,7 @@ use std::{
 
 use clap::Parser;
 pub use cli::bootstrap_cli;
-pub use config::{Args, Config, ConfigBuilder};
+pub use config::{Args, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
 pub use context::QueryMatchContext;
 pub use plugin::Plugin;
@@ -32,13 +32,14 @@ pub use proc_macros::{builder_args, rule, rule_tests};
 use rayon::prelude::*;
 pub use rule::{FileRunInfo, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta};
 use rule::{InstantiatedRule, ResolvedRuleListenerQuery};
-pub use rule_tester::{RuleTestInvalid, RuleTester, RuleTests};
+pub use rule_tester::{RuleTestInvalid, RuleTestValid, RuleTester, RuleTests};
 use tree_sitter::Query;
 use tree_sitter_grep::{CaptureInfo, SupportedLanguage};
 pub use violation::ViolationBuilder;
 use violation::ViolationWithContext;
 
 pub extern crate clap;
+pub extern crate serde_json;
 pub extern crate tree_sitter;
 pub extern crate tree_sitter_grep;
 

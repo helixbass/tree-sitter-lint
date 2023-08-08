@@ -8,5 +8,8 @@ rules:
     level: error
   no-lazy-static:
     level: error
-  replace-foo-with-bar/replace-foo-with-bar:
+  replace-foo-with/replace-foo-with-bar:
     level: error
+  replace-foo-with/replace-foo-with-something:
+    level: error
+    options: whee

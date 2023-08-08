@@ -1,6 +1,11 @@
 use std::{iter, sync::Arc};
 
-use crate::{config::ConfigBuilder, rule::Rule, violation::ViolationWithContext};
+use crate::{
+    config::{ConfigBuilder, ErrorLevel},
+    rule::{Rule, RuleOptions},
+    violation::ViolationWithContext,
+    RuleConfiguration,
+};
 
 pub struct RuleTester {
     rule: Arc<dyn Rule>,
@@ -41,7 +46,11 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
-                .default_rule_configurations()
+                .rule_configurations([RuleConfiguration {
+                    name: self.rule.meta().name,
+                    level: ErrorLevel::Error,
+                    options: valid_test.options.clone(),
+                }])
                 .build()
                 .unwrap(),
         );
@@ -56,7 +65,11 @@ impl RuleTester {
             ConfigBuilder::default()
                 .rule(&self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
-                .default_rule_configurations()
+                .rule_configurations([RuleConfiguration {
+                    name: self.rule.meta().name,
+                    level: ErrorLevel::Error,
+                    options: invalid_test.options.clone(),
+                }])
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()
@@ -107,17 +120,21 @@ impl RuleTests {
 
 pub struct RuleTestValid {
     code: String,
+    options: Option<RuleOptions>,
 }
 
 impl RuleTestValid {
-    pub fn new(code: impl Into<String>) -> Self {
-        Self { code: code.into() }
+    pub fn new(code: impl Into<String>, options: Option<RuleOptions>) -> Self {
+        Self {
+            code: code.into(),
+            options,
+        }
     }
 }
 
 impl From<&str> for RuleTestValid {
     fn from(value: &str) -> Self {
-        Self::new(value)
+        Self::new(value, None)
     }
 }
 
@@ -125,6 +142,7 @@ pub struct RuleTestInvalid {
     code: String,
     errors: Vec<RuleTestExpectedError>,
     output: Option<String>,
+    options: Option<RuleOptions>,
 }
 
 impl RuleTestInvalid {
@@ -132,11 +150,13 @@ impl RuleTestInvalid {
         code: impl Into<String>,
         errors: impl IntoIterator<Item = impl Into<RuleTestExpectedError>>,
         output: Option<impl Into<String>>,
+        options: Option<RuleOptions>,
     ) -> Self {
         Self {
             code: code.into(),
             errors: errors.into_iter().map(Into::into).collect(),
             output: output.map(Into::into),
+            options,
         }
     }
 }

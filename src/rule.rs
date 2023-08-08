@@ -3,7 +3,11 @@ use std::sync::Arc;
 use tree_sitter::{Language, Node, Query};
 use tree_sitter_grep::SupportedLanguage;
 
-use crate::{config::PluginIndex, context::QueryMatchContext, Config};
+use crate::{
+    config::{PluginIndex, RuleConfiguration},
+    context::QueryMatchContext,
+    Config,
+};
 
 #[derive(Clone)]
 pub struct RuleMeta {
@@ -14,7 +18,11 @@ pub struct RuleMeta {
 
 pub trait Rule: Send + Sync {
     fn meta(&self) -> RuleMeta;
-    fn instantiate(self: Arc<Self>, config: &Config) -> Arc<dyn RuleInstance>;
+    fn instantiate(
+        self: Arc<Self>,
+        config: &Config,
+        rule_configuration: &RuleConfiguration,
+    ) -> Arc<dyn RuleInstance>;
 }
 
 pub trait RuleInstance: Send + Sync {
@@ -34,10 +42,15 @@ pub struct InstantiatedRule {
 }
 
 impl InstantiatedRule {
-    pub fn new(rule: Arc<dyn Rule>, plugin_index: Option<PluginIndex>, config: &Config) -> Self {
+    pub fn new(
+        rule: Arc<dyn Rule>,
+        plugin_index: Option<PluginIndex>,
+        rule_configuration: &RuleConfiguration,
+        config: &Config,
+    ) -> Self {
         Self {
             meta: rule.meta(),
-            rule_instance: rule.clone().instantiate(config),
+            rule_instance: rule.clone().instantiate(config, rule_configuration),
             rule,
             plugin_index,
         }
@@ -90,3 +103,5 @@ impl ResolvedRuleListenerQuery {
         &self.query.capture_names()[self.capture_index as usize]
     }
 }
+
+pub type RuleOptions = serde_json::Value;

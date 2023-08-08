@@ -10,7 +10,7 @@ use derive_builder::Builder;
 use serde::Deserialize;
 
 use crate::{
-    rule::{InstantiatedRule, Rule},
+    rule::{InstantiatedRule, Rule, RuleOptions},
     Plugin,
 };
 
@@ -112,36 +112,43 @@ impl Config {
         })
     }
 
-    fn get_active_rules_and_associated_plugins(&self) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>)> {
+    fn get_active_rules_and_associated_plugins_and_options(
+        &self,
+    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>, &RuleConfiguration)> {
         let rules_by_plugin_prefixed_name = self.get_rules_by_plugin_prefixed_name();
         self.rule_configurations
             .iter()
             .filter(|rule_config| rule_config.level != ErrorLevel::Off)
             .map(|rule_config| {
-                rules_by_plugin_prefixed_name
+                let (rule, plugin_index) = rules_by_plugin_prefixed_name
                     .get(&rule_config.name)
                     .unwrap_or_else(|| panic!("Unknown rule: '{}'", rule_config.name))
-                    .clone()
+                    .clone();
+                (rule, plugin_index, rule_config)
             })
             .collect()
     }
 
-    fn filter_based_on_rule_argument(
+    fn filter_based_on_rule_argument<'a>(
         &self,
-        active_rules_and_associated_plugins: Vec<(Arc<dyn Rule>, Option<PluginIndex>)>,
-    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>)> {
+        active_rules_and_associated_plugins_and_options: Vec<(
+            Arc<dyn Rule>,
+            Option<PluginIndex>,
+            &'a RuleConfiguration,
+        )>,
+    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>, &'a RuleConfiguration)> {
         match self.rule.as_ref() {
             Some(rule_arg) => {
-                let filtered = active_rules_and_associated_plugins
+                let filtered = active_rules_and_associated_plugins_and_options
                     .into_iter()
-                    .filter(|(rule, _)| &rule.meta().name == rule_arg)
+                    .filter(|(rule, _, _)| &rule.meta().name == rule_arg)
                     .collect::<Vec<_>>();
                 if !filtered.is_empty() {
                     return filtered;
                 }
                 self.rule_argument_error();
             }
-            None => active_rules_and_associated_plugins,
+            None => active_rules_and_associated_plugins_and_options,
         }
     }
 
@@ -158,15 +165,18 @@ impl Config {
     }
 
     pub fn get_instantiated_rules(&self) -> Vec<InstantiatedRule> {
-        let active_rules_and_associated_plugins = self.get_active_rules_and_associated_plugins();
-        if active_rules_and_associated_plugins.is_empty() {
+        let active_rules_and_associated_plugins_and_options =
+            self.get_active_rules_and_associated_plugins_and_options();
+        if active_rules_and_associated_plugins_and_options.is_empty() {
             panic!("No configured active rules");
         }
-        let active_rules_and_associated_plugins =
-            self.filter_based_on_rule_argument(active_rules_and_associated_plugins);
-        active_rules_and_associated_plugins
+        let active_rules_and_associated_plugins_and_options =
+            self.filter_based_on_rule_argument(active_rules_and_associated_plugins_and_options);
+        active_rules_and_associated_plugins_and_options
             .into_iter()
-            .map(|(rule, plugin_index)| InstantiatedRule::new(rule.clone(), plugin_index, self))
+            .map(|(rule, plugin_index, rule_config)| {
+                InstantiatedRule::new(rule.clone(), plugin_index, rule_config, self)
+            })
             .collect()
     }
 
@@ -225,6 +235,7 @@ pub enum ErrorLevel {
 #[derive(Clone, Deserialize)]
 pub struct RuleConfigurationValue {
     pub level: ErrorLevel,
+    pub options: Option<RuleOptions>,
 }
 
 impl RuleConfigurationValue {
@@ -233,6 +244,7 @@ impl RuleConfigurationValue {
         RuleConfiguration {
             name: rule_name,
             level: self.level,
+            options: self.options.clone(),
         }
     }
 }
@@ -241,6 +253,7 @@ impl RuleConfigurationValue {
 pub struct RuleConfiguration {
     pub name: String,
     pub level: ErrorLevel,
+    pub options: Option<RuleOptions>,
 }
 
 impl RuleConfiguration {
@@ -248,6 +261,7 @@ impl RuleConfiguration {
         Self {
             name: rule.meta().name,
             level: ErrorLevel::Error,
+            options: None,
         }
     }
 }
