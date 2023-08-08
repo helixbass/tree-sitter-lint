@@ -102,7 +102,7 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                 let type_identifier_query =
                     query!(
                         r#"(type_identifier) @c"#,
-                        context.language.language(),
+                        context.language().language(),
                     );
                 return_if_none!(context.maybe_get_single_captured_node_for_filtered_query(
                     type_identifier_query,

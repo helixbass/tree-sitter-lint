@@ -1,4 +1,4 @@
-use squalid::return_default_if_false;
+use squalid::{return_default_if_false, return_default_if_none};
 use tree_sitter_grep::tree_sitter::{Node, TreeCursor};
 
 pub trait NodeExt<'a> {
@@ -15,8 +15,22 @@ pub trait NodeExt<'a> {
 
 impl<'a> NodeExt<'a> for Node<'a> {
     fn is_descendant_of(&self, node: Node) -> bool {
-        self.range().start_byte >= node.range().start_byte
-            && self.range().end_byte <= node.range().end_byte
+        if self.start_byte() < node.start_byte() {
+            return false;
+        }
+        if self.end_byte() > node.end_byte() {
+            return false;
+        }
+        if self.start_byte() == node.start_byte() && self.end_byte() == node.end_byte() {
+            let mut ancestor = return_default_if_none!(self.parent());
+            loop {
+                if ancestor == node {
+                    return true;
+                }
+                ancestor = return_default_if_none!(ancestor.parent());
+            }
+        }
+        true
     }
 
     fn field(&self, field_name: &str) -> Node<'a> {

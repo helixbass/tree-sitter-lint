@@ -179,6 +179,7 @@ struct Rule {
     state: Option<RuleStateSpec>,
     listeners: Vec<RuleListenerSpec>,
     options_type: Option<Type>,
+    are_options_required: bool,
     languages: Vec<Ident>,
     messages: Option<HashMap<Expr, Expr>>,
 }
@@ -217,8 +218,14 @@ impl Parse for Rule {
         let mut options_type: Option<Type> = Default::default();
         let mut languages: Option<Vec<Ident>> = Default::default();
         let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
+        let mut are_options_required: bool = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
+            if key.to_string() == "options_type" {
+                if input.parse::<Token![!]>().is_ok() {
+                    are_options_required = true;
+                }
+            }
             input.parse::<Token![=>]>()?;
             match &*key.to_string() {
                 "name" => {
@@ -291,6 +298,7 @@ impl Parse for Rule {
             options_type,
             languages: languages.expect("Expected 'languages'"),
             messages,
+            are_options_required,
         })
     }
 }
@@ -475,12 +483,17 @@ fn get_rule_rule_impl(
                     });
                 }
             } else {
+                let unwrap = if rule.are_options_required {
+                    quote!(.unwrap())
+                } else {
+                    quote!(.unwrap_or_default())
+                };
                 quote! {
                     let options: #options_type = options.map(|options| {
                         #crate_name::serde_json::from_str(&options.to_string()).unwrap_or_else(|_| {
                             panic!("Couldn't parse rule options: {:#?}", options.to_string());
                         })
-                    }).unwrap();
+                    })#unwrap;
                 }
             }
         }
@@ -564,7 +577,7 @@ fn get_rule_instance_rule_instance_impl(
         impl #crate_name::RuleInstance for #rule_instance_struct_name {
             fn instantiate_per_file<'a>(
                 self: std::sync::Arc<Self>,
-                _file_run_info: &#crate_name::FileRunInfo<'a>,
+                _file_run_context: #crate_name::FileRunContext<'a>,
             ) -> Box<dyn #crate_name::RuleInstancePerFile<'a> + 'a> {
                 Box::new(#rule_instance_per_file_struct_name {
                     rule_instance: self,

@@ -612,7 +612,7 @@ fn test_options_struct() {
     RuleTester::run(
         rule! {
             name => "has-options-struct",
-            options_type => Options,
+            options_type! => Options,
             state => {
                 [per-run]
                 whee: String = options.whee,
@@ -1008,6 +1008,211 @@ fn test_comments_exist_between() {
                         } else {
                             baz();
                         }
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_options_list() {
+    #[derive(Deserialize)]
+    struct OptionType {
+        #[allow(dead_code)]
+        foo: String,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "has-options-list",
+            options_type => Option<Vec<OptionType>>,
+            state => {
+                [per-run]
+                options: Vec<OptionType> = options.unwrap_or_default(),
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if !self.options.is_empty() {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => [],
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => [{
+                        foo => "abc",
+                    }],
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_options_default() {
+    #[derive(Default, Deserialize)]
+    struct Options {
+        foo: String,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "has-options-with-default",
+            options_type => Options,
+            state => {
+                [per-run]
+                foo: String = options.foo,
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if self.foo == "abc" {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => { foo => "def" },
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        foo => "abc",
+                    },
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_get_tokens_between() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-tokens-between",
+            listeners => [
+                r#"(
+                  (use_declaration) @c
+                )"# => |node, context| {
+                    if context.get_tokens_between(
+                        context.get_first_token(node, Option::<fn(Node) -> bool>::None),
+                        context.get_last_token(node, Option::<fn(Node) -> bool>::None),
+                        Option::<fn(Node) -> bool>::None
+                    ).count() == 3 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar::baz;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                    "#,
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_get_comments_after() {
+    RuleTester::run(
+        rule! {
+            name => "uses-get-comments-after",
+            listeners => [
+                r#"(
+                  (use_declaration) @c
+                )"# => |node, context| {
+                    if context.get_comments_after(
+                        node
+                    ).count() == 2 {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar::baz;
+                "#,
+                r#"
+                    use foo::bar::baz;
+                    // one comment
+                "#,
+                r#"
+                    use foo::bar::baz;
+                    // one comment
+                    /* two comments */
+                    // three comments
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        use foo::bar;
+                        // one comment
+                        /* two comments */
                     "#,
                     errors => [{ message => "whee" }],
                 },

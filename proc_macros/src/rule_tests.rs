@@ -8,16 +8,31 @@ use syn::{
     parse_macro_input, token, Expr, Ident, Token,
 };
 
-use crate::shared::{parse_data, ExprOrIdent};
+use crate::{
+    helpers::ExprOrArrowSeparatedKeyValuePairs,
+    shared::{parse_data, ExprOrIdent},
+};
 
 enum RuleOptions {
     Map(HashMap<ExprOrIdent, Expr>),
+    List(Vec<ExprOrArrowSeparatedKeyValuePairs>),
     Expr(Expr),
 }
 
 impl Parse for RuleOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(if input.peek(token::Brace) {
+        Ok(if input.peek(token::Bracket) {
+            let list_input;
+            bracketed!(list_input in input);
+            let mut items: Vec<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
+            while !list_input.is_empty() {
+                items.push(list_input.parse()?);
+                if !list_input.is_empty() {
+                    list_input.parse::<Token![,]>()?;
+                }
+            }
+            Self::List(items)
+        } else if input.peek(token::Brace) {
             let mut map: HashMap<ExprOrIdent, Expr> = Default::default();
             parse_data(&mut map, input)?;
             Self::Map(map)
@@ -36,6 +51,12 @@ impl ToTokens for RuleOptions {
                 let values = map.values();
                 quote! {
                     { #(#keys: #values),* }
+                }
+            }
+            RuleOptions::List(list) => {
+                let items = list.into_iter().map(|item| item.to_yaml());
+                quote! {
+                    [ #(#items),* ]
                 }
             }
             RuleOptions::Expr(expr) => {
