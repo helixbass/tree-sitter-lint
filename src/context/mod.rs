@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use better_any::TidAble;
+use better_any::{TidAble, TidExt};
 use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
@@ -436,7 +436,9 @@ impl<
     ) -> &TFromFileRunContext {
         self.file_run_context
             .from_file_run_context_instance_provider
-            .get::<TFromFileRunContext>(self.file_run_context)
+            .get(TFromFileRunContext::id(), self.file_run_context)
+            .unwrap()
+            .downcast_ref::<TFromFileRunContext>()
             .unwrap()
     }
 }

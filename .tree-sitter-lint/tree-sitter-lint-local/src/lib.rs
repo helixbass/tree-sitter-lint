@@ -1,12 +1,12 @@
-use std::{path::Path, sync::Arc};
+use std::{any::TypeId, path::Path, sync::Arc};
 
 use tree_sitter_lint::{
-    better_any::TidAble,
+    better_any::Tid,
     clap::Parser,
     lsp::{self, LocalLinter},
     tree_sitter::Tree,
     tree_sitter_grep::{RopeOrSlice, SupportedLanguage},
-    Args, Config, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
+    Args, Config, FileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
     FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
     ViolationWithContext,
@@ -21,7 +21,7 @@ pub fn run_and_output() {
 
 pub fn run_for_slice<'a>(
     file_contents: impl Into<RopeOrSlice<'a>>,
-    tree: Option<&Tree>,
+    tree: Option<Tree>,
     path: impl AsRef<Path>,
     args: Args,
     language: SupportedLanguage,
@@ -38,7 +38,7 @@ pub fn run_for_slice<'a>(
 
 pub fn run_fixing_for_slice<'a>(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
-    tree: Option<&Tree>,
+    tree: Option<Tree>,
     path: impl AsRef<Path>,
     args: Args,
     language: SupportedLanguage,
@@ -59,7 +59,7 @@ impl LocalLinter for LocalLinterConcrete {
     fn run_for_slice<'a>(
         &self,
         file_contents: impl Into<RopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -70,7 +70,7 @@ impl LocalLinter for LocalLinterConcrete {
     fn run_fixing_for_slice<'a>(
         &self,
         file_contents: impl Into<MutRopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -116,11 +116,12 @@ struct FromFileRunContextInstanceProviderLocal<'a> {
 impl<'a> FromFileRunContextInstanceProvider<'a> for FromFileRunContextInstanceProviderLocal<'a> {
     type Parent = FromFileRunContextInstanceProviderFactoryLocal;
 
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
+        type_id: TypeId,
         file_run_context: FileRunContext<'a, '_, Self::Parent>,
-    ) -> Option<&T> {
+    ) -> Option<&dyn Tid<'a>> {
         self.tree_sitter_lint_plugin_replace_foo_with_provided_instances
-            .get::<T>(file_run_context)
+            .get(type_id, file_run_context)
     }
 }

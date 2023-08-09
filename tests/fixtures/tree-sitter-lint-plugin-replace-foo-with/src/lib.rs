@@ -31,42 +31,6 @@ impl<'a> FromFileRunContext<'a> for Foo<'a> {
 
 tid! { impl<'a> TidAble<'a> for Foo<'a> }
 
-// #[derive(Default)]
-// struct FooProvider<'a> {
-//     foo_instance: OnceLock<Foo<'a>>,
-// }
-
-// impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
-//     type Parent = FooProviderFactory;
-
-//     fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
-//         &self,
-//         file_run_context: FileRunContext<'a, '_, Self::Parent>,
-//     ) -> Option<&T> {
-//         match T::id() {
-//             id if id == Foo::<'a>::id() => Some(unsafe {
-//                 mem::transmute::<&Foo<'a>, &T>(
-//                     self.foo_instance
-//                         .get_or_init(|| Foo::from_file_run_context(file_run_context)),
-//                 )
-//             }),
-//             _ => None,
-//         }
-//     }
-// }
-
-// struct FooProviderFactory;
-
-// impl FromFileRunContextInstanceProviderFactory for FooProviderFactory {
-//     type Provider<'a> = FooProvider<'a>;
-
-//     fn create<'a>(&self) -> Self::Provider<'a> {
-//         FooProvider {
-//             foo_instance: Default::default(),
-//         }
-//     }
-// }
-
 pub fn instantiate<T: FromFileRunContextInstanceProviderFactory>() -> Plugin<T> {
     Plugin {
         name: "replace-foo-with".to_owned(),

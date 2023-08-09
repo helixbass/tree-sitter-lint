@@ -1,16 +1,17 @@
-use std::{marker::PhantomData, mem, sync::OnceLock};
+use std::{any::TypeId, marker::PhantomData, sync::OnceLock};
 
-use better_any::TidAble;
+use better_any::{Tid, TidAble};
 
 use crate::FileRunContext;
 
 pub trait FromFileRunContextInstanceProvider<'a>: Sized {
     type Parent: FromFileRunContextInstanceProviderFactory<Provider<'a> = Self>;
 
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
+        type_id: TypeId,
         file_run_context: FileRunContext<'a, '_, Self::Parent>,
-    ) -> Option<&T>;
+    ) -> Option<&dyn Tid<'a>>;
 }
 
 pub trait FromFileRunContextInstanceProviderFactory: Send + Sync {
@@ -55,11 +56,11 @@ where
 }
 
 pub trait FromFileRunContextProvidedTypesOnceLockStorage<'a> {
-    // fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
+        type_id: TypeId,
         file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
-    ) -> Option<&T>;
+    ) -> Option<&dyn Tid<'a>>;
 }
 
 pub enum FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1> {
@@ -68,23 +69,19 @@ pub enum FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1> {
 
 impl<'a, T1> FromFileRunContextProvidedTypesOnceLockStorage<'a>
     for FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1>
-// where
-//     T1: FromFileRunContext<'a> + for<'b> TidAble<'b>,
 where
     T1: FromFileRunContext<'a> + TidAble<'a>,
 {
-    // fn get<T: FromFileRunContext<'a> + for<'b> TidAble<'b>>(
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
+        type_id: TypeId,
         file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
-    ) -> Option<&T> {
+    ) -> Option<&dyn Tid<'a>> {
         match self {
-            FromFileRunContextProvidedTypesOnceLockStorageEnum::One(t1, _) => match T::id() {
-                id if id == T1::id() => Some(unsafe {
-                    mem::transmute::<&T1, &T>(
-                        t1.get_or_init(|| T1::from_file_run_context(file_run_context)),
-                    )
-                }),
+            FromFileRunContextProvidedTypesOnceLockStorageEnum::One(t1, _) => match type_id {
+                id if id == T1::id() => {
+                    Some(t1.get_or_init(|| T1::from_file_run_context(file_run_context)))
+                }
                 _ => None,
             },
         }

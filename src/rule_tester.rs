@@ -1,6 +1,6 @@
-use std::{cmp::Ordering, iter, marker::PhantomData, sync::Arc};
+use std::{any::TypeId, cmp::Ordering, iter, marker::PhantomData, sync::Arc};
 
-use better_any::TidAble;
+use better_any::Tid;
 use derive_builder::Builder;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
@@ -9,8 +9,7 @@ use crate::{
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProviderFactory,
-    RuleConfiguration,
+    FileRunContext, FromFileRunContextInstanceProviderFactory, RuleConfiguration,
 };
 
 pub struct RuleTester<
@@ -383,10 +382,11 @@ pub struct DummyFromFileRunContextInstanceProvider<'a> {
 impl<'a> FromFileRunContextInstanceProvider<'a> for DummyFromFileRunContextInstanceProvider<'a> {
     type Parent = DummyFromFileRunContextInstanceProviderFactory;
 
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
+        _type_id: TypeId,
         _file_run_context: FileRunContext<'a, '_, Self::Parent>,
-    ) -> Option<&T> {
+    ) -> Option<&dyn Tid<'a>> {
         unreachable!()
     }
 }

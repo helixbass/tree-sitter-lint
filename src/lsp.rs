@@ -28,7 +28,7 @@ pub trait LocalLinter: Send + Sync {
     fn run_for_slice<'a>(
         &self,
         file_contents: impl Into<RopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -37,7 +37,7 @@ pub trait LocalLinter: Send + Sync {
     fn run_fixing_for_slice<'a>(
         &self,
         file_contents: impl Into<MutRopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -64,7 +64,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
         let per_file_state = self.per_file.get(uri).unwrap();
         let violations = self.local_linter.run_for_slice(
             &per_file_state.contents,
-            Some(&per_file_state.tree),
+            Some(per_file_state.tree.clone()),
             "dummy_path",
             Default::default(),
             SupportedLanguage::Rust,
@@ -96,7 +96,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
         let mut cloned_contents = per_file_state.contents.clone();
         self.local_linter.run_fixing_for_slice(
             &mut cloned_contents,
-            Some(&per_file_state.tree),
+            Some(per_file_state.tree.clone()),
             "dummy_path",
             ArgsBuilder::default().fix(true).build().unwrap(),
             SupportedLanguage::Rust,

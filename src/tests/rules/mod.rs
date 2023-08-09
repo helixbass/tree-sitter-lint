@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::{
-    mem,
+    any::TypeId,
     sync::{Arc, OnceLock},
 };
 
@@ -293,7 +293,7 @@ fn test_rule_test_errors_variable() {
 
 #[test]
 fn test_retrieve() {
-    use better_any::{tid, Tid, TidAble};
+    use better_any::{tid, Tid};
 
     #[derive(Clone)]
     struct Foo<'a> {
@@ -330,17 +330,16 @@ fn test_retrieve() {
     impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
         type Parent = FooProviderFactory;
 
-        fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+        fn get(
             &self,
+            type_id: TypeId,
             file_run_context: FileRunContext<'a, '_, Self::Parent>,
-        ) -> Option<&T> {
-            match T::id() {
-                id if id == Foo::<'a>::id() => Some(unsafe {
-                    mem::transmute::<&Foo<'a>, &T>(
-                        self.foo_instance
-                            .get_or_init(|| Foo::from_file_run_context(file_run_context)),
-                    )
-                }),
+        ) -> Option<&dyn Tid<'a>> {
+            match type_id {
+                id if id == Foo::<'a>::id() => Some(
+                    self.foo_instance
+                        .get_or_init(|| Foo::from_file_run_context(file_run_context)),
+                ),
                 _ => None,
             }
         }
