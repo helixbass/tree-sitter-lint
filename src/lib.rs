@@ -46,7 +46,6 @@ use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{
     MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta,
-    ROOT_EXIT,
 };
 pub use rule_tester::{
     RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid,
@@ -60,7 +59,7 @@ use tree_sitter::Tree;
 use tree_sitter_grep::{
     get_matches, get_parser,
     streaming_iterator::StreamingIterator,
-    tree_sitter::{InputEdit, Point, QueryMatch, Range},
+    tree_sitter::{InputEdit, Node, Point, QueryMatch, Range},
     Parseable, RopeOrSlice, SupportedLanguage,
 };
 pub use violation::{ViolationBuilder, ViolationWithContext};
@@ -237,6 +236,11 @@ fn run_per_file<'a, 'b>(
 ) {
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>> =
         Default::default();
+    let mut node_stack: Vec<Node<'a>> = Default::default();
+    let mut saw_match = false;
+    let wildcard_listener_pattern_index = file_run_context
+        .aggregated_queries
+        .get_wildcard_listener_pattern_index(file_run_context.language);
 
     let span = debug_span!("loop through query matches").entered();
 
@@ -251,34 +255,38 @@ fn run_per_file<'a, 'b>(
             file_run_context,
             query_match,
             &mut instantiated_per_file_rules,
+            &mut node_stack,
+            wildcard_listener_pattern_index,
             &mut on_found_violations,
             |pending_fixes, instantiated_rule| {
                 on_found_pending_fixes(pending_fixes, instantiated_rule)
             },
         );
+        saw_match = true;
     });
 
     span.exit();
 
-    let _span = debug_span!("run root exit listeners").entered();
-
-    for (&instantiated_rule_index, &rule_listener_index) in &file_run_context
-        .aggregated_queries
-        .instantiated_rule_root_exit_rule_listener_indices
-    {
-        run_single_on_query_match_callback(
+    // for Rust at least I'm not seeing it fire a match
+    // for the root grammar node against an empty source
+    // file?
+    if !saw_match {
+        run_exit_node_listeners(
+            file_run_context.tree.root_node(),
             file_run_context,
-            &file_run_context.instantiated_rules[instantiated_rule_index],
             &mut instantiated_per_file_rules,
-            rule_listener_index,
-            file_run_context.tree.root_node().into(),
             &mut on_found_violations,
-            |pending_fixes| {
-                on_found_pending_fixes(
-                    pending_fixes,
-                    &file_run_context.instantiated_rules[instantiated_rule_index],
-                )
-            },
+            &mut on_found_pending_fixes,
+        );
+        return;
+    }
+    while !node_stack.is_empty() {
+        run_exit_node_listeners(
+            node_stack.pop().unwrap(),
+            file_run_context,
+            &mut instantiated_per_file_rules,
+            &mut on_found_violations,
+            &mut on_found_pending_fixes,
         );
     }
 }
@@ -288,9 +296,28 @@ fn run_match<'a, 'b, 'c>(
     file_run_context: FileRunContext<'a, 'b>,
     query_match: &'c QueryMatch<'a, 'a>,
     instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
+    node_stack: &mut Vec<Node<'a>>,
+    wildcard_listener_pattern_index: usize,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
 ) {
+    if query_match.pattern_index == wildcard_listener_pattern_index {
+        assert!(query_match.captures.len() == 1);
+        let node = query_match.captures[0].node;
+
+        while !node_stack.is_empty() && !node.is_descendant_of(*node_stack.last().unwrap()) {
+            run_exit_node_listeners(
+                node_stack.pop().unwrap(),
+                file_run_context,
+                instantiated_per_file_rules,
+                &mut on_found_violations,
+                &mut on_found_pending_fixes,
+            );
+        }
+        node_stack.push(node);
+        return;
+    }
+
     let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = file_run_context
         .aggregated_queries
         .get_rule_and_listener_index_and_capture_index(
@@ -340,6 +367,32 @@ fn run_match<'a, 'b, 'c>(
                 |fixes| on_found_pending_fixes(fixes, instantiated_rule),
             );
         }
+    }
+}
+
+#[instrument(level = "trace", skip_all)]
+fn run_exit_node_listeners<'a, 'b>(
+    exited_node: Node<'a>,
+    file_run_context: FileRunContext<'a, 'b>,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
+    mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
+    mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
+) {
+    if let Some(kind_exit_rule_listener_indices) = file_run_context
+        .aggregated_queries
+        .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
+    {
+        kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
+            run_single_on_query_match_callback(
+                file_run_context,
+                instantiated_rule,
+                instantiated_per_file_rules,
+                rule_listener_index,
+                exited_node.into(),
+                &mut on_found_violations,
+                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+            );
+        });
     }
 }
 

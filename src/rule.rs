@@ -193,5 +193,3 @@ pub struct ResolvedRuleListenerQuery {
 }
 
 pub type RuleOptions = serde_json::Value;
-
-pub const ROOT_EXIT: &str = "__tree_sitter_lint_program_exit";

@@ -18,7 +18,7 @@ mod violations;
 
 use crate::{
     rule::Rule, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, RuleTester, ROOT_EXIT,
+    FromFileRunContextInstanceProviderFactory, RuleTester,
 };
 
 #[test]
@@ -151,7 +151,7 @@ fn test_root_exit_listener() {
         rule! {
             name => "uses-root-exit-listener",
             listeners => [
-                ROOT_EXIT => |node, context| {
+                "source_file:exit" => |node, context| {
                     let mut cursor = node.walk();
                     if node.named_children(&mut cursor).count() != 1 {
                         context.report(violation! {
@@ -195,7 +195,7 @@ fn test_root_exit_listener_amid_other_listeners() {
                         message => "function",
                     });
                 },
-                ROOT_EXIT => |node, context| {
+                "source_file:exit" => |node, context| {
                     let mut cursor = node.walk();
                     if node.named_children(&mut cursor).count() != 1 {
                         context.report(violation! {

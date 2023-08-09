@@ -1,12 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
-use crate::{
-    rule::{InstantiatedRule, ResolvedMatchBy},
-    ROOT_EXIT,
-};
+use crate::rule::{InstantiatedRule, ResolvedMatchBy};
 
 type RuleIndex = usize;
 type RuleListenerIndex = usize;
@@ -19,12 +18,14 @@ pub struct AggregatedQueriesPerLanguage {
     pub query: Arc<Query>,
     #[allow(dead_code)]
     pub query_text: String,
+    pub kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
 }
 
 #[derive(Debug, Default)]
 struct AggregatedQueriesPerLanguageBuilder {
     pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureNameIfPerCapture)>,
     query_text: String,
+    kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
 }
 
 impl AggregatedQueriesPerLanguageBuilder {
@@ -32,8 +33,11 @@ impl AggregatedQueriesPerLanguageBuilder {
     pub fn build(self, language: SupportedLanguage) -> AggregatedQueriesPerLanguage {
         let Self {
             pattern_index_lookup,
-            query_text,
+            mut query_text,
+            kind_exit_rule_listener_indices,
         } = self;
+
+        query_text.push_str("\n(_) @c");
 
         let span = trace_span!("parse aggregated query").entered();
 
@@ -41,7 +45,7 @@ impl AggregatedQueriesPerLanguageBuilder {
 
         span.exit();
 
-        assert!(query.pattern_count() == pattern_index_lookup.len());
+        assert!(query.pattern_count() == pattern_index_lookup.len() + 1);
         AggregatedQueriesPerLanguage {
             pattern_index_lookup: {
                 let span = trace_span!("resolve capture indexes").entered();
@@ -67,14 +71,16 @@ impl AggregatedQueriesPerLanguageBuilder {
             },
             query,
             query_text,
+            kind_exit_rule_listener_indices,
         }
     }
 }
 
+static KIND_EXIT: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^([a-zA-Z_]+):exit$"#).unwrap());
+
 pub struct AggregatedQueries<'a> {
     pub instantiated_rules: &'a [InstantiatedRule],
     pub per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguage>,
-    pub instantiated_rule_root_exit_rule_listener_indices: HashMap<RuleIndex, RuleListenerIndex>,
 }
 
 impl<'a> AggregatedQueries<'a> {
@@ -82,10 +88,6 @@ impl<'a> AggregatedQueries<'a> {
     pub fn new(instantiated_rules: &'a [InstantiatedRule]) -> Self {
         let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
             Default::default();
-        let mut instantiated_rule_root_exit_rule_listener_indices: HashMap<
-            RuleIndex,
-            RuleListenerIndex,
-        > = Default::default();
 
         let span = trace_span!("resolve individual rule listener queries").entered();
 
@@ -98,9 +100,12 @@ impl<'a> AggregatedQueries<'a> {
                     .iter()
                     .enumerate()
                     .filter_map(|(rule_listener_index, rule_listener_query)| {
-                        if rule_listener_query.query == ROOT_EXIT {
-                            instantiated_rule_root_exit_rule_listener_indices
-                                .insert(rule_index, rule_listener_index);
+                        if let Some(captures) = KIND_EXIT.captures(&rule_listener_query.query) {
+                            per_language_builder
+                                .kind_exit_rule_listener_indices
+                                .entry(captures[1].to_owned())
+                                .or_default()
+                                .push((rule_index, rule_listener_index));
 
                             return None;
                         }
@@ -154,8 +159,36 @@ impl<'a> AggregatedQueries<'a> {
 
                 per_language
             },
-            instantiated_rule_root_exit_rule_listener_indices,
         }
+    }
+
+    pub fn is_wildcard_listener(&self, language: SupportedLanguage, pattern_index: usize) -> bool {
+        pattern_index == self.get_wildcard_listener_pattern_index(language)
+    }
+
+    pub fn get_wildcard_listener_pattern_index(&self, language: SupportedLanguage) -> usize {
+        self.per_language
+            .get(&language)
+            .unwrap()
+            .pattern_index_lookup
+            .len()
+    }
+
+    pub fn get_kind_exit_rule_and_listener_indices<'b>(
+        &'b self,
+        language: SupportedLanguage,
+        kind: &str,
+    ) -> Option<impl Iterator<Item = (&'a InstantiatedRule, RuleListenerIndex)> + 'b> {
+        self.per_language
+            .get(&language)
+            .unwrap()
+            .kind_exit_rule_listener_indices
+            .get(kind)
+            .map(|indices| {
+                indices.iter().map(|(rule_index, rule_listener_index)| {
+                    (&self.instantiated_rules[*rule_index], *rule_listener_index)
+                })
+            })
     }
 
     pub fn get_rule_and_listener_index_and_capture_index(
