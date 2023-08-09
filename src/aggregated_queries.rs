@@ -37,7 +37,16 @@ impl AggregatedQueriesPerLanguageBuilder {
             kind_exit_rule_listener_indices,
         } = self;
 
-        query_text.push_str("\n(_) @c");
+        if !kind_exit_rule_listener_indices.is_empty() {
+            query_text.push_str(&format!(
+                "\n[{}] @c",
+                kind_exit_rule_listener_indices
+                    .keys()
+                    .map(|kind| format!("({kind})"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
 
         let span = trace_span!("parse aggregated query").entered();
 
@@ -45,7 +54,15 @@ impl AggregatedQueriesPerLanguageBuilder {
 
         span.exit();
 
-        assert!(query.pattern_count() == pattern_index_lookup.len() + 1);
+        assert!(
+            query.pattern_count()
+                == pattern_index_lookup.len()
+                    + if kind_exit_rule_listener_indices.is_empty() {
+                        0
+                    } else {
+                        1
+                    }
+        );
         AggregatedQueriesPerLanguage {
             pattern_index_lookup: {
                 let span = trace_span!("resolve capture indexes").entered();
