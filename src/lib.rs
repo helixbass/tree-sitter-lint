@@ -4,6 +4,7 @@ mod aggregated_queries;
 mod cli;
 mod config;
 mod context;
+mod event_emitter;
 pub mod lsp;
 mod macros;
 mod node;
@@ -13,6 +14,7 @@ mod rule_tester;
 mod slice;
 #[cfg(test)]
 mod tests;
+mod text;
 mod violation;
 
 use std::{
@@ -26,7 +28,6 @@ use std::{
 };
 
 use aggregated_queries::AggregatedQueries;
-pub use better_any::TidAble;
 pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
 use context::PendingFix;
@@ -37,6 +38,7 @@ pub use context::{
     SkipOptionsBuilder,
 };
 use dashmap::DashMap;
+pub use event_emitter::{Event, EventEmitter};
 pub use node::NodeExt;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
@@ -52,6 +54,7 @@ pub use rule_tester::{
 };
 pub use slice::MutRopeOrSlice;
 use squalid::EverythingExt;
+pub use text::SourceTextProvider;
 use tracing::{debug, debug_span, info_span, instrument, trace};
 use tree_sitter::Tree;
 use tree_sitter_grep::{

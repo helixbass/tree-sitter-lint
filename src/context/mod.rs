@@ -32,9 +32,10 @@ pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
 use crate::{
     rule::InstantiatedRule,
+    text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config,
+    AggregatedQueries, Config, SourceTextProvider,
 };
 
 pub struct FileRunContext<'a, 'b> {
@@ -99,6 +100,12 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
     }
 }
 
+impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
+    fn node_text(&self, node: Node) -> Cow<'a, str> {
+        self.file_contents.node_text(node)
+    }
+}
+
 pub struct QueryMatchContext<'a, 'b> {
     pub file_run_context: FileRunContext<'a, 'b>,
     pub(crate) rule: &'a InstantiatedRule,
@@ -148,7 +155,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     }
 
     pub fn get_node_text(&self, node: Node) -> Cow<'a, str> {
-        get_node_text(node, self.file_run_context.file_contents)
+        self.node_text(node)
     }
 
     pub fn maybe_get_single_captured_node_for_query<'query, 'enclosing_node>(
@@ -408,6 +415,12 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     }
 }
 
+impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
+    fn node_text(&self, node: Node) -> Cow<'a, str> {
+        self.file_run_context.node_text(node)
+    }
+}
+
 pub enum ParsedOrUnparsedQuery<'a> {
     Parsed(Query),
     ParsedRef(&'a Query),
@@ -475,16 +488,5 @@ impl<'a, T> From<T> for MaybeOwned<'a, T> {
 impl<'a, T> From<&'a T> for MaybeOwned<'a, T> {
     fn from(value: &'a T) -> Self {
         Self::Borrowed(value)
-    }
-}
-
-fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> Cow<'a, str> {
-    get_text_slice(file_contents, node.byte_range())
-}
-
-fn get_text_slice(file_contents: RopeOrSlice, range: ops::Range<usize>) -> Cow<'_, str> {
-    match file_contents {
-        RopeOrSlice::Slice(slice) => std::str::from_utf8(&slice[range]).unwrap().into(),
-        RopeOrSlice::Rope(rope) => rope.byte_slice(range).into(),
     }
 }
