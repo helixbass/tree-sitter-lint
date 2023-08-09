@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tree_sitter_lint::{
     better_any::tid, rule, tree_sitter_grep::RopeOrSlice, violation, FileRunContext,
-    FromFileRunContext, FromFileRunContextInstanceProviderFactory, Plugin, Rule,
+    FromFileRunContext, Plugin, Rule,
 };
 
 // pub type ProvidedTypes<'a> = ();
@@ -15,9 +15,7 @@ pub struct Foo<'a> {
 }
 
 impl<'a> FromFileRunContext<'a> for Foo<'a> {
-    fn from_file_run_context(
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
-    ) -> Self {
+    fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self {
         Self {
             text: match &file_run_context.file_contents {
                 RopeOrSlice::Slice(file_contents) => {
@@ -31,7 +29,7 @@ impl<'a> FromFileRunContext<'a> for Foo<'a> {
 
 tid! { impl<'a> TidAble<'a> for Foo<'a> }
 
-pub fn instantiate<T: FromFileRunContextInstanceProviderFactory>() -> Plugin<T> {
+pub fn instantiate() -> Plugin {
     Plugin {
         name: "replace-foo-with".to_owned(),
         rules: vec![
@@ -42,7 +40,7 @@ pub fn instantiate<T: FromFileRunContextInstanceProviderFactory>() -> Plugin<T> 
     }
 }
 
-fn replace_foo_with_bar_rule<T: FromFileRunContextInstanceProviderFactory>() -> Arc<dyn Rule<T>> {
+fn replace_foo_with_bar_rule() -> Arc<dyn Rule> {
     rule! {
         name => "replace-foo-with-bar",
         fixable => true,
@@ -65,8 +63,7 @@ fn replace_foo_with_bar_rule<T: FromFileRunContextInstanceProviderFactory>() -> 
     }
 }
 
-fn replace_foo_with_something_rule<T: FromFileRunContextInstanceProviderFactory>(
-) -> Arc<dyn Rule<T>> {
+fn replace_foo_with_something_rule() -> Arc<dyn Rule> {
     rule! {
         name => "replace-foo-with-something",
         fixable => true,
@@ -94,7 +91,7 @@ fn replace_foo_with_something_rule<T: FromFileRunContextInstanceProviderFactory>
     }
 }
 
-fn starts_with_use_rule<T: FromFileRunContextInstanceProviderFactory>() -> Arc<dyn Rule<T>> {
+fn starts_with_use_rule() -> Arc<dyn Rule> {
     rule! {
         name => "starts-with-use",
         listeners => [

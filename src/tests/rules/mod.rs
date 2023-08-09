@@ -56,9 +56,7 @@ fn test_rule_options() {
     );
 }
 
-fn no_more_than_n_uses_of_foo_rule<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->() -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>> {
+fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
     rule! {
         name => "no_more_than_n_uses_of_foo",
         options_type => usize,
@@ -302,13 +300,7 @@ fn test_retrieve() {
     }
 
     impl<'a> FromFileRunContext<'a> for Foo<'a> {
-        fn from_file_run_context(
-            file_run_context: FileRunContext<
-                'a,
-                '_,
-                impl FromFileRunContextInstanceProviderFactory,
-            >,
-        ) -> Self {
+        fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self {
             Self {
                 text: match &file_run_context.file_contents {
                     RopeOrSlice::Slice(file_contents) => {
@@ -328,12 +320,10 @@ fn test_retrieve() {
     }
 
     impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
-        type Parent = FooProviderFactory;
-
         fn get(
             &self,
             type_id: TypeId,
-            file_run_context: FileRunContext<'a, '_, Self::Parent>,
+            file_run_context: FileRunContext<'a, '_>,
         ) -> Option<&dyn Tid<'a>> {
             match type_id {
                 id if id == Foo::<'a>::id() => Some(
@@ -348,12 +338,10 @@ fn test_retrieve() {
     struct FooProviderFactory;
 
     impl FromFileRunContextInstanceProviderFactory for FooProviderFactory {
-        type Provider<'a> = FooProvider<'a>;
-
-        fn create<'a>(&self) -> Self::Provider<'a> {
-            FooProvider {
+        fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a> {
+            Box::new(FooProvider {
                 foo_instance: Default::default(),
-            }
+            })
         }
     }
 
@@ -385,6 +373,6 @@ fn test_retrieve() {
                 },
             ]
         },
-        FooProviderFactory,
+        Box::new(FooProviderFactory),
     );
 }

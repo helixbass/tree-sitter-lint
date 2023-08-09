@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use tree_sitter_lint::{rule, violation, FromFileRunContextInstanceProviderFactory, Rule};
+use tree_sitter_lint::{rule, violation, Rule};
 
-pub fn require_blazing_keyword_rule<T: FromFileRunContextInstanceProviderFactory>(
-) -> Arc<dyn Rule<T>> {
+pub fn require_blazing_keyword_rule() -> Arc<dyn Rule> {
     rule! {
         name => "require-blazing-keyword",
         languages => [Toml],

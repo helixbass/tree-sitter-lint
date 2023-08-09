@@ -37,40 +37,22 @@ use crate::{
     AggregatedQueries, Config,
 };
 
-pub struct FileRunContext<
-    'a,
-    'b,
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-> {
+pub struct FileRunContext<'a, 'b> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
-    pub config: &'a Config<TFromFileRunContextInstanceProviderFactory>,
+    pub config: &'a Config,
     pub language: SupportedLanguage,
-    pub(crate) aggregated_queries:
-        &'a AggregatedQueries<'a, TFromFileRunContextInstanceProviderFactory>,
+    pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
-    pub(crate) instantiated_rules:
-        &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+    pub(crate) instantiated_rules: &'a [InstantiatedRule],
     changed_ranges: Option<&'a [Range]>,
-    from_file_run_context_instance_provider:
-        &'b TFromFileRunContextInstanceProviderFactory::Provider<'a>,
+    from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
 }
 
-impl<
-        'a,
-        'b,
-        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-    > Copy for FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
-{
-}
+impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
 
-impl<
-        'a,
-        'b,
-        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-    > Clone for FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
-{
+impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
     fn clone(&self) -> Self {
         Self {
             path: self.path,
@@ -87,24 +69,19 @@ impl<
     }
 }
 
-impl<
-        'a,
-        'b,
-        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-    > FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
-{
+impl<'a, 'b> FileRunContext<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
-        config: &'a Config<TFromFileRunContextInstanceProviderFactory>,
+        config: &'a Config,
         language: SupportedLanguage,
-        aggregated_queries: &'a AggregatedQueries<TFromFileRunContextInstanceProviderFactory>,
+        aggregated_queries: &'a AggregatedQueries,
         query: &'a Arc<Query>,
-        instantiated_rules: &'a [InstantiatedRule<TFromFileRunContextInstanceProviderFactory>],
+        instantiated_rules: &'a [InstantiatedRule],
         changed_ranges: Option<&'a [Range]>,
-        from_file_run_context_instance_provider: &'b TFromFileRunContextInstanceProviderFactory::Provider<'a>,
+        from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -122,27 +99,15 @@ impl<
     }
 }
 
-pub struct QueryMatchContext<
-    'a,
-    'b,
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-> {
-    pub file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
-    pub(crate) rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
+pub struct QueryMatchContext<'a, 'b> {
+    pub file_run_context: FileRunContext<'a, 'b>,
+    pub(crate) rule: &'a InstantiatedRule,
     pending_fixes: RefCell<Option<Vec<PendingFix>>>,
     pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<
-        'a,
-        'b,
-        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-    > QueryMatchContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>
-{
-    pub fn new(
-        file_run_context: FileRunContext<'a, 'b, TFromFileRunContextInstanceProviderFactory>,
-        rule: &'a InstantiatedRule<TFromFileRunContextInstanceProviderFactory>,
-    ) -> Self {
+impl<'a, 'b> QueryMatchContext<'a, 'b> {
+    pub fn new(file_run_context: FileRunContext<'a, 'b>, rule: &'a InstantiatedRule) -> Self {
         Self {
             file_run_context,
             rule,

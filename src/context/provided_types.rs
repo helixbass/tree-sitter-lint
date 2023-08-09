@@ -4,26 +4,20 @@ use better_any::{Tid, TidAble};
 
 use crate::FileRunContext;
 
-pub trait FromFileRunContextInstanceProvider<'a>: Sized {
-    type Parent: FromFileRunContextInstanceProviderFactory<Provider<'a> = Self>;
-
+pub trait FromFileRunContextInstanceProvider<'a> {
     fn get(
         &self,
         type_id: TypeId,
-        file_run_context: FileRunContext<'a, '_, Self::Parent>,
+        file_run_context: FileRunContext<'a, '_>,
     ) -> Option<&dyn Tid<'a>>;
 }
 
 pub trait FromFileRunContextInstanceProviderFactory: Send + Sync {
-    type Provider<'a>: FromFileRunContextInstanceProvider<'a, Parent = Self>;
-
-    fn create<'a>(&self) -> Self::Provider<'a>;
+    fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a>;
 }
 
 pub trait FromFileRunContext<'a> {
-    fn from_file_run_context(
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
-    ) -> Self;
+    fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self;
 }
 
 mod _sealed {
@@ -59,7 +53,7 @@ pub trait FromFileRunContextProvidedTypesOnceLockStorage<'a> {
     fn get(
         &self,
         type_id: TypeId,
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
+        file_run_context: FileRunContext<'a, '_>,
     ) -> Option<&dyn Tid<'a>>;
 }
 
@@ -75,7 +69,7 @@ where
     fn get(
         &self,
         type_id: TypeId,
-        file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
+        file_run_context: FileRunContext<'a, '_>,
     ) -> Option<&dyn Tid<'a>> {
         match self {
             FromFileRunContextProvidedTypesOnceLockStorageEnum::One(t1, _) => match type_id {

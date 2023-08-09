@@ -11,7 +11,7 @@ use tracing::{instrument, trace_span};
 
 use crate::{
     rule::{InstantiatedRule, Rule, RuleOptions},
-    FromFileRunContextInstanceProviderFactory, Plugin,
+    Plugin,
 };
 
 mod config_file;
@@ -34,13 +34,11 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn load_config_file_and_into_config<
-        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-    >(
+    pub fn load_config_file_and_into_config(
         self,
-        all_plugins: Vec<Plugin<TFromFileRunContextInstanceProviderFactory>>,
-        all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>>,
-    ) -> Config<TFromFileRunContextInstanceProviderFactory> {
+        all_plugins: Vec<Plugin>,
+        all_standalone_rules: Vec<Arc<dyn Rule>>,
+    ) -> Config {
         let ParsedConfigFile {
             path: config_file_path,
             content: config_file_content,
@@ -69,16 +67,14 @@ pub type PluginIndex = usize;
 
 #[derive(Builder)]
 #[builder(setter(strip_option, into), pattern = "owned")]
-pub struct Config<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-> {
+pub struct Config {
     #[builder(default)]
     pub rule: Option<String>,
 
-    all_standalone_rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>>,
+    all_standalone_rules: Vec<Arc<dyn Rule>>,
 
     #[builder(default)]
-    all_plugins: Vec<Plugin<TFromFileRunContextInstanceProviderFactory>>,
+    all_plugins: Vec<Plugin>,
 
     #[builder(default)]
     pub fix: bool,
@@ -93,42 +89,23 @@ pub struct Config<
 
     #[allow(clippy::type_complexity)]
     #[builder(setter(skip))]
-    rules_by_plugin_prefixed_name: OnceLock<
-        HashMap<
-            String,
-            (
-                Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-                Option<PluginIndex>,
-            ),
-        >,
-    >,
+    rules_by_plugin_prefixed_name: OnceLock<HashMap<String, (Arc<dyn Rule>, Option<PluginIndex>)>>,
 
     #[builder(default)]
     pub force_rebuild: bool,
 }
 
-impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
-    Config<TFromFileRunContextInstanceProviderFactory>
-{
+impl Config {
     #[allow(clippy::type_complexity)]
     fn get_rules_by_plugin_prefixed_name(
         &self,
-    ) -> &HashMap<
-        String,
-        (
-            Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-            Option<PluginIndex>,
-        ),
-    > {
+    ) -> &HashMap<String, (Arc<dyn Rule>, Option<PluginIndex>)> {
         self.rules_by_plugin_prefixed_name.get_or_init(|| {
             let _span = trace_span!("rules by plugin prefixed name init").entered();
 
             let mut rules_by_plugin_prefixed_name: HashMap<
                 String,
-                (
-                    Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-                    Option<PluginIndex>,
-                ),
+                (Arc<dyn Rule>, Option<PluginIndex>),
             > = self
                 .all_plugins
                 .iter()
@@ -154,11 +131,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
     #[instrument(level = "trace", skip(self))]
     fn get_active_rules_and_associated_plugins_and_options(
         &self,
-    ) -> Vec<(
-        Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-        Option<PluginIndex>,
-        &RuleConfiguration,
-    )> {
+    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>, &RuleConfiguration)> {
         let rules_by_plugin_prefixed_name = self.get_rules_by_plugin_prefixed_name();
         self.rule_configurations
             .iter()
@@ -177,15 +150,11 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
     fn filter_based_on_rule_argument<'a>(
         &self,
         active_rules_and_associated_plugins_and_options: Vec<(
-            Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
+            Arc<dyn Rule>,
             Option<PluginIndex>,
             &'a RuleConfiguration,
         )>,
-    ) -> Vec<(
-        Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-        Option<PluginIndex>,
-        &'a RuleConfiguration,
-    )> {
+    ) -> Vec<(Arc<dyn Rule>, Option<PluginIndex>, &'a RuleConfiguration)> {
         match self.rule.as_ref() {
             Some(rule_arg) => {
                 let filtered = active_rules_and_associated_plugins_and_options
@@ -214,9 +183,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
     }
 
     #[instrument(level = "debug", skip(self))]
-    pub fn get_instantiated_rules(
-        &self,
-    ) -> Vec<InstantiatedRule<TFromFileRunContextInstanceProviderFactory>> {
+    pub fn get_instantiated_rules(&self) -> Vec<InstantiatedRule> {
         let active_rules_and_associated_plugins_and_options =
             self.get_active_rules_and_associated_plugins_and_options();
         if active_rules_and_associated_plugins_and_options.is_empty() {
@@ -240,9 +207,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
     }
 }
 
-impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
-    ConfigBuilder<TFromFileRunContextInstanceProviderFactory>
-{
+impl ConfigBuilder {
     pub fn default_rule_configurations(mut self) -> Self {
         self.rule_configurations = Some(
             self.all_standalone_rules
@@ -264,9 +229,7 @@ pub struct RuleConfiguration {
 }
 
 impl RuleConfiguration {
-    pub fn default_for_rule(
-        rule: &Arc<dyn Rule<impl FromFileRunContextInstanceProviderFactory>>,
-    ) -> Self {
+    pub fn default_for_rule(rule: &Arc<dyn Rule>) -> Self {
         Self {
             name: rule.meta().name,
             level: ErrorLevel::Error,
