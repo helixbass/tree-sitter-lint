@@ -280,9 +280,9 @@ fn run_per_file<'a, 'b>(
         );
         return;
     }
-    while !node_stack.is_empty() {
+    while let Some(node) = node_stack.pop() {
         run_exit_node_listeners(
-            node_stack.pop().unwrap(),
+            node,
             file_run_context,
             &mut instantiated_per_file_rules,
             &mut on_found_violations,
