@@ -4,7 +4,7 @@ use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
 };
-use tree_sitter_grep::{tree_sitter::Node, SupportedLanguage};
+use tree_sitter_grep::{tree_sitter::Node, RopeOrSlice, SupportedLanguage};
 
 use crate::{
     event_emitter::{get_listener_selector, EventEmitterName, EventType},
@@ -68,7 +68,7 @@ impl EventEmitterFactory for DummyEventEmitterFactory {
         vec!["dummy-event".to_owned()]
     }
 
-    fn create<'a>(&self) -> Box<dyn EventEmitter<'a>> {
+    fn create<'a>(&self, _file_contents: RopeOrSlice<'a>) -> Box<dyn EventEmitter<'a>> {
         Box::new(DummyEventEmitter)
     }
 }

@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use squalid::regex;
 use tracing::{instrument, trace, trace_span};
-use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
+use tree_sitter_grep::{tree_sitter::Query, RopeOrSlice, SupportedLanguage};
 
 use crate::{
     event_emitter::{self, EventEmitterName, EventType},
@@ -426,11 +426,14 @@ impl<'a> AggregatedQueries<'a> {
     pub fn get_event_emitter_instances<'b>(
         &self,
         language: SupportedLanguage,
-    ) -> Vec<RefCell<Box<dyn EventEmitter<'b>>>> {
+        file_contents: impl Into<RopeOrSlice<'b>>,
+    ) -> Vec<RefCell<Box<dyn EventEmitter<'b> + 'b>>> {
+        let file_contents = file_contents.into();
+
         self.per_language[&language]
             .all_active_event_emitter_factories
             .iter()
-            .map(|event_emitter_factory| RefCell::new(event_emitter_factory.create()))
+            .map(|event_emitter_factory| RefCell::new(event_emitter_factory.create(file_contents)))
             .collect()
     }
 

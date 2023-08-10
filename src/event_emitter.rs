@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tree_sitter_grep::{tree_sitter::Node, SupportedLanguage};
+use tree_sitter_grep::{tree_sitter::Node, RopeOrSlice, SupportedLanguage};
 
 pub type EventEmitterName = String;
 pub type EventType = String;
@@ -10,7 +10,7 @@ pub trait EventEmitterFactory: Send + Sync {
     fn name(&self) -> EventEmitterName;
     fn languages(&self) -> Vec<SupportedLanguage>;
     fn event_types(&self) -> Vec<EventType>;
-    fn create<'a>(&self) -> Box<dyn EventEmitter<'a>>;
+    fn create<'a>(&self, file_contents: RopeOrSlice<'a>) -> Box<dyn EventEmitter<'a> + 'a>;
 }
 
 pub trait EventEmitter<'a> {

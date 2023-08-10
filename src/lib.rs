@@ -48,8 +48,9 @@ pub use rule::{
     MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta,
 };
 pub use rule_tester::{
-    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid,
-    RuleTestValid, RuleTester, RuleTests,
+    DummyFromFileRunContextInstanceProviderFactory, RuleTestExpectedError,
+    RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid, RuleTestValid,
+    RuleTester, RuleTests,
 };
 pub use slice::MutRopeOrSlice;
 use squalid::EverythingExt;
@@ -115,7 +116,8 @@ pub fn run(
         |dir_entry, language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
-            let event_emitters = aggregated_queries.get_event_emitter_instances(language);
+            let event_emitters =
+                aggregated_queries.get_event_emitter_instances(language, file_contents);
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -613,7 +615,8 @@ fn run_fixing_loop<'a>(
 
         let from_file_run_context_instance_provider =
             from_file_run_context_instance_provider_factory.create();
-        let event_emitters = aggregated_queries.get_event_emitter_instances(language);
+        let event_emitters =
+            aggregated_queries.get_event_emitter_instances(language, &file_contents);
         run_per_file(
             FileRunContext::new(
                 path,
@@ -662,7 +665,7 @@ pub fn run_for_slice<'a>(
     config: Config,
     language: SupportedLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> Vec<ViolationWithContext> {
+) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if config.fix {
@@ -682,7 +685,7 @@ pub fn run_for_slice<'a>(
     });
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
-    let event_emitters = aggregated_queries.get_event_emitter_instances(language);
+    let event_emitters = aggregated_queries.get_event_emitter_instances(language, file_contents);
     run_per_file(
         FileRunContext::new(
             path,
@@ -710,7 +713,9 @@ pub fn run_for_slice<'a>(
             panic!("Expected no fixes");
         },
     );
-    violations.into_inner().unwrap()
+    drop(from_file_run_context_instance_provider);
+    drop(event_emitters);
+    (violations.into_inner().unwrap(), instantiated_rules)
     // RunForSliceStatus {
     //     violations: violations.into_inner().unwrap(),
     //     from_file_run_context_instance_provider,
@@ -725,7 +730,7 @@ pub fn run_fixing_for_slice<'a>(
     config: Config,
     language: SupportedLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> Vec<ViolationWithContext> {
+) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if !config.fix {
@@ -746,7 +751,7 @@ pub fn run_fixing_for_slice<'a>(
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
-    let event_emitters = aggregated_queries.get_event_emitter_instances(language);
+    let event_emitters = aggregated_queries.get_event_emitter_instances(language, &file_contents);
     run_per_file(
         FileRunContext::new(
             path,
@@ -782,7 +787,9 @@ pub fn run_fixing_for_slice<'a>(
     let mut violations = violations.into_inner().unwrap();
     let pending_fixes = pending_fixes.into_inner().unwrap();
     if pending_fixes.is_empty() {
-        return violations;
+        drop(from_file_run_context_instance_provider);
+        drop(event_emitters);
+        return (violations, instantiated_rules);
     }
     drop(from_file_run_context_instance_provider);
     drop(event_emitters);
@@ -798,7 +805,7 @@ pub fn run_fixing_for_slice<'a>(
         tree,
         from_file_run_context_instance_provider_factory,
     );
-    violations
+    (violations, instantiated_rules)
 }
 
 fn get_tree_sitter_grep_args(

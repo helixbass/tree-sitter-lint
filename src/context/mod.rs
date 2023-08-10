@@ -49,7 +49,7 @@ pub struct FileRunContext<'a, 'b> {
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
-    pub(crate) event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a>>>],
+    pub(crate) event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a> + 'a>>],
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -85,7 +85,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         instantiated_rules: &'a [InstantiatedRule],
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
-        event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a>>>],
+        event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a> + 'a>>],
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
