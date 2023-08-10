@@ -67,6 +67,7 @@ pub use violation::{ViolationBuilder, ViolationWithContext};
 
 pub extern crate better_any;
 pub extern crate clap;
+pub extern crate const_format;
 pub extern crate serde_json;
 pub extern crate serde_yaml;
 pub extern crate tokio;

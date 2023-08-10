@@ -32,6 +32,17 @@ pub fn is_listener(selector: &str) -> Option<(EventEmitterName, EventType)> {
         .map(|captures| (captures[1].to_owned(), captures[2].to_owned()))
 }
 
+#[macro_export]
+macro_rules! get_const_listener_selector {
+    ($event_emitter_name:expr, $event_name:expr) => {
+        $crate::const_format::formatcp!(
+            "__tree_sitter_lint_event_emitter_{}__{}",
+            $event_emitter_name,
+            $event_name
+        )
+    };
+}
+
 pub fn get_listener_selector(
     event_emitter_name: &str, /* EventEmitterName */
     event_name: &str,         /* EventType */
