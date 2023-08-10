@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
     sync::Arc,
@@ -13,7 +14,7 @@ use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 use crate::{
     event_emitter::{self, EventEmitterName, EventType},
     rule::{InstantiatedRule, ResolvedMatchBy},
-    EventEmitter, EventEmitterFactory,
+    EventEmitter, EventEmitterFactory, EventTypeIndex,
 };
 
 type RuleIndex = usize;
@@ -21,7 +22,6 @@ type RuleListenerIndex = usize;
 type CaptureIndexIfPerCapture = Option<u32>;
 type CaptureNameIfPerCapture = Option<String>;
 type EventEmitterIndex = usize;
-type EventTypeIndex = usize;
 type AllEventEmitterFactoriesIndex = usize;
 
 pub struct AggregatedQueriesPerLanguage {
@@ -372,9 +372,7 @@ impl<'a> AggregatedQueries<'a> {
         language: SupportedLanguage,
         kind: &str,
     ) -> Option<impl Iterator<Item = (&'a InstantiatedRule, RuleListenerIndex)> + 'b> {
-        self.per_language
-            .get(&language)
-            .unwrap()
+        self.per_language[&language]
             .kind_exit_rule_listener_indices
             .get(kind)
             .map(|indices| {
@@ -430,11 +428,27 @@ impl<'a> AggregatedQueries<'a> {
     pub fn get_event_emitter_instances<'b>(
         &self,
         language: SupportedLanguage,
-    ) -> Vec<Box<dyn EventEmitter<'b>>> {
+    ) -> Vec<RefCell<Box<dyn EventEmitter<'b>>>> {
         self.per_language[&language]
             .all_active_event_emitter_factories
             .iter()
-            .map(|event_emitter_factory| event_emitter_factory.create())
+            .map(|event_emitter_factory| RefCell::new(event_emitter_factory.create()))
             .collect()
+    }
+
+    pub fn get_event_emitter_listeners<'b>(
+        &'b self,
+        language: SupportedLanguage,
+        event_emitter_index: EventEmitterIndex,
+        event_type_index: EventTypeIndex,
+    ) -> Option<impl Iterator<Item = (&'a InstantiatedRule, RuleListenerIndex)> + 'b> {
+        self.per_language[&language]
+            .event_emitter_rule_listener_indices
+            .get(&(event_emitter_index, event_type_index))
+            .map(|indices| {
+                indices.iter().map(|(rule_index, rule_listener_index)| {
+                    (&self.instantiated_rules[*rule_index], *rule_listener_index)
+                })
+            })
     }
 }

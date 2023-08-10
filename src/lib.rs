@@ -38,7 +38,7 @@ pub use context::{
     SkipOptionsBuilder,
 };
 use dashmap::DashMap;
-pub use event_emitter::{Event, EventEmitter, EventEmitterFactory};
+pub use event_emitter::{EventEmitter, EventEmitterFactory, EventTypeIndex};
 pub use node::NodeExt;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
@@ -425,6 +425,37 @@ fn run_exit_node_listeners<'a, 'b>(
             );
         });
     }
+
+    for (event_emitter_index, event_emitter) in
+        file_run_context.event_emitters.into_iter().enumerate()
+    {
+        if let Some(fired_event_type_indices) = event_emitter.borrow_mut().leave_node(exited_node) {
+            for fired_event_type_index in fired_event_type_indices {
+                if let Some(event_emitter_listener_indices) = file_run_context
+                    .aggregated_queries
+                    .get_event_emitter_listeners(
+                        file_run_context.language,
+                        event_emitter_index,
+                        fired_event_type_index,
+                    )
+                {
+                    event_emitter_listener_indices.for_each(
+                        |(instantiated_rule, rule_listener_index)| {
+                            run_single_on_query_match_callback(
+                                file_run_context,
+                                instantiated_rule,
+                                instantiated_per_file_rules,
+                                rule_listener_index,
+                                exited_node.into(),
+                                &mut on_found_violations,
+                                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+                            );
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -450,6 +481,38 @@ fn run_enter_node_listeners<'a, 'b>(
                 |fixes| on_found_pending_fixes(fixes, instantiated_rule),
             );
         });
+    }
+
+    for (event_emitter_index, event_emitter) in
+        file_run_context.event_emitters.into_iter().enumerate()
+    {
+        if let Some(fired_event_type_indices) = event_emitter.borrow_mut().enter_node(entered_node)
+        {
+            for fired_event_type_index in fired_event_type_indices {
+                if let Some(event_emitter_listener_indices) = file_run_context
+                    .aggregated_queries
+                    .get_event_emitter_listeners(
+                        file_run_context.language,
+                        event_emitter_index,
+                        fired_event_type_index,
+                    )
+                {
+                    event_emitter_listener_indices.for_each(
+                        |(instantiated_rule, rule_listener_index)| {
+                            run_single_on_query_match_callback(
+                                file_run_context,
+                                instantiated_rule,
+                                instantiated_per_file_rules,
+                                rule_listener_index,
+                                entered_node.into(),
+                                &mut on_found_violations,
+                                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+                            );
+                        },
+                    );
+                }
+            }
+        }
     }
 }
 

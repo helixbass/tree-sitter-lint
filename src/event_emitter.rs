@@ -4,7 +4,7 @@ use tree_sitter_grep::{tree_sitter::Node, SupportedLanguage};
 
 pub type EventEmitterName = String;
 pub type EventType = String;
-pub type Event = EventType;
+pub type EventTypeIndex = usize;
 
 pub trait EventEmitterFactory: Send + Sync {
     fn name(&self) -> EventEmitterName;
@@ -14,8 +14,8 @@ pub trait EventEmitterFactory: Send + Sync {
 }
 
 pub trait EventEmitter<'a> {
-    fn enter_node(&mut self, node: Node<'a>) -> Option<Vec<Event>>;
-    fn leave_node(&mut self, node: Node<'a>) -> Option<Vec<Event>>;
+    fn enter_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
+    fn leave_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
 }
 
 const EVENT_EMITTER_LISTENER_PREFIX: &str = "__tree_sitter_lint_event_emitter_";
