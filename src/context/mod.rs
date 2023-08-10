@@ -35,7 +35,7 @@ use crate::{
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, SourceTextProvider,
+    AggregatedQueries, Config, EventEmitter, SourceTextProvider,
 };
 
 pub struct FileRunContext<'a, 'b> {
@@ -49,6 +49,7 @@ pub struct FileRunContext<'a, 'b> {
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+    event_emitters: &'b [Box<dyn EventEmitter<'a>>],
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -66,6 +67,7 @@ impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
             instantiated_rules: self.instantiated_rules,
             changed_ranges: self.changed_ranges,
             from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
+            event_emitters: self.event_emitters,
         }
     }
 }
@@ -83,6 +85,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         instantiated_rules: &'a [InstantiatedRule],
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+        event_emitters: &'b [Box<dyn EventEmitter<'a>>],
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -96,6 +99,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             instantiated_rules,
             changed_ranges,
             from_file_run_context_instance_provider,
+            event_emitters,
         }
     }
 }

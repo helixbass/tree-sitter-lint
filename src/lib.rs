@@ -115,6 +115,7 @@ pub fn run(
         |dir_entry, language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
+            let event_emitters = aggregated_queries.get_event_emitter_instances(language);
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -127,6 +128,7 @@ pub fn run(
                     &instantiated_rules,
                     None,
                     &*from_file_run_context_instance_provider,
+                    &event_emitters,
                 ),
                 |violations| {
                     all_violations
@@ -548,6 +550,7 @@ fn run_fixing_loop<'a>(
 
         let from_file_run_context_instance_provider =
             from_file_run_context_instance_provider_factory.create();
+        let event_emitters = aggregated_queries.get_event_emitter_instances(language);
         run_per_file(
             FileRunContext::new(
                 path,
@@ -564,6 +567,7 @@ fn run_fixing_loop<'a>(
                 instantiated_rules,
                 Some(&changed_ranges),
                 &*from_file_run_context_instance_provider,
+                &event_emitters,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);
@@ -615,6 +619,7 @@ pub fn run_for_slice<'a>(
     });
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
+    let event_emitters = aggregated_queries.get_event_emitter_instances(language);
     run_per_file(
         FileRunContext::new(
             path,
@@ -633,6 +638,7 @@ pub fn run_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            &event_emitters,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -677,6 +683,7 @@ pub fn run_fixing_for_slice<'a>(
     let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
+    let event_emitters = aggregated_queries.get_event_emitter_instances(language);
     run_per_file(
         FileRunContext::new(
             path,
@@ -695,6 +702,7 @@ pub fn run_fixing_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            &event_emitters,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -714,6 +722,7 @@ pub fn run_fixing_for_slice<'a>(
         return violations;
     }
     drop(from_file_run_context_instance_provider);
+    drop(event_emitters);
     run_fixing_loop(
         &mut violations,
         file_contents,

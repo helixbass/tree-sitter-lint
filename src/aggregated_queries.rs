@@ -13,7 +13,7 @@ use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 use crate::{
     event_emitter::{self, EventEmitterName, EventType},
     rule::{InstantiatedRule, ResolvedMatchBy},
-    EventEmitterFactory,
+    EventEmitter, EventEmitterFactory,
 };
 
 type RuleIndex = usize;
@@ -425,5 +425,16 @@ impl<'a> AggregatedQueries<'a> {
 
     pub fn get_query_for_language(&self, language: SupportedLanguage) -> Arc<Query> {
         self.per_language.get(&language).unwrap().query.clone()
+    }
+
+    pub fn get_event_emitter_instances<'b>(
+        &self,
+        language: SupportedLanguage,
+    ) -> Vec<Box<dyn EventEmitter<'b>>> {
+        self.per_language[&language]
+            .all_active_event_emitter_factories
+            .iter()
+            .map(|event_emitter_factory| event_emitter_factory.create())
+            .collect()
     }
 }
