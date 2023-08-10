@@ -4,7 +4,7 @@ mod aggregated_queries;
 mod cli;
 mod config;
 mod context;
-mod event_emitter;
+pub mod event_emitter;
 pub mod lsp;
 mod macros;
 mod node;
@@ -38,7 +38,7 @@ pub use context::{
     SkipOptionsBuilder,
 };
 use dashmap::DashMap;
-pub use event_emitter::{Event, EventEmitter};
+pub use event_emitter::{Event, EventEmitter, EventEmitterFactory};
 pub use node::NodeExt;
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
@@ -101,7 +101,9 @@ pub fn run(
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
 ) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let all_event_emitter_factories = config.get_all_event_emitter_factories();
+    let aggregated_queries =
+        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
     let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, None);
     let all_violations: DashMap<PathBuf, Vec<ViolationWithContext>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
@@ -600,7 +602,9 @@ pub fn run_for_slice<'a>(
         panic!("Use run_fixing_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let all_event_emitter_factories = config.get_all_event_emitter_factories();
+    let aggregated_queries =
+        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
@@ -659,7 +663,9 @@ pub fn run_fixing_for_slice<'a>(
         panic!("Use run_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let all_event_emitter_factories = config.get_all_event_emitter_factories();
+    let aggregated_queries =
+        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 

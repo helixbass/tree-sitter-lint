@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     sync::Arc,
 };
 
@@ -9,14 +10,20 @@ use squalid::regex;
 use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
-use crate::rule::{InstantiatedRule, ResolvedMatchBy};
+use crate::{
+    event_emitter::{self, EventEmitterName, EventType},
+    rule::{InstantiatedRule, ResolvedMatchBy},
+    EventEmitterFactory,
+};
 
 type RuleIndex = usize;
 type RuleListenerIndex = usize;
 type CaptureIndexIfPerCapture = Option<u32>;
 type CaptureNameIfPerCapture = Option<String>;
+type EventEmitterIndex = usize;
+type EventTypeIndex = usize;
+type AllEventEmitterFactoriesIndex = usize;
 
-#[derive(Debug)]
 pub struct AggregatedQueriesPerLanguage {
     pub pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureIndexIfPerCapture)>,
     pub query: Arc<Query>,
@@ -24,6 +31,35 @@ pub struct AggregatedQueriesPerLanguage {
     pub query_text: String,
     pub kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
     pub kind_enter_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
+    pub all_active_event_emitter_factories: Vec<Arc<dyn EventEmitterFactory>>,
+    pub event_emitter_rule_listener_indices:
+        HashMap<(EventEmitterIndex, EventTypeIndex), Vec<(RuleIndex, RuleListenerIndex)>>,
+}
+
+impl fmt::Debug for AggregatedQueriesPerLanguage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AggregatedQueriesPerLanguage")
+            .field("pattern_index_lookup", &self.pattern_index_lookup)
+            .field("query", &self.query)
+            .field("query_text", &self.query_text)
+            .field(
+                "kind_exit_rule_listener_indices",
+                &self.kind_exit_rule_listener_indices,
+            )
+            .field(
+                "kind_enter_rule_listener_indices",
+                &self.kind_enter_rule_listener_indices,
+            )
+            // .field(
+            //     "all_active_event_emitter_factories",
+            //     &self.all_active_event_emitter_factories,
+            // )
+            .field(
+                "event_emitter_rule_listener_indices",
+                &self.event_emitter_rule_listener_indices,
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -32,20 +68,32 @@ struct AggregatedQueriesPerLanguageBuilder {
     query_text: String,
     kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
     kind_enter_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
+    all_active_event_emitter_factories: HashSet<AllEventEmitterFactoriesIndex>,
+    event_emitter_rule_listener_indices: HashMap<
+        (AllEventEmitterFactoriesIndex, EventTypeIndex),
+        Vec<(RuleIndex, RuleListenerIndex)>,
+    >,
 }
 
 impl AggregatedQueriesPerLanguageBuilder {
-    #[instrument(level = "trace")]
-    pub fn build(self, language: SupportedLanguage) -> AggregatedQueriesPerLanguage {
+    #[instrument(level = "trace", skip(all_event_emitter_factories))]
+    pub fn build(
+        self,
+        language: SupportedLanguage,
+        all_event_emitter_factories: &[Arc<dyn EventEmitterFactory>],
+    ) -> AggregatedQueriesPerLanguage {
         let Self {
             pattern_index_lookup,
             mut query_text,
             kind_exit_rule_listener_indices,
             kind_enter_rule_listener_indices,
+            event_emitter_rule_listener_indices,
+            all_active_event_emitter_factories: all_active_event_emitter_factory_indices,
         } = self;
 
         if !kind_exit_rule_listener_indices.is_empty()
             || !kind_enter_rule_listener_indices.is_empty()
+            || !event_emitter_rule_listener_indices.is_empty()
         {
             query_text.push_str("\n(_) @c");
         }
@@ -56,11 +104,24 @@ impl AggregatedQueriesPerLanguageBuilder {
 
         span.exit();
 
+        let mut all_active_event_emitter_factories: Vec<Arc<dyn EventEmitterFactory>> =
+            Default::default();
+        let mut all_event_emitter_factories_index_to_event_emitter_index: HashMap<
+            AllEventEmitterFactoriesIndex,
+            EventEmitterIndex,
+        > = Default::default();
+        for index in all_active_event_emitter_factory_indices {
+            all_active_event_emitter_factories.push(all_event_emitter_factories[index].clone());
+            all_event_emitter_factories_index_to_event_emitter_index
+                .insert(index, all_active_event_emitter_factories.len() - 1);
+        }
+
         assert!(
             query.pattern_count()
                 == pattern_index_lookup.len()
                     + if kind_exit_rule_listener_indices.is_empty()
                         && kind_enter_rule_listener_indices.is_empty()
+                        && event_emitter_rule_listener_indices.is_empty()
                     {
                         0
                     } else {
@@ -94,6 +155,22 @@ impl AggregatedQueriesPerLanguageBuilder {
             query_text,
             kind_exit_rule_listener_indices,
             kind_enter_rule_listener_indices,
+            event_emitter_rule_listener_indices: event_emitter_rule_listener_indices
+                .into_iter()
+                .map(
+                    |((all_event_emitter_factories_index, event_type_index), rule_indices)| {
+                        (
+                            (
+                                all_event_emitter_factories_index_to_event_emitter_index
+                                    [&all_event_emitter_factories_index],
+                                event_type_index,
+                            ),
+                            rule_indices,
+                        )
+                    },
+                )
+                .collect(),
+            all_active_event_emitter_factories,
         }
     }
 }
@@ -108,9 +185,43 @@ pub struct AggregatedQueries<'a> {
 
 impl<'a> AggregatedQueries<'a> {
     #[instrument(level = "debug", skip_all)]
-    pub fn new(instantiated_rules: &'a [InstantiatedRule]) -> Self {
+    pub fn new(
+        instantiated_rules: &'a [InstantiatedRule],
+        all_event_emitter_factories: &[Arc<dyn EventEmitterFactory>],
+    ) -> Self {
         let mut per_language: HashMap<SupportedLanguage, AggregatedQueriesPerLanguageBuilder> =
             Default::default();
+        #[allow(clippy::type_complexity)]
+        let all_event_emitter_factories_by_name: HashMap<
+            EventEmitterName,
+            (
+                AllEventEmitterFactoriesIndex,
+                Arc<dyn EventEmitterFactory>,
+                HashMap<EventType, EventTypeIndex>,
+            ),
+        > = all_event_emitter_factories
+            .iter()
+            .enumerate()
+            .map(|(index, event_emitter_factory)| {
+                (
+                    event_emitter_factory.name(),
+                    (
+                        index,
+                        event_emitter_factory.clone(),
+                        event_emitter_factory
+                            .event_types()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, event_type)| (event_type, index))
+                            .collect(),
+                    ),
+                )
+            })
+            .collect();
+        let mut all_active_event_emitter_factories: HashMap<
+            EventEmitterName,
+            AllEventEmitterFactoriesIndex,
+        > = Default::default();
 
         let span = trace_span!("resolve individual rule listener queries").entered();
 
@@ -124,6 +235,31 @@ impl<'a> AggregatedQueries<'a> {
                     .enumerate()
                     .filter_map(|(rule_listener_index, rule_listener_query)| {
                         if !rule_listener_query.query.contains('(') {
+                            if let Some((event_emitter_name, event_type)) =
+                                event_emitter::is_listener(&rule_listener_query.query)
+                            {
+                                let all_event_emitter_factories_index =
+                                    *all_active_event_emitter_factories
+                                        .entry(event_emitter_name.clone())
+                                        .or_insert_with(|| {
+                                            all_event_emitter_factories_by_name
+                                                .get(&event_emitter_name)
+                                                .unwrap_or_else(|| panic!("Unknown event emitter"))
+                                                .0
+                                        });
+                                let event_index = *all_event_emitter_factories_by_name
+                                    .get(&event_emitter_name)
+                                    .unwrap()
+                                    .2
+                                    .get(&event_type)
+                                    .unwrap_or_else(|| panic!("Unknown event type"));
+                                per_language_builder
+                                    .event_emitter_rule_listener_indices
+                                    .entry((all_event_emitter_factories_index, event_index))
+                                    .or_default()
+                                    .push((rule_index, rule_listener_index));
+                            }
+
                             let mut saw_selector = false;
                             let mut seen_exit_and_enter_kinds: (HashSet<String>, HashSet<&str>) =
                                 (Default::default(), Default::default());
@@ -203,7 +339,10 @@ impl<'a> AggregatedQueries<'a> {
                 let per_language = per_language
                     .into_iter()
                     .map(|(language, per_language_value)| {
-                        (language, per_language_value.build(language))
+                        (
+                            language,
+                            per_language_value.build(language, all_event_emitter_factories),
+                        )
                     })
                     .collect::<HashMap<_, _>>();
 

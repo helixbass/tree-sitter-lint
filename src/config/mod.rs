@@ -11,7 +11,7 @@ use tracing::{instrument, trace_span};
 
 use crate::{
     rule::{InstantiatedRule, Rule, RuleOptions},
-    Plugin,
+    EventEmitterFactory, Plugin,
 };
 
 mod config_file;
@@ -204,6 +204,14 @@ impl Config {
 
     pub fn get_plugin_name(&self, plugin_index: PluginIndex) -> &str {
         &self.all_plugins[plugin_index].name
+    }
+
+    pub fn get_all_event_emitter_factories(&self) -> Vec<Arc<dyn EventEmitterFactory>> {
+        self.all_plugins
+            .iter()
+            .flat_map(|plugin| plugin.event_emitter_factories.iter())
+            .cloned()
+            .collect()
     }
 }
 
