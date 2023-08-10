@@ -9,7 +9,7 @@ use crate::{
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    FileRunContext, FromFileRunContextInstanceProviderFactory, RuleConfiguration,
+    FileRunContext, FromFileRunContextInstanceProviderFactory, Plugin, RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -18,6 +18,7 @@ pub struct RuleTester {
     language: SupportedLanguage,
     from_file_run_context_instance_provider_factory:
         Box<dyn FromFileRunContextInstanceProviderFactory>,
+    plugins: Vec<Plugin>,
 }
 
 impl RuleTester {
@@ -27,6 +28,7 @@ impl RuleTester {
         from_file_run_context_instance_provider_factory: Box<
             dyn FromFileRunContextInstanceProviderFactory,
         >,
+        plugins: Vec<Plugin>,
     ) -> Self {
         if !rule.meta().fixable
             && rule_tests.invalid_tests.iter().any(|invalid_test| {
@@ -47,7 +49,18 @@ impl RuleTester {
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
+            plugins,
         }
+    }
+
+    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(DummyFromFileRunContextInstanceProviderFactory),
+            Default::default(),
+        )
+        .run_tests()
     }
 
     pub fn run_with_from_file_run_context_instance_provider(
@@ -61,6 +74,17 @@ impl RuleTester {
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
+            Default::default(),
+        )
+        .run_tests()
+    }
+
+    pub fn run_with_plugins(rule: Arc<dyn Rule>, rule_tests: RuleTests, plugins: Vec<Plugin>) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(DummyFromFileRunContextInstanceProviderFactory),
+            plugins,
         )
         .run_tests()
     }
@@ -88,6 +112,7 @@ impl RuleTester {
                     level: ErrorLevel::Error,
                     options: valid_test.options.clone(),
                 }])
+                .all_plugins(self.plugins.clone())
                 .build()
                 .unwrap(),
             self.language,
@@ -113,6 +138,7 @@ impl RuleTester {
                     level: ErrorLevel::Error,
                     options: invalid_test.options.clone(),
                 }])
+                .all_plugins(self.plugins.clone())
                 .fix(true)
                 .report_fixed_violations(true)
                 .build()
@@ -139,17 +165,6 @@ impl RuleTester {
             }
             _ => (),
         }
-    }
-}
-
-impl RuleTester {
-    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
-        Self::new(
-            rule,
-            rule_tests,
-            Box::new(DummyFromFileRunContextInstanceProviderFactory),
-        )
-        .run_tests()
     }
 }
 

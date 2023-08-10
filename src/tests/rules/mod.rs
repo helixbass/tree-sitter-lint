@@ -11,6 +11,7 @@ use proc_macros::{
 };
 use tree_sitter_grep::RopeOrSlice;
 
+mod event_emitter;
 mod options;
 mod state;
 mod tokens;

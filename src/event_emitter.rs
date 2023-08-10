@@ -23,7 +23,7 @@ const EVENT_EMITTER_LISTENER_PREFIX: &str = "__tree_sitter_lint_event_emitter_";
 static EVENT_EMITTER_LISTENER: Lazy<Regex> = Lazy::new(|| {
     // TODO: validate that event emitter names/event names match this regex (if we're going to
     // restrict to it here)?
-    Regex::new(&format!(r#"{EVENT_EMITTER_LISTENER_PREFIX}([a-zA-Z][a-zA-Z_-]+[a-zA-Z])__([a-zA-Z][a-zA-Z_-]+[a-zA-Z])"#)).unwrap()
+    Regex::new(&format!(r#"{EVENT_EMITTER_LISTENER_PREFIX}([a-zA-Z][a-zA-Z_-]*[a-zA-Z])__([a-zA-Z][a-zA-Z_-]*[a-zA-Z])"#)).unwrap()
 });
 
 pub fn is_listener(selector: &str) -> Option<(EventEmitterName, EventType)> {
@@ -33,8 +33,8 @@ pub fn is_listener(selector: &str) -> Option<(EventEmitterName, EventType)> {
 }
 
 pub fn get_listener_selector(
-    event_emitter_name: &EventEmitterName,
-    event_name: &EventType,
+    event_emitter_name: &str, /* EventEmitterName */
+    event_name: &str,         /* EventType */
 ) -> String {
     format!("{EVENT_EMITTER_LISTENER_PREFIX}{event_emitter_name}__{event_name}")
 }

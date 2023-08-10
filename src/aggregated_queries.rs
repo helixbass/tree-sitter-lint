@@ -68,7 +68,7 @@ struct AggregatedQueriesPerLanguageBuilder {
     query_text: String,
     kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
     kind_enter_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
-    all_active_event_emitter_factories: HashSet<AllEventEmitterFactoriesIndex>,
+    all_active_event_emitter_factories: HashMap<EventEmitterName, AllEventEmitterFactoriesIndex>,
     event_emitter_rule_listener_indices: HashMap<
         (AllEventEmitterFactoriesIndex, EventTypeIndex),
         Vec<(RuleIndex, RuleListenerIndex)>,
@@ -110,7 +110,7 @@ impl AggregatedQueriesPerLanguageBuilder {
             AllEventEmitterFactoriesIndex,
             EventEmitterIndex,
         > = Default::default();
-        for index in all_active_event_emitter_factory_indices {
+        for (_, index) in all_active_event_emitter_factory_indices {
             all_active_event_emitter_factories.push(all_event_emitter_factories[index].clone());
             all_event_emitter_factories_index_to_event_emitter_index
                 .insert(index, all_active_event_emitter_factories.len() - 1);
@@ -218,10 +218,6 @@ impl<'a> AggregatedQueries<'a> {
                 )
             })
             .collect();
-        let mut all_active_event_emitter_factories: HashMap<
-            EventEmitterName,
-            AllEventEmitterFactoriesIndex,
-        > = Default::default();
 
         let span = trace_span!("resolve individual rule listener queries").entered();
 
@@ -238,15 +234,15 @@ impl<'a> AggregatedQueries<'a> {
                             if let Some((event_emitter_name, event_type)) =
                                 event_emitter::is_listener(&rule_listener_query.query)
                             {
-                                let all_event_emitter_factories_index =
-                                    *all_active_event_emitter_factories
-                                        .entry(event_emitter_name.clone())
-                                        .or_insert_with(|| {
-                                            all_event_emitter_factories_by_name
-                                                .get(&event_emitter_name)
-                                                .unwrap_or_else(|| panic!("Unknown event emitter"))
-                                                .0
-                                        });
+                                let all_event_emitter_factories_index = *per_language_builder
+                                    .all_active_event_emitter_factories
+                                    .entry(event_emitter_name.clone())
+                                    .or_insert_with(|| {
+                                        all_event_emitter_factories_by_name
+                                            .get(&event_emitter_name)
+                                            .unwrap_or_else(|| panic!("Unknown event emitter"))
+                                            .0
+                                    });
                                 let event_index = *all_event_emitter_factories_by_name
                                     .get(&event_emitter_name)
                                     .unwrap()
@@ -258,6 +254,8 @@ impl<'a> AggregatedQueries<'a> {
                                     .entry((all_event_emitter_factories_index, event_index))
                                     .or_default()
                                     .push((rule_index, rule_listener_index));
+
+                                return None;
                             }
 
                             let mut saw_selector = false;

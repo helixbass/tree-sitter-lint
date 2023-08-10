@@ -37,6 +37,7 @@ pub fn instantiate() -> Plugin {
             replace_foo_with_something_rule(),
             starts_with_use_rule(),
         ],
+        event_emitter_factories: Default::default(),
     }
 }
 
