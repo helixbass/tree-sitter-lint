@@ -1,7 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
+use squalid::regex;
 use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, SupportedLanguage};
 
@@ -19,6 +23,7 @@ pub struct AggregatedQueriesPerLanguage {
     #[allow(dead_code)]
     pub query_text: String,
     pub kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
+    pub kind_enter_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
 }
 
 #[derive(Debug, Default)]
@@ -26,6 +31,7 @@ struct AggregatedQueriesPerLanguageBuilder {
     pattern_index_lookup: Vec<(RuleIndex, RuleListenerIndex, CaptureNameIfPerCapture)>,
     query_text: String,
     kind_exit_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
+    kind_enter_rule_listener_indices: HashMap<String, Vec<(RuleIndex, RuleListenerIndex)>>,
 }
 
 impl AggregatedQueriesPerLanguageBuilder {
@@ -35,17 +41,13 @@ impl AggregatedQueriesPerLanguageBuilder {
             pattern_index_lookup,
             mut query_text,
             kind_exit_rule_listener_indices,
+            kind_enter_rule_listener_indices,
         } = self;
 
-        if !kind_exit_rule_listener_indices.is_empty() {
-            query_text.push_str(&format!(
-                "\n[{}] @c",
-                kind_exit_rule_listener_indices
-                    .keys()
-                    .map(|kind| format!("({kind})"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
+        if !kind_exit_rule_listener_indices.is_empty()
+            || !kind_enter_rule_listener_indices.is_empty()
+        {
+            query_text.push_str("\n(_) @c");
         }
 
         let span = trace_span!("parse aggregated query").entered();
@@ -57,7 +59,9 @@ impl AggregatedQueriesPerLanguageBuilder {
         assert!(
             query.pattern_count()
                 == pattern_index_lookup.len()
-                    + if kind_exit_rule_listener_indices.is_empty() {
+                    + if kind_exit_rule_listener_indices.is_empty()
+                        && kind_enter_rule_listener_indices.is_empty()
+                    {
                         0
                     } else {
                         1
@@ -89,10 +93,12 @@ impl AggregatedQueriesPerLanguageBuilder {
             query,
             query_text,
             kind_exit_rule_listener_indices,
+            kind_enter_rule_listener_indices,
         }
     }
 }
 
+static KIND_ENTER: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^[a-zA-Z_]+$"#).unwrap());
 static KIND_EXIT: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^([a-zA-Z_]+):exit$"#).unwrap());
 
 pub struct AggregatedQueries<'a> {
@@ -117,12 +123,43 @@ impl<'a> AggregatedQueries<'a> {
                     .iter()
                     .enumerate()
                     .filter_map(|(rule_listener_index, rule_listener_query)| {
-                        if let Some(captures) = KIND_EXIT.captures(&rule_listener_query.query) {
-                            per_language_builder
-                                .kind_exit_rule_listener_indices
-                                .entry(captures[1].to_owned())
-                                .or_default()
-                                .push((rule_index, rule_listener_index));
+                        if !rule_listener_query.query.contains('(') {
+                            let mut saw_selector = false;
+                            let mut seen_exit_and_enter_kinds: (HashSet<String>, HashSet<&str>) =
+                                (Default::default(), Default::default());
+                            for selector in
+                                regex!(r#"\s*,\s*"#).split(rule_listener_query.query.trim())
+                            {
+                                if let Some(captures) = KIND_EXIT.captures(selector) {
+                                    let kind = &captures[1];
+                                    if seen_exit_and_enter_kinds.0.contains(kind) {
+                                        panic!("Repeated exit kind");
+                                    }
+                                    seen_exit_and_enter_kinds.0.insert(kind.to_owned());
+                                    per_language_builder
+                                        .kind_exit_rule_listener_indices
+                                        .entry(kind.to_owned())
+                                        .or_default()
+                                        .push((rule_index, rule_listener_index));
+                                } else if KIND_ENTER.is_match(selector) {
+                                    let kind = selector;
+                                    if seen_exit_and_enter_kinds.1.contains(kind) {
+                                        panic!("Repeated enter kind");
+                                    }
+                                    seen_exit_and_enter_kinds.1.insert(kind);
+                                    per_language_builder
+                                        .kind_enter_rule_listener_indices
+                                        .entry(kind.to_owned())
+                                        .or_default()
+                                        .push((rule_index, rule_listener_index));
+                                } else {
+                                    panic!("Failed to parse non-query selector");
+                                }
+                                saw_selector = true;
+                            }
+                            if !saw_selector {
+                                panic!("Failed to parse non-query selector");
+                            }
 
                             return None;
                         }
@@ -200,6 +237,23 @@ impl<'a> AggregatedQueries<'a> {
             .get(&language)
             .unwrap()
             .kind_exit_rule_listener_indices
+            .get(kind)
+            .map(|indices| {
+                indices.iter().map(|(rule_index, rule_listener_index)| {
+                    (&self.instantiated_rules[*rule_index], *rule_listener_index)
+                })
+            })
+    }
+
+    pub fn get_kind_enter_rule_and_listener_indices<'b>(
+        &'b self,
+        language: SupportedLanguage,
+        kind: &str,
+    ) -> Option<impl Iterator<Item = (&'a InstantiatedRule, RuleListenerIndex)> + 'b> {
+        self.per_language
+            .get(&language)
+            .unwrap()
+            .kind_enter_rule_listener_indices
             .get(kind)
             .map(|indices| {
                 indices.iter().map(|(rule_index, rule_listener_index)| {

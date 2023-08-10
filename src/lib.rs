@@ -236,7 +236,7 @@ fn run_per_file<'a, 'b>(
 ) {
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>> =
         Default::default();
-    let mut node_stack: Vec<Node<'a>> = Default::default();
+    let mut node_stack: Vec<Node<'a>> = Vec::with_capacity(16);
     let mut saw_match = false;
     let wildcard_listener_pattern_index = file_run_context
         .aggregated_queries
@@ -305,7 +305,7 @@ fn run_match<'a, 'b, 'c>(
         assert!(query_match.captures.len() == 1);
         let node = query_match.captures[0].node;
 
-        while !node_stack.is_empty() && !node.is_descendant_of(*node_stack.last().unwrap()) {
+        while !node_stack.is_empty() && node.end_byte() > node_stack.last().unwrap().end_byte() {
             run_exit_node_listeners(
                 node_stack.pop().unwrap(),
                 file_run_context,
@@ -315,6 +315,13 @@ fn run_match<'a, 'b, 'c>(
             );
         }
         node_stack.push(node);
+        run_enter_node_listeners(
+            node,
+            file_run_context,
+            instantiated_per_file_rules,
+            &mut on_found_violations,
+            &mut on_found_pending_fixes,
+        );
         return;
     }
 
@@ -339,12 +346,32 @@ fn run_match<'a, 'b, 'c>(
                 .into_iter()
                 .filter(|capture| capture.index == capture_index)
                 .for_each(|capture| {
+                    let node = capture.node;
+
+                    // I don't know if this "guarantees" that exit listeners
+                    // will be fired at the "expected" time wrt query listeners
+                    // (what about the "match-oriented" case below?)?
+                    // May be better to just "be symmetrical" and use "enter"
+                    // listeners to correspond to "exit" listeners (vs using
+                    // query listeners as the "enter" listeners)?
+                    while !node_stack.is_empty()
+                        && node.end_byte() > node_stack.last().unwrap().end_byte()
+                    {
+                        run_exit_node_listeners(
+                            node_stack.pop().unwrap(),
+                            file_run_context,
+                            instantiated_per_file_rules,
+                            &mut on_found_violations,
+                            &mut on_found_pending_fixes,
+                        );
+                    }
+
                     run_single_on_query_match_callback(
                         file_run_context,
                         instantiated_rule,
                         instantiated_per_file_rules,
                         rule_listener_index,
-                        capture.node.into(),
+                        node.into(),
                         &mut on_found_violations,
                         |fixes| on_found_pending_fixes(fixes, instantiated_rule),
                     );
@@ -389,6 +416,32 @@ fn run_exit_node_listeners<'a, 'b>(
                 instantiated_per_file_rules,
                 rule_listener_index,
                 exited_node.into(),
+                &mut on_found_violations,
+                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+            );
+        });
+    }
+}
+
+#[instrument(level = "trace", skip_all)]
+fn run_enter_node_listeners<'a, 'b>(
+    entered_node: Node<'a>,
+    file_run_context: FileRunContext<'a, 'b>,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
+    mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
+    mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
+) {
+    if let Some(kind_enter_rule_listener_indices) = file_run_context
+        .aggregated_queries
+        .get_kind_enter_rule_and_listener_indices(file_run_context.language, entered_node.kind())
+    {
+        kind_enter_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
+            run_single_on_query_match_callback(
+                file_run_context,
+                instantiated_rule,
+                instantiated_per_file_rules,
+                rule_listener_index,
+                entered_node.into(),
                 &mut on_found_violations,
                 |fixes| on_found_pending_fixes(fixes, instantiated_rule),
             );
