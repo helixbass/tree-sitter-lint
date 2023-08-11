@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use better_any::tid;
 use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
@@ -88,3 +89,5 @@ impl<'a> EventEmitter<'a> for DummyEventEmitter {
         None
     }
 }
+
+tid! { impl<'a> TidAble<'a> for DummyEventEmitter }

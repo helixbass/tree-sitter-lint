@@ -1,3 +1,4 @@
+use better_any::Tid;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tree_sitter_grep::{tree_sitter::Node, RopeOrSlice, SupportedLanguage};
@@ -13,7 +14,7 @@ pub trait EventEmitterFactory: Send + Sync {
     fn create<'a>(&self, file_contents: RopeOrSlice<'a>) -> Box<dyn EventEmitter<'a> + 'a>;
 }
 
-pub trait EventEmitter<'a> {
+pub trait EventEmitter<'a>: Tid<'a> {
     fn enter_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
     fn leave_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
 }

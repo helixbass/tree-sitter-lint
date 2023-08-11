@@ -37,8 +37,6 @@ pub trait FromFileRunContextProvidedTypes<'a>: _sealed::Sealed<'a> {
 }
 
 impl<'a, T1> FromFileRunContextProvidedTypes<'a> for (T1,)
-// where
-//     T1: FromFileRunContext<'a> + for<'b> TidAble<'b>,
 where
     T1: FromFileRunContext<'a> + TidAble<'a>,
 {
