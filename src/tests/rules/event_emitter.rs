@@ -9,12 +9,12 @@ use tree_sitter_grep::{tree_sitter::Node, RopeOrSlice, SupportedLanguage};
 
 use crate::{
     event_emitter::{get_listener_selector, EventEmitterName, EventType},
-    EventEmitter, EventEmitterFactory, EventTypeIndex, Plugin, RuleTester,
+    EventEmitter, EventEmitterFactory, EventTypeIndex, RuleTester,
 };
 
 #[test]
 fn test_event_emitter() {
-    RuleTester::run_with_plugins(
+    RuleTester::run_with_event_emitter(
         rule! {
             name => "listens-for-event",
             listeners => [
@@ -42,16 +42,8 @@ fn test_event_emitter() {
                 },
             ]
         },
-        vec![get_plugin_with_event_emitter()],
+        Arc::new(DummyEventEmitterFactory),
     );
-}
-
-fn get_plugin_with_event_emitter() -> Plugin {
-    Plugin {
-        name: "has-event-emitter".to_owned(),
-        rules: Default::default(),
-        event_emitter_factories: vec![Arc::new(DummyEventEmitterFactory)],
-    }
 }
 
 struct DummyEventEmitterFactory;
