@@ -502,6 +502,7 @@ fn run_enter_node_listeners<'a, 'b>(
     for (event_emitter_index, event_emitter) in
         file_run_context.event_emitters.into_iter().enumerate()
     {
+        file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
         if let Some(fired_event_type_indices) = {
             let fired_event_type_indices = event_emitter.borrow_mut().enter_node(entered_node);
             fired_event_type_indices
