@@ -30,7 +30,7 @@ use std::{
 
 use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
-pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
+pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
 use context::PendingFix;
 pub use context::{
     FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
@@ -437,7 +437,10 @@ fn run_exit_node_listeners<'a, 'b>(
         file_run_context.event_emitters.into_iter().enumerate()
     {
         file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
-        if let Some(fired_event_type_indices) = event_emitter.borrow_mut().leave_node(exited_node) {
+        if let Some(fired_event_type_indices) = {
+            let fired_event_type_indices = event_emitter.borrow_mut().leave_node(exited_node);
+            fired_event_type_indices
+        } {
             for fired_event_type_index in fired_event_type_indices {
                 event_emitter
                     .borrow_mut()
@@ -497,8 +500,10 @@ fn run_enter_node_listeners<'a, 'b>(
     for (event_emitter_index, event_emitter) in
         file_run_context.event_emitters.into_iter().enumerate()
     {
-        if let Some(fired_event_type_indices) = event_emitter.borrow_mut().enter_node(entered_node)
-        {
+        if let Some(fired_event_type_indices) = {
+            let fired_event_type_indices = event_emitter.borrow_mut().enter_node(entered_node);
+            fired_event_type_indices
+        } {
             for fired_event_type_index in fired_event_type_indices {
                 event_emitter
                     .borrow_mut()
