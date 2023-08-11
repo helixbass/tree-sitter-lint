@@ -18,6 +18,7 @@ pub trait EventEmitterFactory: Send + Sync {
 pub trait EventEmitter<'a>: Tid<'a> {
     fn enter_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
     fn leave_node(&mut self, node: Node<'a>) -> Option<Vec<EventTypeIndex>>;
+    fn processing_emitted_event_index(&mut self, index: usize);
 }
 
 const EVENT_EMITTER_LISTENER_PREFIX: &str = "__tree_sitter_lint_event_emitter_";

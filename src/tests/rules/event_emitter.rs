@@ -88,6 +88,8 @@ impl<'a> EventEmitter<'a> for DummyEventEmitter {
     fn leave_node(&mut self, _node: Node<'a>) -> Option<Vec<EventTypeIndex>> {
         None
     }
+
+    fn processing_emitted_event_index(&mut self, _index: usize) {}
 }
 
 tid! { impl<'a> TidAble<'a> for DummyEventEmitter }

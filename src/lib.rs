@@ -439,6 +439,9 @@ fn run_exit_node_listeners<'a, 'b>(
         file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
         if let Some(fired_event_type_indices) = event_emitter.borrow_mut().leave_node(exited_node) {
             for fired_event_type_index in fired_event_type_indices {
+                event_emitter
+                    .borrow_mut()
+                    .processing_emitted_event_index(fired_event_type_index);
                 if let Some(event_emitter_listener_indices) = file_run_context
                     .aggregated_queries
                     .get_event_emitter_listeners(
@@ -497,6 +500,9 @@ fn run_enter_node_listeners<'a, 'b>(
         if let Some(fired_event_type_indices) = event_emitter.borrow_mut().enter_node(entered_node)
         {
             for fired_event_type_index in fired_event_type_indices {
+                event_emitter
+                    .borrow_mut()
+                    .processing_emitted_event_index(fired_event_type_index);
                 if let Some(event_emitter_listener_indices) = file_run_context
                     .aggregated_queries
                     .get_event_emitter_listeners(
