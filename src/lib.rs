@@ -416,23 +416,6 @@ fn run_exit_node_listeners<'a, 'b>(
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
 ) {
-    if let Some(kind_exit_rule_listener_indices) = file_run_context
-        .aggregated_queries
-        .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
-    {
-        kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
-            run_single_on_query_match_callback(
-                file_run_context,
-                instantiated_rule,
-                instantiated_per_file_rules,
-                rule_listener_index,
-                exited_node.into(),
-                &mut on_found_violations,
-                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
-            );
-        });
-    }
-
     for (event_emitter_index, event_emitter) in
         file_run_context.event_emitters.into_iter().enumerate()
     {
@@ -471,6 +454,23 @@ fn run_exit_node_listeners<'a, 'b>(
                 }
             }
         }
+    }
+
+    if let Some(kind_exit_rule_listener_indices) = file_run_context
+        .aggregated_queries
+        .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
+    {
+        kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
+            run_single_on_query_match_callback(
+                file_run_context,
+                instantiated_rule,
+                instantiated_per_file_rules,
+                rule_listener_index,
+                exited_node.into(),
+                &mut on_found_violations,
+                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+            );
+        });
     }
 }
 
