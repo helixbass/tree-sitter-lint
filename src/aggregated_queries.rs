@@ -12,7 +12,7 @@ use tracing::{instrument, trace, trace_span};
 use tree_sitter_grep::{tree_sitter::Query, RopeOrSlice, SupportedLanguage};
 
 use crate::{
-    event_emitter::{self, EventEmitterName, EventType},
+    event_emitter::{self, EventEmitterIndex, EventEmitterName, EventType},
     rule::{InstantiatedRule, ResolvedMatchBy},
     EventEmitter, EventEmitterFactory, EventTypeIndex,
 };
@@ -21,7 +21,6 @@ type RuleIndex = usize;
 type RuleListenerIndex = usize;
 type CaptureIndexIfPerCapture = Option<u32>;
 type CaptureNameIfPerCapture = Option<String>;
-type EventEmitterIndex = usize;
 type AllEventEmitterFactoriesIndex = usize;
 
 pub struct AggregatedQueriesPerLanguage {

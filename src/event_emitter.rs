@@ -6,6 +6,7 @@ use tree_sitter_grep::{tree_sitter::Node, RopeOrSlice, SupportedLanguage};
 pub type EventEmitterName = String;
 pub type EventType = String;
 pub type EventTypeIndex = usize;
+pub type EventEmitterIndex = usize;
 
 pub trait EventEmitterFactory: Send + Sync {
     fn name(&self) -> EventEmitterName;

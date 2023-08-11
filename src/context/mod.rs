@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    cell::{Ref, RefCell},
+    cell::{Cell, Ref, RefCell},
     ops,
     path::Path,
     sync::Arc,
@@ -31,6 +31,7 @@ pub use provided_types::{
 pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
 use crate::{
+    event_emitter::EventEmitterIndex,
     rule::InstantiatedRule,
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
@@ -50,6 +51,7 @@ pub struct FileRunContext<'a, 'b> {
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
     pub(crate) event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a> + 'a>>],
+    current_event_emitter_index: &'b Cell<Option<EventEmitterIndex>>,
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -68,6 +70,7 @@ impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
             changed_ranges: self.changed_ranges,
             from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
             event_emitters: self.event_emitters,
+            current_event_emitter_index: self.current_event_emitter_index,
         }
     }
 }
@@ -86,6 +89,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
         event_emitters: &'b [RefCell<Box<dyn EventEmitter<'a> + 'a>>],
+        current_event_emitter_index: &'b Cell<Option<EventEmitterIndex>>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -100,7 +104,12 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             changed_ranges,
             from_file_run_context_instance_provider,
             event_emitters,
+            current_event_emitter_index,
         }
+    }
+
+    pub fn set_current_event_emitter_index(&self, event_emitter_index: Option<EventEmitterIndex>) {
+        self.current_event_emitter_index.set(event_emitter_index);
     }
 }
 
@@ -416,6 +425,26 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
             .unwrap()
             .downcast_ref::<TFromFileRunContext>()
             .unwrap()
+    }
+
+    pub fn get_current_event_emitter(&self) -> Ref<dyn EventEmitter<'a> + 'a> {
+        Ref::map(
+            self.file_run_context.event_emitters[self
+                .file_run_context
+                .current_event_emitter_index
+                .get()
+                .unwrap()]
+            .borrow(),
+            |box_| &**box_,
+        )
+    }
+
+    pub fn get_current_event_emitter_as<TEventEmitter: EventEmitter<'a>>(
+        &self,
+    ) -> Ref<TEventEmitter> {
+        Ref::map(self.get_current_event_emitter(), |dyn_event_emitter| {
+            dyn_event_emitter.downcast_ref::<TEventEmitter>().unwrap()
+        })
     }
 }
 

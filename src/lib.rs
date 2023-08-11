@@ -18,6 +18,7 @@ mod text;
 mod violation;
 
 use std::{
+    cell::Cell,
     cmp::Ordering,
     collections::HashMap,
     fs,
@@ -38,6 +39,7 @@ pub use context::{
     SkipOptionsBuilder,
 };
 use dashmap::DashMap;
+use event_emitter::EventEmitterIndex;
 pub use event_emitter::{EventEmitter, EventEmitterFactory, EventTypeIndex};
 pub use node::NodeExt;
 pub use plugin::Plugin;
@@ -119,6 +121,7 @@ pub fn run(
                 from_file_run_context_instance_provider_factory.create();
             let event_emitters =
                 aggregated_queries.get_event_emitter_instances(language, file_contents);
+            let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -132,6 +135,7 @@ pub fn run(
                     None,
                     &*from_file_run_context_instance_provider,
                     &event_emitters,
+                    &current_event_emitter_index,
                 ),
                 |violations| {
                     all_violations
@@ -432,6 +436,7 @@ fn run_exit_node_listeners<'a, 'b>(
     for (event_emitter_index, event_emitter) in
         file_run_context.event_emitters.into_iter().enumerate()
     {
+        file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
         if let Some(fired_event_type_indices) = event_emitter.borrow_mut().leave_node(exited_node) {
             for fired_event_type_index in fired_event_type_indices {
                 if let Some(event_emitter_listener_indices) = file_run_context
@@ -618,6 +623,7 @@ fn run_fixing_loop<'a>(
             from_file_run_context_instance_provider_factory.create();
         let event_emitters =
             aggregated_queries.get_event_emitter_instances(language, &file_contents);
+        let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
         run_per_file(
             FileRunContext::new(
                 path,
@@ -635,6 +641,7 @@ fn run_fixing_loop<'a>(
                 Some(&changed_ranges),
                 &*from_file_run_context_instance_provider,
                 &event_emitters,
+                &current_event_emitter_index,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);
@@ -687,6 +694,7 @@ pub fn run_for_slice<'a>(
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
     let event_emitters = aggregated_queries.get_event_emitter_instances(language, file_contents);
+    let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -706,6 +714,7 @@ pub fn run_for_slice<'a>(
             None,
             &*from_file_run_context_instance_provider,
             &event_emitters,
+            &current_event_emitter_index,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -753,6 +762,7 @@ pub fn run_fixing_for_slice<'a>(
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
     let event_emitters = aggregated_queries.get_event_emitter_instances(language, &file_contents);
+    let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -772,6 +782,7 @@ pub fn run_fixing_for_slice<'a>(
             None,
             &*from_file_run_context_instance_provider,
             &event_emitters,
+            &current_event_emitter_index,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
