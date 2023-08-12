@@ -204,14 +204,19 @@ fn assert_that_violations_match_expected(
 ) {
     assert_eq!(
         violations.len(),
-        invalid_test.errors.len(),
+        match &invalid_test.errors {
+            RuleTestExpectedErrors::NumErrors(num_errors) => *num_errors,
+            RuleTestExpectedErrors::Errors(errors) => errors.len(),
+        },
         "Didn't get expected number of violations for code {:#?}, got: {violations:#?}",
         invalid_test.code
     );
-    let mut violations = violations.to_owned();
-    violations.sort_by(|a, b| compare_ranges(a.range, b.range));
-    for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
-        assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
+    if let RuleTestExpectedErrors::Errors(errors) = &invalid_test.errors {
+        let mut violations = violations.to_owned();
+        violations.sort_by(|a, b| compare_ranges(a.range, b.range));
+        for (violation, expected_violation) in iter::zip(violations, errors) {
+            assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
+        }
     }
 }
 
@@ -344,9 +349,26 @@ impl From<&str> for RuleTestExpectedOutput {
     }
 }
 
+pub enum RuleTestExpectedErrors {
+    NumErrors(usize),
+    Errors(Vec<RuleTestExpectedError>),
+}
+
+impl From<usize> for RuleTestExpectedErrors {
+    fn from(value: usize) -> Self {
+        Self::NumErrors(value)
+    }
+}
+
+impl From<Vec<RuleTestExpectedError>> for RuleTestExpectedErrors {
+    fn from(value: Vec<RuleTestExpectedError>) -> Self {
+        Self::Errors(value)
+    }
+}
+
 pub struct RuleTestInvalid {
     code: String,
-    errors: Vec<RuleTestExpectedError>,
+    errors: RuleTestExpectedErrors,
     output: Option<RuleTestExpectedOutput>,
     options: Option<RuleOptions>,
 }
@@ -354,13 +376,13 @@ pub struct RuleTestInvalid {
 impl RuleTestInvalid {
     pub fn new(
         code: impl Into<String>,
-        errors: impl IntoIterator<Item = impl Into<RuleTestExpectedError>>,
+        errors: impl Into<RuleTestExpectedErrors>,
         output: Option<impl Into<RuleTestExpectedOutput>>,
         options: Option<RuleOptions>,
     ) -> Self {
         Self {
             code: code.into(),
-            errors: errors.into_iter().map(Into::into).collect(),
+            errors: errors.into(),
             output: output.map(Into::into),
             options,
         }

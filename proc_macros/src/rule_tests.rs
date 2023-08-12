@@ -336,6 +336,7 @@ impl Parse for InvalidRuleTestErrorsSpec {
 impl ToTokens for InvalidRuleTestErrorsSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
+            Self::Expr(Expr::Lit(value)) => quote!(#value),
             Self::Expr(value) => quote!(#value.iter().cloned().collect::<Vec<_>>()),
             Self::Vec(value) => {
                 let errors = value.iter().map(|error| quote!(#error));
