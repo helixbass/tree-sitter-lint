@@ -12,6 +12,7 @@ pub trait NodeExt<'a> {
         predicate: impl FnMut(Node) -> bool,
     ) -> Option<Node<'a>>;
     fn find_first_descendant_of_kind(&self, kind: &str) -> Option<Node<'a>>;
+    fn get_first_child_of_kind(&self, kind: &str) -> Node<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -87,6 +88,15 @@ impl<'a> NodeExt<'a> for Node<'a> {
 
     fn find_first_descendant_of_kind(&self, kind: &str) -> Option<Node<'a>> {
         self.find_first_matching_descendant(|node| node.kind() == kind)
+    }
+
+    fn get_first_child_of_kind(&self, kind: &str) -> Node<'a> {
+        let mut cursor = self.walk();
+        let ret = self
+            .children(&mut cursor)
+            .find(|child| child.kind() == kind)
+            .unwrap();
+        ret
     }
 }
 
