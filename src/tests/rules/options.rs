@@ -3,6 +3,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::RuleTester;
 
@@ -232,6 +233,61 @@ fn test_options_default() {
                     options => {
                         foo => "abc",
                     },
+                    errors => [{ message => "whee" }],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_options_variable() {
+    #[derive(Default, Deserialize)]
+    struct Options {
+        foo: String,
+    }
+
+    let options = json!({"foo": "abc"});
+    RuleTester::run(
+        rule! {
+            name => "has-options-with-default",
+            options_type => Options,
+            state => {
+                [per-run]
+                foo: String = options.foo,
+            },
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    if self.foo == "abc" {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => { foo => "def" },
+                }
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => options,
                     errors => [{ message => "whee" }],
                 },
             ]

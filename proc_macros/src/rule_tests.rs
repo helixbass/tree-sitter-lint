@@ -45,6 +45,7 @@ impl Parse for RuleOptions {
 
 impl ToTokens for RuleOptions {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let mut should_yamlize = true;
         let yaml = match self {
             RuleOptions::Map(map) => {
                 let keys = map.keys();
@@ -59,12 +60,21 @@ impl ToTokens for RuleOptions {
                     [ #(#items),* ]
                 }
             }
+            RuleOptions::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
+                should_yamlize = false;
+                let ident = path.path.get_ident().unwrap();
+                quote!(#ident.clone())
+            }
             RuleOptions::Expr(expr) => {
                 quote!(#expr)
             }
         };
-        quote! {
-            tree_sitter_lint::serde_yaml::from_str(stringify!(#yaml)).unwrap()
+        if should_yamlize {
+            quote! {
+                tree_sitter_lint::serde_yaml::from_str(stringify!(#yaml)).unwrap()
+            }
+        } else {
+            yaml
         }
         .to_tokens(tokens)
     }
@@ -292,7 +302,7 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                 }
             }
             Self::Expr(expr) => {
-                quote!(tree_sitter_lint::RuleTestExpectedError::from(#expr))
+                quote!(tree_sitter_lint::RuleTestExpectedError::from(#expr.clone()))
             }
         }
         .to_tokens(tokens)

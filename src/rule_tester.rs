@@ -390,15 +390,19 @@ impl RuleTestInvalid {
 }
 
 #[derive(Builder, Clone, Debug, Default)]
-#[builder(default, setter(strip_option, into))]
+#[builder(default, setter(strip_option))]
 pub struct RuleTestExpectedError {
+    #[builder(setter(into))]
     pub message: Option<String>,
     pub line: Option<usize>,
     pub column: Option<usize>,
     pub end_line: Option<usize>,
     pub end_column: Option<usize>,
+    #[builder(setter(into))]
     pub type_: Option<String>,
+    #[builder(setter(into))]
     pub message_id: Option<String>,
+    #[builder(setter(into))]
     pub data: Option<ViolationData>,
 }
 
