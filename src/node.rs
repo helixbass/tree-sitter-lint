@@ -3,6 +3,7 @@ use tree_sitter_grep::tree_sitter::{Node, TreeCursor};
 
 pub trait NodeExt<'a> {
     fn is_descendant_of(&self, node: Node) -> bool;
+    fn is_same_or_descendant_of(&self, node: Node) -> bool;
     fn field(&self, field_name: &str) -> Node<'a>;
     fn root(&self) -> Node<'a>;
     fn get_cursor_scoped_to_root(&self) -> TreeCursor<'a>;
@@ -31,6 +32,10 @@ impl<'a> NodeExt<'a> for Node<'a> {
             }
         }
         true
+    }
+
+    fn is_same_or_descendant_of(&self, node: Node) -> bool {
+        *self == node || self.is_descendant_of(node)
     }
 
     fn field(&self, field_name: &str) -> Node<'a> {
