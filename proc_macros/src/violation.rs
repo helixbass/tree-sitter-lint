@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
@@ -7,7 +5,7 @@ use syn::{
     parse_macro_input, Expr, Ident, Token,
 };
 
-use crate::shared::{parse_data, ExprOrIdent};
+use crate::helpers::ExprOrArrowSeparatedKeyValuePairs;
 
 struct Violation {
     message: Option<Expr>,
@@ -15,7 +13,7 @@ struct Violation {
     node: Expr,
     range: Option<Expr>,
     fix: Option<Expr>,
-    data: Option<HashMap<ExprOrIdent, Expr>>,
+    data: Option<ExprOrArrowSeparatedKeyValuePairs>,
 }
 
 impl Parse for Violation {
@@ -25,7 +23,7 @@ impl Parse for Violation {
         let mut node: Option<Expr> = Default::default();
         let mut range: Option<Expr> = Default::default();
         let mut fix: Option<Expr> = Default::default();
-        let mut data: Option<HashMap<ExprOrIdent, Expr>> = Default::default();
+        let mut data: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -53,8 +51,7 @@ impl Parse for Violation {
                 }
                 "data" => {
                     assert!(data.is_none(), "already saw 'data' key");
-                    let data = data.get_or_insert_with(Default::default);
-                    parse_data(data, input)?;
+                    data = Some(input.parse()?);
                 }
                 _ => panic!("Unexpected key: '{key}'"),
             }
@@ -96,16 +93,26 @@ pub fn violation_with_crate_name(input: TokenStream, crate_name: &str) -> TokenS
 
     let data = match violation.data.as_ref() {
         Some(data) => {
-            let data_keys = data.keys().map(|key| match key {
-                ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
-                ExprOrIdent::Expr(Expr::Path(key)) if key.path.get_ident().is_some() => {
-                    quote!(stringify!(#key))
+            let data = match data {
+                ExprOrArrowSeparatedKeyValuePairs::Expr(data) => quote!(#data),
+                ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(data) => {
+                    let data_keys = data
+                        .keys_and_values
+                        .keys()
+                        .map(|key| quote!(stringify!(#key)));
+                    // ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+                    // ExprOrIdent::Expr(Expr::Path(key)) if key.path.get_ident().is_some() => {
+                    //     quote!(stringify!(#key))
+                    // }
+                    // _ => quote!(#key),
+                    let data_values = data.keys_and_values.values();
+                    quote! {
+                        [#((#data_keys.to_string(), #data_values.to_string())),*]
+                    }
                 }
-                _ => quote!(#key),
-            });
-            let data_values = data.values();
+            };
             quote! {
-                .data([#((#data_keys.to_string(), #data_values.to_string())),*])
+                .data(#data)
             }
         }
         None => quote!(),

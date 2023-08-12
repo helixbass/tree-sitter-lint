@@ -65,7 +65,7 @@ use tree_sitter_grep::{
     tree_sitter::{InputEdit, Node, Point, QueryMatch, Range},
     Parseable, RopeOrSlice, SupportedLanguage,
 };
-pub use violation::{ViolationBuilder, ViolationWithContext};
+pub use violation::{ViolationBuilder, ViolationData, ViolationWithContext};
 
 pub extern crate better_any;
 pub extern crate clap;

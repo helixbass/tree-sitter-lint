@@ -13,7 +13,9 @@ use syn::{
     Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
 };
 
-use crate::{helpers::ExprOrArrowSeparatedKeyValuePairs, ArrowSeparatedKeyValuePairs};
+use crate::{
+    helpers::ExprOrArrowSeparatedKeyValuePairs, shared::ExprOrIdent, ArrowSeparatedKeyValuePairs,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum RuleStateScope {
@@ -662,7 +664,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                 }
             }
             _ => match syn::parse2::<
-                ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
+                ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>,
             >(node.mac.tokens.clone())
             {
                 Ok(mut arrow_separated_key_value_pairs) => {
@@ -687,7 +689,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
 fn rewrite_self_accesses_in_arrow_separated_key_value_pairs(
     mut rewriter: SelfAccessRewriter,
     arrow_separated_key_value_pairs: &mut ArrowSeparatedKeyValuePairs<
-        Ident,
+        ExprOrIdent,
         ExprOrArrowSeparatedKeyValuePairs,
     >,
 ) {

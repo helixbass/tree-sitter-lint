@@ -7,6 +7,8 @@ use syn::{
     token, Expr, Ident, Token,
 };
 
+use crate::shared::ExprOrIdent;
+
 pub struct ArrowSeparatedKeyValuePair<TKey = Ident, TValue = Expr> {
     key: TKey,
     value: TValue,
@@ -29,7 +31,7 @@ pub struct ArrowSeparatedKeyValuePairs<TKey = Ident, TValue = Expr> {
     pub keys_and_values: HashMap<TKey, TValue>,
 }
 
-impl ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs> {
+impl ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs> {
     pub fn to_yaml(&self) -> proc_macro2::TokenStream {
         let keys = self.keys_and_values.keys();
         let values = self.keys_and_values.values().map(|value| value.to_yaml());
@@ -77,7 +79,7 @@ where
 pub enum ExprOrArrowSeparatedKeyValuePairs {
     Expr(Expr),
     ArrowSeparatedKeyValuePairs(
-        ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
+        ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>,
     ),
 }
 
@@ -98,7 +100,7 @@ impl Parse for ExprOrArrowSeparatedKeyValuePairs {
             let braced_input;
             braced!(braced_input in input);
             let arrow_separated_key_value_pairs = braced_input
-                .parse::<ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>>();
+                .parse::<ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>>();
             if let Ok(arrow_separated_key_value_pairs) = arrow_separated_key_value_pairs {
                 return Ok(Self::ArrowSeparatedKeyValuePairs(
                     arrow_separated_key_value_pairs,
@@ -109,7 +111,7 @@ impl Parse for ExprOrArrowSeparatedKeyValuePairs {
             let bracketed_input;
             bracketed!(bracketed_input in input);
             let arrow_separated_key_value_pairs = bracketed_input
-                .parse::<ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>>();
+                .parse::<ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>>();
             if let Ok(arrow_separated_key_value_pairs) = arrow_separated_key_value_pairs {
                 return Ok(Self::ArrowSeparatedKeyValuePairs(
                     arrow_separated_key_value_pairs,
