@@ -83,19 +83,12 @@ impl AggregatedQueriesPerLanguageBuilder {
     ) -> AggregatedQueriesPerLanguage {
         let Self {
             pattern_index_lookup,
-            mut query_text,
+            query_text,
             kind_exit_rule_listener_indices,
             kind_enter_rule_listener_indices,
             event_emitter_rule_listener_indices,
             all_active_event_emitter_factories: all_active_event_emitter_factory_indices,
         } = self;
-
-        if !kind_exit_rule_listener_indices.is_empty()
-            || !kind_enter_rule_listener_indices.is_empty()
-            || !event_emitter_rule_listener_indices.is_empty()
-        {
-            query_text.push_str("\n(_) @c");
-        }
 
         let span = trace_span!("parse aggregated query").entered();
 
@@ -115,18 +108,7 @@ impl AggregatedQueriesPerLanguageBuilder {
                 .insert(index, all_active_event_emitter_factories.len() - 1);
         }
 
-        assert!(
-            query.pattern_count()
-                == pattern_index_lookup.len()
-                    + if kind_exit_rule_listener_indices.is_empty()
-                        && kind_enter_rule_listener_indices.is_empty()
-                        && event_emitter_rule_listener_indices.is_empty()
-                    {
-                        0
-                    } else {
-                        1
-                    }
-        );
+        assert!(query.pattern_count() == pattern_index_lookup.len() + 1);
         AggregatedQueriesPerLanguage {
             pattern_index_lookup: {
                 let span = trace_span!("resolve capture indexes").entered();
@@ -222,7 +204,12 @@ impl<'a> AggregatedQueries<'a> {
 
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for &language in &instantiated_rule.meta.languages {
-                let per_language_builder = per_language.entry(language).or_default();
+                let per_language_builder = per_language.entry(language).or_insert_with(|| {
+                    AggregatedQueriesPerLanguageBuilder {
+                        query_text: "(_) @c\n".to_owned(),
+                        ..Default::default()
+                    }
+                });
                 for (rule_listener_index, rule_listener_query) in instantiated_rule
                     .rule_instance
                     .listener_queries()
@@ -356,12 +343,8 @@ impl<'a> AggregatedQueries<'a> {
         pattern_index == self.get_wildcard_listener_pattern_index(language)
     }
 
-    pub fn get_wildcard_listener_pattern_index(&self, language: SupportedLanguage) -> usize {
-        self.per_language
-            .get(&language)
-            .unwrap()
-            .pattern_index_lookup
-            .len()
+    pub fn get_wildcard_listener_pattern_index(&self, _language: SupportedLanguage) -> usize {
+        0
     }
 
     pub fn get_kind_exit_rule_and_listener_indices<'b>(
@@ -409,7 +392,7 @@ impl<'a> AggregatedQueries<'a> {
             .per_language
             .get(&language)
             .unwrap()
-            .pattern_index_lookup[pattern_index];
+            .pattern_index_lookup[pattern_index - 1];
         let instantiated_rule = &self.instantiated_rules[rule_index];
         (
             instantiated_rule,
