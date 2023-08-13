@@ -240,6 +240,7 @@ impl RuleTester {
                 .all_plugins(self.plugins.clone())
                 .fix(true)
                 .report_fixed_violations(true)
+                .single_fixing_pass(true)
                 .build()
                 .unwrap(),
             self.language,

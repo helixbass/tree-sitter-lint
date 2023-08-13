@@ -625,6 +625,9 @@ fn run_fixing_loop<'a>(
         } else {
             violations.clear();
         }
+        if config.single_fixing_pass {
+            return;
+        }
 
         let parse_span = debug_span!("tree-sitter parse").entered();
 

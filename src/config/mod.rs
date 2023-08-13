@@ -59,6 +59,7 @@ impl Args {
             rule_configurations: config_file_content.rules().collect(),
             rules_by_plugin_prefixed_name: Default::default(),
             force_rebuild,
+            single_fixing_pass: Default::default(),
         }
     }
 }
@@ -93,6 +94,9 @@ pub struct Config {
 
     #[builder(default)]
     pub force_rebuild: bool,
+
+    #[builder(default)]
+    pub single_fixing_pass: bool,
 }
 
 impl Config {
