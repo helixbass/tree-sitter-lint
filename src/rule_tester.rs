@@ -22,6 +22,7 @@ enum TestOutcome {
 struct TestResult {
     outcome: TestOutcome,
     code: String,
+    was_invalid: bool,
 }
 
 pub struct RuleTester {
@@ -141,7 +142,7 @@ impl RuleTester {
                     match test_result.outcome {
                         TestOutcome::Passed => {
                             println!(
-                                "{} {}",
+                                "{} {} {}",
                                 test_result
                                     .code
                                     .trim()
@@ -149,13 +150,14 @@ impl RuleTester {
                                     .take(30)
                                     .collect::<String>()
                                     .dimmed(),
+                                if test_result.was_invalid { "i" } else { "v" },
                                 "✔".green()
                             );
                         }
                         TestOutcome::Failed => {
                             saw_failure = true;
                             println!(
-                                "{} {}",
+                                "{} {} {}",
                                 test_result
                                     .code
                                     .trim()
@@ -163,6 +165,7 @@ impl RuleTester {
                                     .take(30)
                                     .collect::<String>()
                                     .dimmed(),
+                                if test_result.was_invalid { "i" } else { "v" },
                                 "✗".red()
                             );
                         }
@@ -202,11 +205,13 @@ impl RuleTester {
                     TestResult {
                         outcome: TestOutcome::Failed,
                         code: valid_test.code.clone(),
+                        was_invalid: false,
                     }
                 } else {
                     TestResult {
                         outcome: TestOutcome::Passed,
                         code: valid_test.code.clone(),
+                        was_invalid: false,
                     }
                 });
             return;
@@ -241,7 +246,9 @@ impl RuleTester {
             &*self.from_file_run_context_instance_provider_factory,
         );
 
-        self.check_that_violations_match_expected(&violations, invalid_test);
+        if !self.check_that_violations_match_expected(&violations, invalid_test) {
+            return;
+        }
 
         match invalid_test.output.as_ref() {
             Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
@@ -250,6 +257,7 @@ impl RuleTester {
                         self.aggregated_results.borrow_mut().push(TestResult {
                             outcome: TestOutcome::Failed,
                             code: invalid_test.code.clone(),
+                            was_invalid: true,
                         });
                         return;
                     }
@@ -268,6 +276,7 @@ impl RuleTester {
                         self.aggregated_results.borrow_mut().push(TestResult {
                             outcome: TestOutcome::Failed,
                             code: invalid_test.code.clone(),
+                            was_invalid: true,
                         });
                         return;
                     }
@@ -285,6 +294,7 @@ impl RuleTester {
         self.aggregated_results.borrow_mut().push(TestResult {
             outcome: TestOutcome::Passed,
             code: invalid_test.code.clone(),
+            was_invalid: true,
         });
     }
 
@@ -292,7 +302,7 @@ impl RuleTester {
         &self,
         violations: &[ViolationWithContext],
         invalid_test: &RuleTestInvalid,
-    ) {
+    ) -> bool {
         if self.should_aggregate_results {
             if violations.len()
                 != match &invalid_test.errors {
@@ -303,8 +313,9 @@ impl RuleTester {
                 self.aggregated_results.borrow_mut().push(TestResult {
                     outcome: TestOutcome::Failed,
                     code: invalid_test.code.clone(),
+                    was_invalid: true,
                 });
-                return;
+                return false;
             }
         } else {
             assert_eq!(
@@ -327,10 +338,12 @@ impl RuleTester {
                     expected_violation,
                     invalid_test,
                 ) {
-                    return;
+                    return false;
                 }
             }
         }
+
+        true
     }
 
     fn check_that_violation_matches_expected(
@@ -345,6 +358,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -364,6 +378,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -383,6 +398,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -402,6 +418,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -421,6 +438,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -440,6 +458,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -461,6 +480,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
@@ -484,6 +504,7 @@ impl RuleTester {
                     self.aggregated_results.borrow_mut().push(TestResult {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
+                        was_invalid: true,
                     });
                     return false;
                 }
