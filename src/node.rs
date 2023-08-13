@@ -17,6 +17,7 @@ pub trait NodeExt<'a> {
     ) -> Option<Node<'a>>;
     fn find_first_descendant_of_kind(&self, kind: &str) -> Option<Node<'a>>;
     fn get_first_child_of_kind(&self, kind: &str) -> Node<'a>;
+    fn next_named_sibling_of_kinds(&self, kinds: &[&str]) -> Node<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -101,6 +102,16 @@ impl<'a> NodeExt<'a> for Node<'a> {
             .find(|child| child.kind() == kind)
             .unwrap();
         ret
+    }
+
+    fn next_named_sibling_of_kinds(&self, kinds: &[&str]) -> Node<'a> {
+        let mut current_node = *self;
+        loop {
+            current_node = current_node.next_named_sibling().unwrap();
+            if kinds.contains(&current_node.kind()) {
+                return current_node;
+            }
+        }
     }
 }
 

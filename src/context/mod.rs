@@ -446,6 +446,11 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
             dyn_event_emitter.downcast_ref::<TEventEmitter>().unwrap()
         })
     }
+
+    pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+        let comment_kinds = self.file_run_context.language.comment_kinds();
+        get_tokens_before_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+    }
 }
 
 impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
