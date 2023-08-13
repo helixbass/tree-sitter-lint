@@ -33,7 +33,7 @@ pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
 use context::PendingFix;
 pub use context::{
-    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
+    FileRunContext, Fixer, FromFileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
     FromFileRunContextProvidedTypesOnceLockStorage, QueryMatchContext, SkipOptions,
     SkipOptionsBuilder,
