@@ -615,6 +615,11 @@ fn run_fixing_loop<'a>(
         for input_edit in &input_edits {
             old_tree.edit(input_edit);
         }
+
+        if config.single_fixing_pass {
+            return;
+        }
+
         pending_fixes = Default::default();
         if config.report_fixed_violations {
             *violations = violations
@@ -624,9 +629,6 @@ fn run_fixing_loop<'a>(
                 .collect();
         } else {
             violations.clear();
-        }
-        if config.single_fixing_pass {
-            return;
         }
 
         let parse_span = debug_span!("tree-sitter parse").entered();
