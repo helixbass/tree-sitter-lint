@@ -117,6 +117,10 @@ impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
     fn node_text(&self, node: Node) -> Cow<'a, str> {
         self.file_contents.node_text(node)
     }
+
+    fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        self.file_contents.slice(range)
+    }
 }
 
 pub struct QueryMatchContext<'a, 'b> {
@@ -461,6 +465,10 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
 impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
     fn node_text(&self, node: Node) -> Cow<'a, str> {
         self.file_run_context.node_text(node)
+    }
+
+    fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        self.file_run_context.slice(range)
     }
 }
 

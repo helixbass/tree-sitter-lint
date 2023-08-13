@@ -184,6 +184,7 @@ struct Rule {
     are_options_required: bool,
     languages: Vec<Ident>,
     messages: Option<HashMap<Expr, Expr>>,
+    allow_self_conflicting_fixes: Option<Expr>,
 }
 
 impl Rule {
@@ -221,6 +222,7 @@ impl Parse for Rule {
         let mut languages: Option<Vec<Ident>> = Default::default();
         let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         let mut are_options_required: bool = Default::default();
+        let mut allow_self_conflicting_fixes: Option<Expr> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             if key.to_string() == "options_type" {
@@ -286,6 +288,13 @@ impl Parse for Rule {
                         }
                     }
                 }
+                "allow_self_conflicting_fixes" => {
+                    assert!(
+                        allow_self_conflicting_fixes.is_none(),
+                        "Already saw 'allow_self_conflicting_fixes' key"
+                    );
+                    allow_self_conflicting_fixes = Some(input.parse()?);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -301,6 +310,7 @@ impl Parse for Rule {
             languages: languages.expect("Expected 'languages'"),
             messages,
             are_options_required,
+            allow_self_conflicting_fixes,
         })
     }
 }
@@ -514,15 +524,20 @@ fn get_rule_rule_impl(
         }
         None => quote!(None),
     };
+    let allow_self_conflicting_fixes = match rule.allow_self_conflicting_fixes.as_ref() {
+        Some(allow_self_conflicting_fixes) => quote!(#allow_self_conflicting_fixes),
+        None => quote!(false),
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
-            fn meta(&self) -> #crate_name::RuleMeta {
-                #crate_name::RuleMeta {
+            fn meta(&self) -> std::sync::Arc<#crate_name::RuleMeta> {
+                std::sync::Arc::new(#crate_name::RuleMeta {
                     name: #name.into(),
                     fixable: #fixable,
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
                     messages: #messages,
-                }
+                    allow_self_conflicting_fixes: #allow_self_conflicting_fixes,
+                })
             }
 
             fn instantiate(

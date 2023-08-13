@@ -81,7 +81,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                             violation.range,
                         ),
                         severity: Some(DiagnosticSeverity::ERROR),
-                        code: Some(NumberOrString::String(violation.rule.name)),
+                        code: Some(NumberOrString::String(violation.rule.name.clone())),
                         source: Some("tree-sitter-lint".to_owned()),
                         ..Default::default()
                     })

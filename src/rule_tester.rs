@@ -55,7 +55,7 @@ impl RuleTester {
         {
             panic!("Specified 'output' for a non-fixable rule");
         }
-        let languages = rule.meta().languages;
+        let languages = &rule.meta().languages;
         if languages.len() != 1 {
             panic!("Only supporting single-language rules currently");
         }
@@ -184,10 +184,10 @@ impl RuleTester {
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(self.rule.meta().name)
+                .rule(self.rule.meta().name.clone())
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name,
+                    name: self.rule.meta().name.clone(),
                     level: ErrorLevel::Error,
                     options: valid_test.options.clone(),
                 }])
@@ -230,10 +230,10 @@ impl RuleTester {
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(self.rule.meta().name)
+                .rule(self.rule.meta().name.clone())
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name,
+                    name: self.rule.meta().name.clone(),
                     level: ErrorLevel::Error,
                     options: invalid_test.options.clone(),
                 }])

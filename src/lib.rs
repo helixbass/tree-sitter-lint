@@ -25,7 +25,7 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     process,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use aggregated_queries::AggregatedQueries;
@@ -147,7 +147,7 @@ pub fn run(
                     files_with_fixes.append(
                         dir_entry.path(),
                         file_contents,
-                        &instantiated_rule.meta.name,
+                        &instantiated_rule.meta,
                         fixes,
                         language,
                         tree.clone(),
@@ -597,7 +597,7 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
 fn run_fixing_loop<'a>(
     violations: &mut Vec<ViolationWithContext>,
     file_contents: impl Into<MutRopeOrSlice<'a>>,
-    mut pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+    mut pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
     aggregated_queries: &AggregatedQueries,
     path: &Path,
     config: &Config,
@@ -665,7 +665,8 @@ fn run_fixing_loop<'a>(
             |fixes, instantiated_rule| {
                 pending_fixes
                     .entry(instantiated_rule.meta.name.clone())
-                    .or_default()
+                    .or_insert_with(|| (Default::default(), instantiated_rule.meta.clone()))
+                    .0
                     .extend(fixes);
             },
         );
@@ -774,7 +775,9 @@ pub fn run_fixing_for_slice<'a>(
             .unwrap()
     });
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
-    let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
+    #[allow(clippy::type_complexity)]
+    let pending_fixes: Mutex<HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>> =
+        Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
     let event_emitters = aggregated_queries.get_event_emitter_instances(language, &file_contents);
@@ -808,7 +811,8 @@ pub fn run_fixing_for_slice<'a>(
                 .lock()
                 .unwrap()
                 .entry(instantiated_rule.meta.name.clone())
-                .or_default()
+                .or_insert_with(|| (Default::default(), instantiated_rule.meta.clone()))
+                .0
                 .extend(fixes);
         },
     );
@@ -867,7 +871,7 @@ type RuleName = String;
 #[instrument(level = "debug", skip_all)]
 fn apply_fixes(
     file_contents: &mut MutRopeOrSlice,
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+    pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
 ) -> Vec<InputEdit> {
     let non_conflicting_sorted_pending_fixes =
         get_sorted_non_conflicting_pending_fixes(pending_fixes);
@@ -934,15 +938,35 @@ fn has_overlapping_ranges(sorted_pending_fixes: &[PendingFix]) -> bool {
     false
 }
 
+fn get_non_overlapping_subset(sorted_pending_fixes: &[PendingFix]) -> Vec<PendingFix> {
+    let mut prev_end = None;
+    sorted_pending_fixes
+        .into_iter()
+        .filter(|pending_fix| {
+            if let Some(prev_end) = prev_end {
+                if pending_fix.range.start_byte < prev_end {
+                    return false;
+                }
+            }
+            prev_end = Some(pending_fix.range.end_byte);
+            true
+        })
+        .cloned()
+        .collect()
+}
+
 fn get_sorted_non_conflicting_pending_fixes(
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+    pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
 ) -> Vec<PendingFix> {
     pending_fixes.into_iter().fold(
         Default::default(),
-        |accumulated_fixes, (rule_name, mut pending_fixes_for_rule)| {
+        |accumulated_fixes, (rule_name, (mut pending_fixes_for_rule, rule_meta))| {
             pending_fixes_for_rule.sort_by(compare_pending_fixes);
             if has_overlapping_ranges(&pending_fixes_for_rule) {
-                panic!("Rule {:?} tried to apply self-conflicting fixes", rule_name);
+                if !rule_meta.allow_self_conflicting_fixes {
+                    panic!("Rule {:?} tried to apply self-conflicting fixes", rule_name);
+                }
+                pending_fixes_for_rule = get_non_overlapping_subset(&pending_fixes_for_rule);
             }
             let mut tentative = accumulated_fixes.clone();
             tentative.extend(pending_fixes_for_rule);
@@ -963,7 +987,7 @@ impl AllPendingFixes {
         &self,
         path: &Path,
         file_contents: &[u8],
-        rule_name: &str,
+        rule_meta: &Arc<RuleMeta>,
         fixes: Vec<PendingFix>,
         language: SupportedLanguage,
         tree: Tree,
@@ -971,8 +995,9 @@ impl AllPendingFixes {
         self.entry(path.to_owned())
             .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned(), language, tree))
             .pending_fixes
-            .entry(rule_name.to_owned())
-            .or_default()
+            .entry(rule_meta.name.to_owned())
+            .or_insert_with(|| (Default::default(), rule_meta.clone()))
+            .0
             .extend(fixes);
     }
 
@@ -991,7 +1016,7 @@ impl Deref for AllPendingFixes {
 
 struct PerFilePendingFixes {
     file_contents: Vec<u8>,
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
+    pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
     language: SupportedLanguage,
     tree: Tree,
 }

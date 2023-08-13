@@ -16,10 +16,11 @@ pub struct RuleMeta {
     pub fixable: bool,
     pub languages: Vec<SupportedLanguage>,
     pub messages: Option<HashMap<String, String>>,
+    pub allow_self_conflicting_fixes: bool,
 }
 
 pub trait Rule: Send + Sync {
-    fn meta(&self) -> RuleMeta;
+    fn meta(&self) -> Arc<RuleMeta>;
     fn instantiate(
         self: Arc<Self>,
         config: &Config,
@@ -37,7 +38,7 @@ pub trait RuleInstance: Send + Sync {
 }
 
 pub struct InstantiatedRule {
-    pub meta: RuleMeta,
+    pub meta: Arc<RuleMeta>,
     pub rule: Arc<dyn Rule>,
     pub rule_instance: Arc<dyn RuleInstance>,
     pub plugin_index: Option<PluginIndex>,

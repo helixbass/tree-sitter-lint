@@ -120,8 +120,10 @@ impl Config {
                 })
                 .collect();
             for standalone_rule in &self.all_standalone_rules {
-                rules_by_plugin_prefixed_name
-                    .insert(standalone_rule.meta().name, (standalone_rule.clone(), None));
+                rules_by_plugin_prefixed_name.insert(
+                    standalone_rule.meta().name.clone(),
+                    (standalone_rule.clone(), None),
+                );
             }
             rules_by_plugin_prefixed_name
         })
@@ -239,7 +241,7 @@ pub struct RuleConfiguration {
 impl RuleConfiguration {
     pub fn default_for_rule(rule: &Arc<dyn Rule>) -> Self {
         Self {
-            name: rule.meta().name,
+            name: rule.meta().name.clone(),
             level: ErrorLevel::Error,
             options: None,
         }

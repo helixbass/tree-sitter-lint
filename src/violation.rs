@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, fmt, path::PathBuf, rc::Rc, sync::Arc};
 
 use derive_builder::Builder;
 use tree_sitter_grep::tree_sitter::Range;
@@ -95,7 +95,7 @@ pub struct ViolationWithContext {
     pub message_or_message_id: MessageOrMessageId,
     pub range: tree_sitter::Range,
     pub path: PathBuf,
-    pub rule: RuleMeta,
+    pub rule: Arc<RuleMeta>,
     pub plugin_index: Option<PluginIndex>,
     pub had_fixes: bool,
     pub kind: &'static str,
