@@ -1,5 +1,9 @@
+use std::cmp::Ordering;
+
 use squalid::{return_default_if_false, return_default_if_none};
 use tree_sitter_grep::tree_sitter::{Node, TreeCursor};
+
+use crate::rule_tester::compare_ranges;
 
 pub trait NodeExt<'a> {
     fn is_descendant_of(&self, node: Node) -> bool;
@@ -108,6 +112,23 @@ fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
             assert!(cursor.goto_first_child());
         } else {
             assert!(cursor.goto_next_sibling());
+        }
+    }
+}
+
+pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
+    if a == b {
+        return Ordering::Equal;
+    }
+    match compare_ranges(a.range(), b.range()) {
+        Ordering::Less => Ordering::Less,
+        Ordering::Greater => Ordering::Greater,
+        Ordering::Equal => {
+            if a.is_descendant_of(*b) {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
         }
     }
 }

@@ -41,7 +41,7 @@ pub use context::{
 use dashmap::DashMap;
 use event_emitter::EventEmitterIndex;
 pub use event_emitter::{EventEmitter, EventEmitterFactory, EventTypeIndex};
-pub use node::NodeExt;
+pub use node::{compare_nodes, NodeExt};
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
 use rayon::prelude::*;

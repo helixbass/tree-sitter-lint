@@ -522,7 +522,7 @@ impl RuleTester {
     }
 }
 
-fn compare_ranges(a: Range, b: Range) -> Ordering {
+pub fn compare_ranges(a: Range, b: Range) -> Ordering {
     match a.start_byte.cmp(&b.start_byte) {
         Ordering::Equal => {}
         ord => return ord,
