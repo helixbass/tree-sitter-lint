@@ -13,6 +13,7 @@ use tree_sitter_grep::RopeOrSlice;
 
 mod event_emitter;
 mod options;
+mod rule_tester;
 mod state;
 mod tokens;
 mod violations;
@@ -237,53 +238,6 @@ fn test_root_exit_listener_amid_other_listeners() {
                             message => "function",
                         }
                     ],
-                },
-            ]
-        },
-    );
-}
-
-#[test]
-fn test_rule_test_errors_variable() {
-    use crate::RuleTestExpectedErrorBuilder;
-
-    let errors = [RuleTestExpectedErrorBuilder::default()
-        .message("whee")
-        .build()
-        .unwrap()];
-    RuleTester::run(
-        rule! {
-            name => "reports-functions",
-            listeners => [
-                r#"(
-                  (function_item) @c
-                )"# => |node, context| {
-                    context.report(violation! {
-                        node => node,
-                        message => "whee",
-                    });
-                }
-            ],
-            languages => [Rust],
-        },
-        rule_tests! {
-            valid => [
-                r#"
-                    use foo::bar;
-                "#,
-            ],
-            invalid => [
-                {
-                    code => r#"
-                        fn whee() {}
-                    "#,
-                    errors => errors,
-                },
-                {
-                    code => r#"
-                        fn bar() {}
-                    "#,
-                    errors => errors,
                 },
             ]
         },

@@ -562,10 +562,13 @@ impl RuleTests {
     }
 }
 
-#[derive(Debug)]
+#[derive(Builder, Debug)]
+#[builder(setter(strip_option, into))]
 pub struct RuleTestValid {
     code: String,
+    #[builder(default)]
     options: Option<RuleOptions>,
+    #[builder(default)]
     only: Option<bool>,
 }
 
@@ -585,11 +588,16 @@ impl From<&str> for RuleTestValid {
     }
 }
 
+#[derive(Builder, Clone)]
+#[builder(setter(strip_option, into))]
 pub struct RuleTestInvalid {
     code: String,
     errors: RuleTestExpectedErrors,
+    #[builder(default)]
     output: Option<RuleTestExpectedOutput>,
+    #[builder(default)]
     options: Option<RuleOptions>,
+    #[builder(default)]
     only: Option<bool>,
 }
 
@@ -611,6 +619,7 @@ impl RuleTestInvalid {
     }
 }
 
+#[derive(Clone)]
 pub enum RuleTestExpectedOutput {
     Output(String),
     NoOutput,
@@ -628,6 +637,7 @@ impl From<&str> for RuleTestExpectedOutput {
     }
 }
 
+#[derive(Clone)]
 pub enum RuleTestExpectedErrors {
     NumErrors(usize),
     Errors(Vec<RuleTestExpectedError>),

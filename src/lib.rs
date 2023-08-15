@@ -51,8 +51,8 @@ pub use rule::{
 };
 pub use rule_tester::{
     DummyFromFileRunContextInstanceProviderFactory, RuleTestExpectedError,
-    RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid, RuleTestValid,
-    RuleTester, RuleTests,
+    RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid, RuleTestInvalidBuilder,
+    RuleTestValid, RuleTestValidBuilder, RuleTester, RuleTests,
 };
 pub use slice::MutRopeOrSlice;
 use squalid::EverythingExt;

@@ -80,13 +80,40 @@ impl ToTokens for RuleOptions {
     }
 }
 
-struct ValidRuleTestSpec {
+enum ValidRuleTestSpec {
+    Single(SingleValidRuleTestSpec),
+    Spread(Expr),
+}
+
+impl Parse for ValidRuleTestSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            Self::Spread(input.parse()?)
+        } else {
+            Self::Single(input.parse()?)
+        })
+    }
+}
+
+impl ToTokens for ValidRuleTestSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Single(value) => value.to_tokens(tokens),
+            Self::Spread(value) => value.to_tokens(tokens),
+        }
+    }
+}
+
+struct SingleValidRuleTestSpec {
     code: Expr,
     options: Option<RuleOptions>,
     only: Option<Expr>,
 }
 
-impl Parse for ValidRuleTestSpec {
+impl Parse for SingleValidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
@@ -124,7 +151,7 @@ impl Parse for ValidRuleTestSpec {
     }
 }
 
-impl ToTokens for ValidRuleTestSpec {
+impl ToTokens for SingleValidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
         let options = match self.options.as_ref() {
@@ -372,7 +399,34 @@ impl ToTokens for InvalidRuleTestErrorsSpec {
     }
 }
 
-struct InvalidRuleTestSpec {
+enum InvalidRuleTestSpec {
+    Single(SingleInvalidRuleTestSpec),
+    Spread(Expr),
+}
+
+impl Parse for InvalidRuleTestSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            Self::Spread(input.parse()?)
+        } else {
+            Self::Single(input.parse()?)
+        })
+    }
+}
+
+impl ToTokens for InvalidRuleTestSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Single(value) => value.to_tokens(tokens),
+            Self::Spread(value) => value.to_tokens(tokens),
+        }
+    }
+}
+
+struct SingleInvalidRuleTestSpec {
     code: Expr,
     errors: InvalidRuleTestErrorsSpec,
     output: Option<Expr>,
@@ -380,7 +434,7 @@ struct InvalidRuleTestSpec {
     only: Option<Expr>,
 }
 
-impl Parse for InvalidRuleTestSpec {
+impl Parse for SingleInvalidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut errors: Option<InvalidRuleTestErrorsSpec> = Default::default();
@@ -424,7 +478,7 @@ impl Parse for InvalidRuleTestSpec {
     }
 }
 
-impl ToTokens for InvalidRuleTestSpec {
+impl ToTokens for SingleInvalidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
         let errors = &self.errors;
@@ -517,13 +571,69 @@ pub fn rule_tests(input: TokenStream, crate_name: &str) -> TokenStream {
     let crate_name = format_ident!("{}", crate_name);
     let RuleTests { valid, invalid } = parse_macro_input!(input);
 
+    let valid = if valid
+        .iter()
+        .any(|valid_test| matches!(valid_test, ValidRuleTestSpec::Spread(_)))
+    {
+        let add_cases = valid
+            .iter()
+            .map(|valid_test| match valid_test {
+                ValidRuleTestSpec::Single(value) => {
+                    quote! {
+                        cases.push(#value);
+                    }
+                }
+                ValidRuleTestSpec::Spread(value) => {
+                    quote! {
+                        cases.extend(#value);
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        quote! {{
+            let mut cases: Vec<#crate_name::RuleTestValid> = vec![];
+            #(#add_cases)*
+            cases
+        }}
+    } else {
+        quote!(vec![#(#valid),*])
+    };
+
+    let invalid = if invalid
+        .iter()
+        .any(|invalid_test| matches!(invalid_test, InvalidRuleTestSpec::Spread(_)))
+    {
+        let add_cases = invalid
+            .iter()
+            .map(|invalid_test| match invalid_test {
+                InvalidRuleTestSpec::Single(value) => {
+                    quote! {
+                        cases.push(#value);
+                    }
+                }
+                InvalidRuleTestSpec::Spread(value) => {
+                    quote! {
+                        cases.extend(#value);
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        quote! {{
+            let mut cases: Vec<#crate_name::RuleTestInvalid> = vec![];
+            #(#add_cases)*
+            cases
+        }}
+    } else {
+        quote!(vec![#(#invalid),*])
+    };
+
     quote! {
         {
             use #crate_name as tree_sitter_lint;
 
             tree_sitter_lint::RuleTests::new(
-                vec![#(#valid),*],
-                vec![#(#invalid),*],
+                #valid,
+                #invalid,
             )
         }
     }
