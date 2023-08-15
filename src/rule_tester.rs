@@ -565,11 +565,11 @@ impl RuleTests {
 #[derive(Builder, Debug)]
 #[builder(setter(strip_option, into))]
 pub struct RuleTestValid {
-    code: String,
+    pub code: String,
     #[builder(default)]
-    options: Option<RuleOptions>,
+    pub options: Option<RuleOptions>,
     #[builder(default)]
-    only: Option<bool>,
+    pub only: Option<bool>,
 }
 
 impl RuleTestValid {
@@ -588,17 +588,23 @@ impl From<&str> for RuleTestValid {
     }
 }
 
+impl From<String> for RuleTestValid {
+    fn from(value: String) -> Self {
+        Self::new(value, None, None)
+    }
+}
+
 #[derive(Builder, Clone)]
 #[builder(setter(strip_option, into))]
 pub struct RuleTestInvalid {
-    code: String,
-    errors: RuleTestExpectedErrors,
+    pub code: String,
+    pub errors: RuleTestExpectedErrors,
     #[builder(default)]
-    output: Option<RuleTestExpectedOutput>,
+    pub output: Option<RuleTestExpectedOutput>,
     #[builder(default)]
-    options: Option<RuleOptions>,
+    pub options: Option<RuleOptions>,
     #[builder(default)]
-    only: Option<bool>,
+    pub only: Option<bool>,
 }
 
 impl RuleTestInvalid {
