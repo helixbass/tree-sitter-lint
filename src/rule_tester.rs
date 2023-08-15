@@ -14,17 +14,6 @@ use crate::{
     RuleConfiguration,
 };
 
-enum TestOutcome {
-    Passed,
-    Failed,
-}
-
-struct TestResult {
-    outcome: TestOutcome,
-    code: String,
-    was_invalid: bool,
-}
-
 pub struct RuleTester {
     rule: Arc<dyn Rule>,
     rule_tests: RuleTests,
@@ -123,6 +112,26 @@ impl RuleTester {
     }
 
     fn run_tests(&self) {
+        if let Some(only_valid_test) = self
+            .rule_tests
+            .valid_tests
+            .iter()
+            .find(|valid_test| valid_test.only == Some(true))
+        {
+            self.run_valid_test(only_valid_test);
+            return;
+        }
+
+        if let Some(only_invalid_test) = self
+            .rule_tests
+            .invalid_tests
+            .iter()
+            .find(|invalid_test| invalid_test.only == Some(true))
+        {
+            self.run_invalid_test(only_invalid_test);
+            return;
+        }
+
         for valid_test in &self.rule_tests.valid_tests {
             self.run_valid_test(valid_test);
         }
@@ -557,20 +566,48 @@ impl RuleTests {
 pub struct RuleTestValid {
     code: String,
     options: Option<RuleOptions>,
+    only: Option<bool>,
 }
 
 impl RuleTestValid {
-    pub fn new(code: impl Into<String>, options: Option<RuleOptions>) -> Self {
+    pub fn new(code: impl Into<String>, options: Option<RuleOptions>, only: Option<bool>) -> Self {
         Self {
             code: code.into(),
             options,
+            only,
         }
     }
 }
 
 impl From<&str> for RuleTestValid {
     fn from(value: &str) -> Self {
-        Self::new(value, None)
+        Self::new(value, None, None)
+    }
+}
+
+pub struct RuleTestInvalid {
+    code: String,
+    errors: RuleTestExpectedErrors,
+    output: Option<RuleTestExpectedOutput>,
+    options: Option<RuleOptions>,
+    only: Option<bool>,
+}
+
+impl RuleTestInvalid {
+    pub fn new(
+        code: impl Into<String>,
+        errors: impl Into<RuleTestExpectedErrors>,
+        output: Option<impl Into<RuleTestExpectedOutput>>,
+        options: Option<RuleOptions>,
+        only: Option<bool>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            errors: errors.into(),
+            output: output.map(Into::into),
+            options,
+            only,
+        }
     }
 }
 
@@ -605,29 +642,6 @@ impl From<usize> for RuleTestExpectedErrors {
 impl From<Vec<RuleTestExpectedError>> for RuleTestExpectedErrors {
     fn from(value: Vec<RuleTestExpectedError>) -> Self {
         Self::Errors(value)
-    }
-}
-
-pub struct RuleTestInvalid {
-    code: String,
-    errors: RuleTestExpectedErrors,
-    output: Option<RuleTestExpectedOutput>,
-    options: Option<RuleOptions>,
-}
-
-impl RuleTestInvalid {
-    pub fn new(
-        code: impl Into<String>,
-        errors: impl Into<RuleTestExpectedErrors>,
-        output: Option<impl Into<RuleTestExpectedOutput>>,
-        options: Option<RuleOptions>,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            errors: errors.into(),
-            output: output.map(Into::into),
-            options,
-        }
     }
 }
 
@@ -670,6 +684,17 @@ impl From<&RuleTestExpectedError> for RuleTestExpectedError {
     fn from(value: &RuleTestExpectedError) -> Self {
         value.clone()
     }
+}
+
+enum TestOutcome {
+    Passed,
+    Failed,
+}
+
+struct TestResult {
+    outcome: TestOutcome,
+    code: String,
+    was_invalid: bool,
 }
 
 #[derive(Clone, Default)]

@@ -83,12 +83,14 @@ impl ToTokens for RuleOptions {
 struct ValidRuleTestSpec {
     code: Expr,
     options: Option<RuleOptions>,
+    only: Option<Expr>,
 }
 
 impl Parse for ValidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
+        let mut only: Option<Expr> = Default::default();
         if input.peek(token::Brace) {
             let content;
             braced!(content in input);
@@ -102,6 +104,9 @@ impl Parse for ValidRuleTestSpec {
                     "options" => {
                         options = Some(content.parse()?);
                     }
+                    "only" => {
+                        only = Some(content.parse()?);
+                    }
                     _ => panic!("didn't expect key '{}'", key),
                 }
                 if !content.is_empty() {
@@ -114,6 +119,7 @@ impl Parse for ValidRuleTestSpec {
         Ok(Self {
             code: code.expect("Expected 'code'"),
             options,
+            only,
         })
     }
 }
@@ -127,10 +133,17 @@ impl ToTokens for ValidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let only = match self.only.as_ref() {
+            Some(only) => quote! {
+                Some(#only)
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestValid::new(
                 #code,
-                #options
+                #options,
+                #only
             )
         }
         .to_tokens(tokens)
@@ -364,6 +377,7 @@ struct InvalidRuleTestSpec {
     errors: InvalidRuleTestErrorsSpec,
     output: Option<Expr>,
     options: Option<RuleOptions>,
+    only: Option<Expr>,
 }
 
 impl Parse for InvalidRuleTestSpec {
@@ -372,6 +386,7 @@ impl Parse for InvalidRuleTestSpec {
         let mut errors: Option<InvalidRuleTestErrorsSpec> = Default::default();
         let mut output: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
+        let mut only: Option<Expr> = Default::default();
         let content;
         braced!(content in input);
         while !content.is_empty() {
@@ -390,6 +405,9 @@ impl Parse for InvalidRuleTestSpec {
                 "options" => {
                     options = Some(content.parse()?);
                 }
+                "only" => {
+                    only = Some(content.parse()?);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !content.is_empty() {
@@ -401,6 +419,7 @@ impl Parse for InvalidRuleTestSpec {
             errors: errors.expect("Expected 'errors'"),
             output,
             options,
+            only,
         })
     }
 }
@@ -424,12 +443,19 @@ impl ToTokens for InvalidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let only = match self.only.as_ref() {
+            Some(only) => quote! {
+                Some(#only)
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
                 #errors,
                 #output,
-                #options
+                #options,
+                #only
             )
         }
         .to_tokens(tokens)
