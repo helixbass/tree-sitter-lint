@@ -109,3 +109,49 @@ fn test_rule_test_spread_cases() {
         },
     );
 }
+
+#[test]
+fn test_rule_test_spread_cases_valid_just_str() {
+    fn valid_cases() -> Vec<&'static str> {
+        vec!["use bar::baz;"]
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "reports-functions",
+            listeners => [
+                r#"
+                  (function_item) @c
+                "# => |node, context| {
+                    context.report(violation! {
+                        node => node,
+                        message => "whee",
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                ...valid_cases(),
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => 1,
+                },
+                {
+                    code => r#"
+                        fn bar() {}
+                    "#,
+                    errors => 1,
+                },
+            ]
+        },
+    );
+}

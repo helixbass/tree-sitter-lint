@@ -585,7 +585,7 @@ pub fn rule_tests(input: TokenStream, crate_name: &str) -> TokenStream {
                 }
                 ValidRuleTestSpec::Spread(value) => {
                     quote! {
-                        cases.extend(#value);
+                        cases.extend(#value.into_iter().map(#crate_name::RuleTestValid::from));
                     }
                 }
             })
