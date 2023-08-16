@@ -15,6 +15,7 @@ mod slice;
 #[cfg(test)]
 mod tests;
 mod text;
+mod treesitter;
 mod violation;
 
 use std::{
@@ -33,10 +34,10 @@ pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
 use context::PendingFix;
 pub use context::{
-    FileRunContext, Fixer, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
-    FromFileRunContextProvidedTypesOnceLockStorage, QueryMatchContext, SkipOptions,
-    SkipOptionsBuilder,
+    CountOptions, CountOptionsBuilder, FileRunContext, Fixer, FromFileRunContext,
+    FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
+    FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
+    QueryMatchContext, SkipOptions, SkipOptionsBuilder,
 };
 use dashmap::DashMap;
 use event_emitter::EventEmitterIndex;
@@ -64,6 +65,10 @@ use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
     tree_sitter::{InputEdit, Node, Point, QueryMatch, Range},
     Parseable, RopeOrSlice, SupportedLanguage,
+};
+pub use treesitter::{
+    range_between_end_and_start, range_between_ends, range_between_start_and_end,
+    range_between_starts,
 };
 pub use violation::{ViolationBuilder, ViolationData, ViolationWithContext};
 

@@ -15,12 +15,14 @@ use tree_sitter_grep::{
 };
 
 mod backward_tokens;
+mod count_options;
 mod fix;
 mod get_tokens;
 mod provided_types;
 mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
+pub use count_options::{CountOptions, CountOptionsBuilder};
 pub use fix::{Fixer, PendingFix};
 use get_tokens::{get_tokens, get_tokens_after_node};
 pub use provided_types::{
@@ -459,6 +461,43 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     pub fn get_comments_inside(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
         let comment_kinds = self.file_run_context.language.comment_kinds();
         get_tokens(node).filter(|node| comment_kinds.contains(node.kind()))
+    }
+
+    pub fn get_first_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        count_options: Option<impl Into<CountOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut count_options = count_options.map(Into::into).unwrap_or_default();
+        let language = self.file_run_context.language;
+        get_tokens(node)
+            .take(count_options.count())
+            .filter(move |node| {
+                count_options.filter().map_or(true, |filter| filter(*node))
+                    && if count_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
+    pub fn is_space_between(&self, a: Node<'a>, b: Node<'a>) -> bool {
+        let a_start = a.start_byte();
+        let b_start = b.start_byte();
+        let (start, end_byte) = if a_start < b_start {
+            (a, b_start)
+        } else {
+            (b, a_start)
+        };
+        let mut prev_token = start;
+        get_tokens_after_node(start)
+            .take_while(move |token| token.start_byte() <= end_byte)
+            .any(|token| {
+                let ret = prev_token.end_byte() < token.start_byte();
+                prev_token = token;
+                ret
+            })
     }
 }
 

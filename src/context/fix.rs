@@ -1,6 +1,8 @@
 use squalid::{IsEmpty, OptionExt};
 use tree_sitter_grep::tree_sitter::{Node, Range};
 
+use crate::{range_between_ends, range_between_starts};
+
 #[derive(Default)]
 pub struct Fixer {
     pending_fixes: Option<Vec<PendingFix>>,
@@ -33,6 +35,24 @@ impl Fixer {
         self.pending_fixes
             .get_or_insert_with(Default::default)
             .push(PendingFix::new(range, replacement.into()));
+    }
+
+    pub fn insert_text_after(&mut self, node: Node, text: impl Into<String>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(
+                range_between_ends(node.range(), node.range()),
+                text.into(),
+            ));
+    }
+
+    pub fn insert_text_before(&mut self, node: Node, text: impl Into<String>) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(
+                range_between_starts(node.range(), node.range()),
+                text.into(),
+            ));
     }
 }
 
