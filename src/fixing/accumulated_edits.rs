@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use itertools::Itertools;
-use squalid::OptionExt;
+use squalid::{OptionExt, VecExt};
 use tree_sitter_grep::tree_sitter::{InputEdit, Point};
 
 pub struct AccumulatedEdits {
@@ -22,20 +22,176 @@ impl AccumulatedEdits {
         for (input_edit, replacement) in edits {
             if let Some(prev_start_byte) = prev_start_byte {
                 assert!(
-                    input_edit.old_end_byte < prev_start_byte,
+                    input_edit.old_end_byte <= prev_start_byte,
                     "Expected non-overlapping edits in reverse order"
                 );
             }
 
-            self.edits.push(AccumulatedEdit {
-                original_start_byte: input_edit.start_byte,
-                original_len: input_edit.old_end_byte - input_edit.start_byte,
-                replacement_len: replacement.len(),
-                replacement_newline_offsets: get_newline_offsets(replacement).collect(),
-            });
+            let (overlapping_edits, adjustment) = self.get_overlapping_edits(input_edit);
+            match overlapping_edits {
+                OverlappingEditsOrInsertionPoint::InsertionPoint(insertion_index) => {
+                    self.edits.insert(
+                        insertion_index,
+                        AccumulatedEdit {
+                            original_start_byte: (input_edit.start_byte as isize + adjustment)
+                                .try_into()
+                                .unwrap(),
+                            original_len: input_edit.old_end_byte - input_edit.start_byte,
+                            replacement_len: replacement.len(),
+                            replacement_newline_offsets: get_newline_offsets(replacement).collect(),
+                        },
+                    );
+                }
+                OverlappingEditsOrInsertionPoint::OverlappingEdits(overlapping_indices) => {
+                    let combined = overlapping_indices
+                        .iter()
+                        .copied()
+                        .map(|index| self.edits[index].clone())
+                        .reduce(|a, b| {
+                            let gap =
+                                b.original_start_byte - (a.original_start_byte + a.original_len);
+                            AccumulatedEdit {
+                                original_start_byte: a.original_start_byte,
+                                original_len: a.original_len + b.original_len + gap,
+                                replacement_len: a.replacement_len + b.replacement_len + gap,
+                                replacement_newline_offsets: a
+                                    .replacement_newline_offsets
+                                    .and_extend(b.replacement_newline_offsets.into_iter().map(
+                                        |newline_offset| newline_offset + a.replacement_len + gap,
+                                    )),
+                            }
+                        })
+                        .unwrap();
+                    let input_edit_original_start = (input_edit.start_byte as isize + adjustment)
+                        .try_into()
+                        .unwrap();
+                    let mut stretched = combined;
+                    let left_stick_out =
+                        stretched.original_start_byte as isize - input_edit_original_start as isize;
+                    if left_stick_out > 0 {
+                        let left_stick_out: usize = left_stick_out.try_into().unwrap();
+                        stretched = AccumulatedEdit {
+                            original_start_byte: input_edit_original_start,
+                            original_len: left_stick_out + stretched.original_len,
+                            replacement_len: left_stick_out + stretched.replacement_len,
+                            replacement_newline_offsets: stretched
+                                .replacement_newline_offsets
+                                .into_iter()
+                                .map(|newline_offset| left_stick_out + newline_offset)
+                                .collect(),
+                        };
+                    }
+                    let input_edit_old_len = input_edit.old_end_byte - input_edit.start_byte;
+                    let input_edit_original_old_end =
+                        input_edit_original_start + input_edit_old_len;
+                    let right_stick_out = input_edit_original_old_end as isize
+                        - (stretched.original_start_byte + stretched.replacement_len) as isize;
+                    if right_stick_out > 0 {
+                        let right_stick_out: usize = right_stick_out.try_into().unwrap();
+                        stretched = AccumulatedEdit {
+                            original_start_byte: stretched.original_start_byte,
+                            original_len: stretched.original_len + right_stick_out,
+                            replacement_len: stretched.replacement_len + right_stick_out,
+                            replacement_newline_offsets: stretched.replacement_newline_offsets,
+                        };
+                    }
+                    let input_edit_replacement_len =
+                        input_edit.new_end_byte - input_edit.start_byte;
+                    let input_edit_adjustment =
+                        input_edit_replacement_len as isize - input_edit_old_len as isize;
+                    let left_inset = input_edit_original_start - stretched.original_start_byte;
+                    // let right_inset = (stretched.original_start_byte + stretched.replacement_len)
+                    //     - input_edit_original_old_end;
+                    let plopped = AccumulatedEdit {
+                        original_start_byte: stretched.original_start_byte,
+                        original_len: stretched.original_len,
+                        replacement_len: (stretched.replacement_len as isize
+                            + input_edit_adjustment)
+                            .try_into()
+                            .unwrap(),
+                        replacement_newline_offsets: {
+                            let mut replacement_newline_offsets: Vec<usize> = Default::default();
+                            let mut index = 0;
+                            while let Some(replacement_newline_offset) = stretched
+                                .replacement_newline_offsets
+                                .get(index)
+                                .copied()
+                                .filter(|&replacement_newline_offset| {
+                                    replacement_newline_offset < left_inset
+                                })
+                            {
+                                replacement_newline_offsets.push(replacement_newline_offset);
+                                index += 1;
+                            }
+                            replacement_newline_offsets.extend(
+                                get_newline_offsets(replacement)
+                                    .map(|newline_offset| left_inset + newline_offset),
+                            );
+                            replacement_newline_offsets.extend(
+                                stretched
+                                    .replacement_newline_offsets
+                                    .into_iter()
+                                    .skip(index)
+                                    .map(|replacement_newline_offset| {
+                                        usize::try_from(
+                                            (replacement_newline_offset as isize)
+                                                + input_edit_adjustment,
+                                        )
+                                        .unwrap()
+                                    }),
+                            );
+                            replacement_newline_offsets
+                        },
+                    };
+                    self.edits.splice(
+                        overlapping_indices.first().copied().unwrap()
+                            ..=overlapping_indices.last().copied().unwrap(),
+                        [plopped],
+                    );
+                }
+            }
 
             prev_start_byte = Some(input_edit.start_byte);
         }
+    }
+
+    fn get_overlapping_edits(
+        &self,
+        input_edit: &InputEdit,
+    ) -> (OverlappingEditsOrInsertionPoint, isize) {
+        let mut adjustment = 0;
+        let mut index = 0;
+        let mut overlapping_indices: Vec<usize> = Default::default();
+        while index < self.edits.len() {
+            let existing_edit = &self.edits[index];
+            let input_edit_original_start: usize = (input_edit.start_byte as isize + adjustment)
+                .try_into()
+                .unwrap();
+            let input_edit_original_old_end =
+                input_edit_original_start + (input_edit.old_end_byte - input_edit.start_byte);
+            if input_edit_original_start
+                >= existing_edit.original_start_byte + existing_edit.replacement_len
+            {
+                adjustment +=
+                    existing_edit.replacement_len as isize - existing_edit.original_len as isize;
+                index += 1;
+                continue;
+            }
+            if input_edit_original_old_end <= existing_edit.original_start_byte {
+                break;
+            }
+            overlapping_indices.push(index);
+            adjustment +=
+                existing_edit.replacement_len as isize - existing_edit.original_len as isize;
+            index += 1;
+        }
+        (
+            match overlapping_indices.is_empty() {
+                true => OverlappingEditsOrInsertionPoint::InsertionPoint(index),
+                false => OverlappingEditsOrInsertionPoint::OverlappingEdits(overlapping_indices),
+            },
+            adjustment,
+        )
     }
 
     pub fn get_input_edits(&self) -> Vec<InputEdit> {
@@ -54,11 +210,17 @@ impl AccumulatedEdits {
     }
 }
 
+#[derive(Clone)]
 pub struct AccumulatedEdit {
     original_start_byte: usize,
     original_len: usize,
     replacement_len: usize,
     replacement_newline_offsets: Vec<usize>,
+}
+
+enum OverlappingEditsOrInsertionPoint {
+    OverlappingEdits(Vec<usize>),
+    InsertionPoint(usize),
 }
 
 fn get_point_from_newline_offsets(start_byte: usize, newline_offsets: &[usize]) -> Point {
@@ -449,8 +611,43 @@ use whee::whoa;
         assert_eq!(
             accumulated_edits.get_input_edits(),
             [
-                get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello").0,
                 get_input_edit_and_replacement(source_text, "foo::bar", "foo::b").0,
+                get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello").0,
+            ]
+        )
+    }
+
+    #[test]
+    fn test_multiple_rounds_non_overlapping() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
+        ]);
+        let updated_source_text = r#"use foo::b;
+use bar::baz;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(updated_source_text, "whee::whoa", "whee::whooo"),
+            get_input_edit_and_replacement(updated_source_text, "bar::baz", "bar::bz"),
+        ]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [
+                get_input_edit_and_replacement(source_text, "foo::bar", "foo::b").0,
+                get_input_edit_and_replacement(source_text, "bar::baz", "bar::bz").0,
+                get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello").0,
+                get_input_edit_and_replacement(source_text, "whee::whoa", "whee::whooo").0,
             ]
         )
     }
