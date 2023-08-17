@@ -33,7 +33,7 @@ impl AccumulatedEdits {
                     self.edits.insert(
                         insertion_index,
                         AccumulatedEdit {
-                            original_start_byte: (input_edit.start_byte as isize + adjustment)
+                            original_start_byte: (input_edit.start_byte as isize - adjustment)
                                 .try_into()
                                 .unwrap(),
                             original_len: input_edit.old_end_byte - input_edit.start_byte,
@@ -62,7 +62,7 @@ impl AccumulatedEdits {
                             }
                         })
                         .unwrap();
-                    let input_edit_original_start = (input_edit.start_byte as isize + adjustment)
+                    let input_edit_original_start = (input_edit.start_byte as isize - adjustment)
                         .try_into()
                         .unwrap();
                     let mut stretched = combined;
@@ -164,7 +164,7 @@ impl AccumulatedEdits {
         let mut overlapping_indices: Vec<usize> = Default::default();
         while index < self.edits.len() {
             let existing_edit = &self.edits[index];
-            let input_edit_original_start: usize = (input_edit.start_byte as isize + adjustment)
+            let input_edit_original_start: usize = (input_edit.start_byte as isize - adjustment)
                 .try_into()
                 .unwrap();
             let input_edit_original_old_end =
@@ -218,6 +218,7 @@ pub struct AccumulatedEdit {
     replacement_newline_offsets: Vec<usize>,
 }
 
+#[derive(Debug)]
 enum OverlappingEditsOrInsertionPoint {
     OverlappingEdits(Vec<usize>),
     InsertionPoint(usize),
