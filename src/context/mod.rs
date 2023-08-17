@@ -16,14 +16,12 @@ use tree_sitter_grep::{
 
 mod backward_tokens;
 mod count_options;
-mod fix;
 mod get_tokens;
 mod provided_types;
 mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use count_options::{CountOptions, CountOptionsBuilder};
-pub use fix::{Fixer, PendingFix};
 use get_tokens::{get_tokens, get_tokens_after_node};
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
@@ -38,7 +36,7 @@ use crate::{
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, EventEmitter, SourceTextProvider,
+    AggregatedQueries, Config, EventEmitter, SourceTextProvider, fixing::PendingFix, Fixer,
 };
 
 pub struct FileRunContext<'a, 'b> {

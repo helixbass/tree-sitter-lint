@@ -5,10 +5,10 @@ use tree_sitter_grep::tree_sitter::Range;
 
 use crate::{
     config::PluginIndex,
-    context::{Fixer, QueryMatchContext},
+    context::QueryMatchContext,
     rule::RuleMeta,
     tree_sitter::{self, Node},
-    Config,
+    Config, Fixer,
 };
 
 #[derive(Builder)]
