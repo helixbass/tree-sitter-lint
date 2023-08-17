@@ -162,6 +162,7 @@ impl AccumulatedEdits {
         let mut adjustment = 0;
         let mut index = 0;
         let mut overlapping_indices: Vec<usize> = Default::default();
+        let mut has_seen_overlap = false;
         while index < self.edits.len() {
             let existing_edit = &self.edits[index];
             let input_edit_original_start: usize = (input_edit.start_byte as isize - adjustment)
@@ -172,6 +173,7 @@ impl AccumulatedEdits {
             if input_edit_original_start
                 >= existing_edit.original_start_byte + existing_edit.replacement_len
             {
+                assert!(!has_seen_overlap);
                 adjustment +=
                     existing_edit.replacement_len as isize - existing_edit.original_len as isize;
                 index += 1;
@@ -180,9 +182,8 @@ impl AccumulatedEdits {
             if input_edit_original_old_end <= existing_edit.original_start_byte {
                 break;
             }
+            has_seen_overlap = true;
             overlapping_indices.push(index);
-            adjustment +=
-                existing_edit.replacement_len as isize - existing_edit.original_len as isize;
             index += 1;
         }
         (
@@ -650,6 +651,185 @@ use whee::whoa;
                 get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello").0,
                 get_input_edit_and_replacement(source_text, "whee::whoa", "whee::whooo").0,
             ]
+        )
+    }
+
+    #[test]
+    fn test_single_overlapping_sticks_out_both() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            source_text,
+            "baz::whee",
+            "baz::hello",
+        )]);
+        let updated_source_text = r#"use foo::bar;
+use bar::baz;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "baz;\nuse baz::hello;",
+            "{baz, foo};",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [get_input_edit_and_replacement(
+                source_text,
+                "bar::baz;\nuse baz::whee;",
+                "bar::{baz, foo};"
+            )
+            .0,]
+        )
+    }
+
+    #[test]
+    fn test_single_overlapping_sticks_out_left() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            source_text,
+            "baz::whee",
+            "baz::hello",
+        )]);
+        let updated_source_text = r#"use foo::bar;
+use bar::baz;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "baz;\nuse baz::h",
+            "baaz;\nuse bzzz::w",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [get_input_edit_and_replacement(
+                source_text,
+                "bar::baz;\nuse baz::whee;",
+                "bar::baaz;\nuse bazz::wello;"
+            )
+            .0,]
+        )
+    }
+
+    #[test]
+    fn test_single_overlapping_sticks_out_right() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            source_text,
+            "baz::whee",
+            "baz::hello",
+        )]);
+        let updated_source_text = r#"use foo::bar;
+use bar::baz;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "hello;\nuse whee",
+            "zhaa;\nuse whaa",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [get_input_edit_and_replacement(
+                source_text,
+                "use baz::whee;\nuse whee::whoa",
+                "use baz::zhaa;\nuse whaa::whoa"
+            )
+            .0,]
+        )
+    }
+
+    #[test]
+    fn test_single_overlapping_sticks_out_neither() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            source_text,
+            "baz::whee",
+            "baz::hello",
+        )]);
+        let updated_source_text = r#"use foo::bar;
+use bar::baz;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "hello",
+            "hyzzzo",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [get_input_edit_and_replacement(source_text, "use baz::whee", "use baz::hyzzzo").0,]
+        )
+    }
+
+    #[test]
+    fn test_single_overlapping_combines_two_sticks_out_neither() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "bar::baz", "bar::zzbze"),
+        ]);
+        let updated_source_text = r#"use foo::bar;
+use bar::zzbze;
+use baz::hello;
+use whee::whoa;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "zzbze;\nuse baz::hello",
+            "zzwzs;\nuse whaa::hyllo",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [get_input_edit_and_replacement(
+                source_text,
+                "use bar::baz;\nuse baz::whee;",
+                "use bar::zzwzs;\nuse whaa::hyllo;"
+            )
+            .0,]
         )
     }
 }
