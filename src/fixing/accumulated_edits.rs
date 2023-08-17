@@ -37,7 +37,11 @@ fn get_point_from_newline_offsets(start_byte: usize, newline_offsets: &[usize]) 
         .count();
     Point {
         row,
-        column: start_byte - newline_offsets[row],
+        column: if row > 0 {
+            start_byte - (newline_offsets[row - 1] + 1)
+        } else {
+            start_byte
+        },
     }
 }
 
@@ -272,42 +276,93 @@ fn whee() {
         )
     }
 
-    // fn get_input_edit_and_replacement<'a>(
-    //     text: &str,
-    //     original_chunk: &str,
-    //     replacement_chunk: &'a str,
-    // ) -> (InputEdit, &'a str) {
-    //     let chunk_start_byte = text.find(original_chunk).unwrap();
-    //     let shared_chunk_prefix = iter::zip(original_chunk.chars(), replacement_chunk.chars())
-    //         .take_while(|(a, b)| a == b)
-    //         .map(|(a, b)| a)
-    //         .collect::<String>();
-    //     let shared_chunk_suffix = iter::zip(
-    //         original_chunk.chars().rev(),
-    //         replacement_chunk.chars().rev(),
-    //     )
-    //     .take_while(|(a, b)| a == b)
-    //     .map(|(a, b)| a)
-    //     .rev()
-    //     .collect::<String>();
-    //     let replacement = &replacement_chunk
-    //         [shared_chunk_prefix.len()..replacement_chunk.len() - shared_chunk_suffix.len()];
-    //     let replacement_offset_in_chunk = shared_chunk_prefix.len();
-    //     let replaced = &original_chunk
-    //         [shared_chunk_prefix.len()..original_chunk.len() - shared_chunk_suffix.len()];
-    //     let start_byte = chunk_start_byte + replacement_offset_in_chunk;
-    //     let old_end_byte = start_byte + replaced.len();
-    //     let new_end_byte = start_byte + replacement.len();
-    //     let newline_offsets_in_text = get_newline_offsets(text).collect_vec();
-    //     let start_point = get_point_from_newline_offsets(start_byte, &newline_offsets_in_text);
-    //     let newline_offsets_in_new_text = get_merged_newline_offsets(
-    //         &newline_offsets_in_text,
-    //         start_byte,
-    //         old_end_byte,
-    //         replacement,
-    //     );
-    //     assert!(text);
-    // }
+    fn get_input_edit_and_replacement<'a>(
+        text: &str,
+        original_chunk: &str,
+        replacement_chunk: &'a str,
+    ) -> (InputEdit, &'a str) {
+        let chunk_start_byte = text.find(original_chunk).unwrap();
+        assert!(
+            !text[chunk_start_byte + 1..].contains(original_chunk),
+            "Non-unique chunk"
+        );
+        let shared_chunk_prefix = iter::zip(original_chunk.chars(), replacement_chunk.chars())
+            .take_while(|(a, b)| a == b)
+            .map(|(a, _)| a)
+            .collect::<String>();
+        let shared_chunk_suffix = iter::zip(
+            original_chunk.chars().rev(),
+            replacement_chunk.chars().rev(),
+        )
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| a)
+        .collect_vec()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+        let replacement = &replacement_chunk
+            [shared_chunk_prefix.len()..replacement_chunk.len() - shared_chunk_suffix.len()];
+        let replacement_offset_in_chunk = shared_chunk_prefix.len();
+        let replaced = &original_chunk
+            [shared_chunk_prefix.len()..original_chunk.len() - shared_chunk_suffix.len()];
+        let start_byte = chunk_start_byte + replacement_offset_in_chunk;
+        let old_end_byte = start_byte + replaced.len();
+        let new_end_byte = start_byte + replacement.len();
+        let newline_offsets_in_text = get_newline_offsets(text).collect_vec();
+        let newline_offsets_in_new_text = get_merged_newline_offsets(
+            &newline_offsets_in_text,
+            start_byte,
+            old_end_byte,
+            replacement,
+        );
+
+        (
+            InputEdit {
+                start_byte,
+                old_end_byte,
+                new_end_byte,
+                start_position: get_point_from_newline_offsets(
+                    start_byte,
+                    &newline_offsets_in_text,
+                ),
+                old_end_position: get_point_from_newline_offsets(
+                    old_end_byte,
+                    &newline_offsets_in_text,
+                ),
+                new_end_position: get_point_from_newline_offsets(
+                    new_end_byte,
+                    &newline_offsets_in_new_text,
+                ),
+            },
+            replacement,
+        )
+    }
+
+    #[test]
+    fn test_get_input_edit_and_replacement() {
+        assert_eq!(
+            get_input_edit_and_replacement(
+                r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#,
+                "baz::whee",
+                "baz::hello"
+            ),
+            (
+                InputEdit {
+                    start_byte: 37,
+                    old_end_byte: 41,
+                    new_end_byte: 42,
+                    start_position: Point { row: 2, column: 9 },
+                    old_end_position: Point { row: 2, column: 13 },
+                    new_end_position: Point { row: 2, column: 14 },
+                },
+                "hello"
+            )
+        );
+    }
 
     // #[test]
     // fn test_non_overlapping_accumulation() {
@@ -316,40 +371,14 @@ fn whee() {
     // use baz::whee;
     // use whee::whoa;
     // "#;
+    //     assert_eq!(
+    //         get_newline_offsets(source_text).collect_vec(),
+    //         [13, 27, 42, 58]
+    //     );
     //     let mut accumulated_edits = AccumulatedEdits::default();
     //     accumulated_edits.add_round_of_edits(&[
-    //         // use baz::whee; -> use baz::hello;
-    //         (
-    //             InputEdit {
-    //                 start_byte: 37,
-    //                 old_end_byte: 41,
-    //                 new_end_byte: 42,
-    //                 start_position: Point { row: 2, column: 9 },
-    //                 old_end_position: Point { row: 2, column: 13 },
-    //                 new_end_position: Point { row: 2, column: 13 },
-    //             },
-    //             "hello",
-    //         ),
-    //         // use foo::bar; -> use foo::b;
-    //         (
-    //             InputEdit {
-    //                 start_byte: 9,
-    //                 old_end_byte: 12,
-    //                 new_end_byte: 10,
-    //                 start_position: Point { row: 0, column: 9 },
-    //                 old_end_position: Point { row: 0, column: 12 },
-    //                 new_end_position: Point { row: 0, column: 10 },
-    //             },
-    //             "b",
-    //         ),
+    //         get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+    //         get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
     //     ]);
-    //     assert_eq!(
-    //         accumulated_edits.apply_to_text(source_text),
-    //         r#"use foo::bar;
-    // use bar::baz;
-    // use baz::whee;
-    // use whee::whoa;
-    // "#
-    //     );
     // }
 }
