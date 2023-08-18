@@ -62,7 +62,7 @@ impl IsEmpty for Fixer {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PendingFix {
     pub range: Range,
     pub replacement: String,

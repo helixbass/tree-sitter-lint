@@ -2,6 +2,7 @@ use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
 };
+use serde::Deserialize;
 
 use crate::{RuleTestValid, RuleTester};
 
@@ -150,6 +151,68 @@ fn test_rule_test_spread_cases_valid_just_str() {
                         fn bar() {}
                     "#,
                     errors => 1,
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_rule_test_null_option_value() {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Options {
+        field: Option<String>,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "null-option-value",
+            listeners => [
+                r#"
+                  (function_item) @c
+                "# => |node, context| {
+                    if self.field.is_none() {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            options_type => Options,
+            state => {
+                [per-run]
+                field: Option<String> = options.field.clone(),
+            },
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        field => "abc",
+                    }
+                },
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => 1,
+                },
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    errors => 1,
+                    options => {
+                        field => null,
+                    }
                 },
             ]
         },

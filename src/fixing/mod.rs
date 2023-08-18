@@ -177,6 +177,7 @@ fn compare_pending_fixes(a: &PendingFix, b: &PendingFix) -> Ordering {
 }
 
 fn has_overlapping_ranges(sorted_pending_fixes: &[PendingFix]) -> bool {
+    let mut prev_start = None;
     let mut prev_end = None;
     for pending_fix in sorted_pending_fixes {
         if let Some(prev_end) = prev_end {
@@ -184,12 +185,19 @@ fn has_overlapping_ranges(sorted_pending_fixes: &[PendingFix]) -> bool {
                 return true;
             }
         }
+        if let Some(prev_start) = prev_start {
+            if pending_fix.range.start_byte <= prev_start {
+                return true;
+            }
+        }
         prev_end = Some(pending_fix.range.end_byte);
+        prev_start = Some(pending_fix.range.start_byte);
     }
     false
 }
 
 fn get_non_overlapping_subset(sorted_pending_fixes: &[PendingFix]) -> Vec<PendingFix> {
+    let mut prev_start = None;
     let mut prev_end = None;
     sorted_pending_fixes
         .into_iter()
@@ -199,7 +207,13 @@ fn get_non_overlapping_subset(sorted_pending_fixes: &[PendingFix]) -> Vec<Pendin
                     return false;
                 }
             }
+            if let Some(prev_start) = prev_start {
+                if pending_fix.range.start_byte <= prev_start {
+                    return false;
+                }
+            }
             prev_end = Some(pending_fix.range.end_byte);
+            prev_start = Some(pending_fix.range.start_byte);
             true
         })
         .cloned()
@@ -215,7 +229,7 @@ fn get_sorted_non_conflicting_pending_fixes(
             pending_fixes_for_rule.sort_by(compare_pending_fixes);
             if has_overlapping_ranges(&pending_fixes_for_rule) {
                 if !rule_meta.allow_self_conflicting_fixes {
-                    panic!("Rule {:?} tried to apply self-conflicting fixes", rule_name);
+                    panic!("Rule {:?} tried to apply self-conflicting fixes: {pending_fixes_for_rule:#?}", rule_name);
                 }
                 pending_fixes_for_rule = get_non_overlapping_subset(&pending_fixes_for_rule);
             }
