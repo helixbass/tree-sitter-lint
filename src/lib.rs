@@ -73,6 +73,7 @@ pub extern crate clap;
 pub extern crate const_format;
 pub extern crate serde_json;
 pub extern crate serde_yaml;
+pub extern crate squalid;
 pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};

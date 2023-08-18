@@ -6,6 +6,7 @@ use std::{
 
 use clap::Parser;
 use inflector::Inflector;
+use itertools::Itertools;
 use quote::{format_ident, quote};
 use tracing::{debug, debug_span, instrument};
 
@@ -39,12 +40,11 @@ pub fn bootstrap_cli() {
     if should_regenerate_local_binary(&config_file_path, &path_to_local_release_binary, &args) {
         regenerate_local_binary(&local_binary_project_directory, &Path::new("..").join(".."));
     }
-    let mut command = Command::new(path_to_local_release_binary);
-    command.args(command_line_args.into_iter().skip(1));
-    if let Ok(rust_log) = env::var("RUST_LOG") {
-        command.env("RUST_LOG", rust_log);
-    }
-    let mut handle = command.spawn().unwrap();
+    let mut handle = Command::new(path_to_local_release_binary)
+        .args(command_line_args.into_iter().skip(1))
+        .envs(env::vars())
+        .spawn()
+        .unwrap();
     process::exit(handle.wait().unwrap().code().unwrap_or(1));
 }
 
@@ -193,6 +193,10 @@ fn get_local_binary_cargo_toml_contents(
                 .expect("Couldn't convert plugin path to string")
         ));
     }
+    contents.push_str("tracing = \"0.1.37\"\n");
+    contents.push_str("tracing-subscriber = \"0.3.17\"\n");
+    contents.push_str("tracing-chrome = \"0.7.1\"\n");
+
     contents.push_str("\n[patch.crates-io]\n");
     contents.push_str("tree-sitter = { git = \"https://github.com/tree-sitter/tree-sitter\", rev = \"c16b90d\" }\n\n");
     contents.push_str("[[bin]]\n");
@@ -205,7 +209,20 @@ fn get_local_binary_cargo_toml_contents(
 fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str) -> String {
     let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
     quote! {
+        use std::env;
+
+        use tracing_chrome::ChromeLayerBuilder;
+        use tracing_subscriber::prelude::*;
+        use tree_sitter_lint::squalid::NonEmpty;
+
         fn main() {
+            if env::var("TRACE_CHROME").ok().is_non_empty() {
+                let (chrome_layer, _guard) = ChromeLayerBuilder::new().include_args(true).build();
+                tracing_subscriber::registry().with(chrome_layer).init();
+            } else {
+                tracing_subscriber::fmt::init();
+            }
+
             #local_binary_crate_name::run_and_output();
         }
     }
@@ -232,42 +249,97 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
         quote!(vec![])
     };
 
-    let plugin_crates = parsed_config_file
-        .content
-        .plugins
-        .keys()
-        .map(|plugin_name| format_ident!("{}", get_plugin_crate_name(plugin_name).to_snake_case()));
+    let plugin_names = parsed_config_file.content.plugins.keys().collect_vec();
+
+    let plugin_crate_names = plugin_names
+        .iter()
+        .map(|plugin_name| get_plugin_crate_name(plugin_name).to_snake_case())
+        .collect_vec();
+
+    let plugin_crates = plugin_crate_names
+        .iter()
+        .map(|plugin_crate_name| format_ident!("{}", plugin_crate_name))
+        .collect_vec();
+
+    let plugin_crates_provided_instances_struct_field_names = plugin_crate_names
+        .iter()
+        .map(|plugin_crate_name| format_ident!("{}_provided_instances", plugin_crate_name))
+        .collect_vec();
+
+    let instance_provider_impl_get_body = if plugin_crate_names.is_empty() {
+        quote!(None)
+    } else {
+        let mut plugin_crates_provided_instances_struct_field_name =
+            &plugin_crates_provided_instances_struct_field_names[0];
+        let mut ret = quote! {
+            self.#plugin_crates_provided_instances_struct_field_name.get(type_id, file_run_context)
+        };
+        let mut index = 1;
+        while index < plugin_crates_provided_instances_struct_field_names.len() {
+            plugin_crates_provided_instances_struct_field_name =
+                &plugin_crates_provided_instances_struct_field_names[index];
+            ret = quote! {
+                self.#plugin_crates_provided_instances_struct_field_name.get(type_id, file_run_context)
+                    .or_else(|| {
+                        #ret
+                    })
+            };
+            index += 1;
+        }
+        ret
+    };
 
     quote! {
-        use std::{path::Path, sync::Arc};
+        use std::{any::TypeId, path::Path, sync::Arc};
 
         use tree_sitter_lint::{
-            clap::Parser, tree_sitter::Tree, tree_sitter_grep::{RopeOrSlice, SupportedLanguage}, Args, Config, MutRopeOrSlice,
-            Plugin, Rule, ViolationWithContext, lsp::{LocalLinter, self},
+            better_any::Tid,
+            clap::Parser, tree_sitter::Tree, tree_sitter_grep::{RopeOrSlice, SupportedLanguage},
+            Args, Config, FileRunContext, FromFileRunContextInstanceProvider,
+            FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
+            FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
+            ViolationWithContext, lsp::{LocalLinter, self},
         };
 
         pub fn run_and_output() {
-            tree_sitter_lint::run_and_output(args_to_config(Args::parse()));
+            tree_sitter_lint::run_and_output(
+                args_to_config(Args::parse()),
+                &FromFileRunContextInstanceProviderFactoryLocal,
+            );
         }
 
         pub fn run_for_slice<'a>(
             file_contents: impl Into<RopeOrSlice<'a>>,
-            tree: Option<&Tree>,
+            tree: Option<Tree>,
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
         ) -> Vec<ViolationWithContext> {
-            tree_sitter_lint::run_for_slice(file_contents, tree, path, args_to_config(args), language)
+            tree_sitter_lint::run_for_slice(
+                file_contents,
+                tree,
+                path,
+                args_to_config(args),
+                language,
+                &FromFileRunContextInstanceProviderFactoryLocal,
+            ).0
         }
 
         pub fn run_fixing_for_slice<'a>(
             file_contents: impl Into<MutRopeOrSlice<'a>>,
-            tree: Option<&Tree>,
+            tree: Option<Tree>,
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
         ) -> Vec<ViolationWithContext> {
-            tree_sitter_lint::run_fixing_for_slice(file_contents, tree, path, args_to_config(args), language)
+            tree_sitter_lint::run_fixing_for_slice(
+                file_contents,
+                tree,
+                path,
+                args_to_config(args),
+                language,
+                &FromFileRunContextInstanceProviderFactoryLocal,
+            ).0
         }
 
         struct LocalLinterConcrete;
@@ -276,7 +348,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             fn run_for_slice<'a>(
                 &self,
                 file_contents: impl Into<RopeOrSlice<'a>>,
-                tree: Option<&Tree>,
+                tree: Option<Tree>,
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
@@ -287,7 +359,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             fn run_fixing_for_slice<'a>(
                 &self,
                 file_contents: impl Into<MutRopeOrSlice<'a>>,
-                tree: Option<&Tree>,
+                tree: Option<Tree>,
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
@@ -310,6 +382,30 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
 
         fn all_standalone_rules() -> Vec<Arc<dyn Rule>> {
             #standalone_rules
+        }
+
+        struct FromFileRunContextInstanceProviderFactoryLocal;
+
+        impl FromFileRunContextInstanceProviderFactory for FromFileRunContextInstanceProviderFactoryLocal {
+            fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a> {
+                Box::new(FromFileRunContextInstanceProviderLocal {
+                    #(#plugin_crates_provided_instances_struct_field_names: #plugin_crates::ProvidedTypes::<'a>::once_lock_storage()),*
+                })
+            }
+        }
+
+        struct FromFileRunContextInstanceProviderLocal<'a> {
+            #(#plugin_crates_provided_instances_struct_field_names: <#plugin_crates::ProvidedTypes::<'a> as FromFileRunContextProvidedTypes::<'a>>::OnceLockStorage),*
+        }
+
+        impl<'a> FromFileRunContextInstanceProvider<'a> for FromFileRunContextInstanceProviderLocal<'a> {
+            fn get(
+                &self,
+                type_id: TypeId,
+                file_run_context: FileRunContext<'a, '_>,
+            ) -> Option<&dyn Tid<'a>> {
+                #instance_provider_impl_get_body
+            }
         }
     }.to_string()
 }
