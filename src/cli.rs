@@ -11,7 +11,7 @@ use quote::{format_ident, quote};
 use tracing::{debug, debug_span, instrument};
 
 use crate::{
-    config::{find_config_file, load_config_file, ParsedConfigFile},
+    config::{find_config_file, load_config_file, ParsedConfigFile, TreeSitterLintDependencySpec},
     Args,
 };
 
@@ -103,6 +103,10 @@ fn regenerate_local_binary(
         &parsed_config_file,
         has_local_rules,
         relative_path_from_local_binary_project_directory_to_project_directory,
+        parsed_config_file
+            .content
+            .tree_sitter_lint_dependency
+            .as_ref(),
     );
     fs::write(local_binary_project_cargo_toml_path, cargo_toml_contents)
         .expect("Couldn't write local binary project Cargo.toml");
@@ -165,6 +169,7 @@ fn get_local_binary_cargo_toml_contents(
     parsed_config_file: &ParsedConfigFile,
     has_local_rules: bool,
     relative_path_from_local_binary_project_directory_to_project_directory: &Path,
+    tree_sitter_lint_dependency: Option<&TreeSitterLintDependencySpec>,
 ) -> String {
     let mut contents = String::new();
     contents.push_str("[package]\n");
@@ -172,7 +177,16 @@ fn get_local_binary_cargo_toml_contents(
     contents.push_str("version = \"0.1.0\"\n");
     contents.push_str("edition = \"2021\"\n\n");
     contents.push_str("[dependencies]\n");
-    contents.push_str("tree-sitter-lint = { path = \"../..\" }\n");
+    contents.push_str(&format!(
+        "tree-sitter-lint = {{ path = \"{}\" }}\n",
+        tree_sitter_lint_dependency.map_or("../..".to_owned(), |tree_sitter_lint_dependency| {
+            relative_path_from_local_binary_project_directory_to_project_directory
+                .join(&tree_sitter_lint_dependency.path)
+                .to_str()
+                .unwrap()
+                .to_owned()
+        }),
+    ));
     if has_local_rules {
         contents.push_str(&format!(
             "local_rules = {{ path = \"../{}\" }}\n",

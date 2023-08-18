@@ -17,10 +17,12 @@ pub struct ParsedConfigFile {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ParsedConfigFileContent {
     pub plugins: HashMap<String, PluginSpecValue>,
     #[serde(rename = "rules")]
     rules_by_name: HashMap<String, RuleConfigurationValue>,
+    pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
 }
 
 impl ParsedConfigFileContent {
@@ -29,6 +31,11 @@ impl ParsedConfigFileContent {
             .iter()
             .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
     }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct TreeSitterLintDependencySpec {
+    pub path: PathBuf,
 }
 
 #[derive(Clone, Deserialize)]

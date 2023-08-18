@@ -15,7 +15,9 @@ use crate::{
 };
 
 mod config_file;
-pub use config_file::{find_config_file, load_config_file, ParsedConfigFile};
+pub use config_file::{
+    find_config_file, load_config_file, ParsedConfigFile, TreeSitterLintDependencySpec,
+};
 
 #[derive(Builder, Debug, Default, Parser)]
 #[builder(default, setter(into, strip_option))]
