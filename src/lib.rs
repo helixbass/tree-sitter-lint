@@ -4,7 +4,6 @@ mod aggregated_queries;
 mod cli;
 mod config;
 mod context;
-pub mod event_emitter;
 mod fixing;
 pub mod lsp;
 mod macros;
@@ -20,7 +19,6 @@ mod treesitter;
 mod violation;
 
 use std::{
-    cell::Cell,
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
@@ -38,8 +36,6 @@ pub use context::{
     QueryMatchContext, SkipOptions, SkipOptionsBuilder,
 };
 use dashmap::DashMap;
-use event_emitter::EventEmitterIndex;
-pub use event_emitter::{EventEmitter, EventEmitterFactory, EventTypeIndex};
 pub use fixing::Fixer;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use node::{compare_nodes, NodeExt};
@@ -108,9 +104,7 @@ pub fn run(
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
 ) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
-    let all_event_emitter_factories = config.get_all_event_emitter_factories();
-    let aggregated_queries =
-        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
     let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, None);
     let all_violations: DashMap<PathBuf, Vec<ViolationWithContext>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
@@ -122,9 +116,6 @@ pub fn run(
         |dir_entry, language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
-            let event_emitters =
-                aggregated_queries.get_event_emitter_instances(language, file_contents);
-            let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
             run_per_file(
                 FileRunContext::new(
                     dir_entry.path(),
@@ -137,8 +128,6 @@ pub fn run(
                     &instantiated_rules,
                     None,
                     &*from_file_run_context_instance_provider,
-                    &event_emitters,
-                    &current_event_emitter_index,
                 ),
                 |violations| {
                     all_violations
@@ -419,46 +408,6 @@ fn run_exit_node_listeners<'a, 'b>(
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
 ) {
-    for (event_emitter_index, event_emitter) in
-        file_run_context.event_emitters.into_iter().enumerate()
-    {
-        file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
-        if let Some(fired_event_type_indices) = {
-            let fired_event_type_indices = event_emitter.borrow_mut().leave_node(exited_node);
-            fired_event_type_indices
-        } {
-            for (event_index, fired_event_type_index) in
-                fired_event_type_indices.into_iter().enumerate()
-            {
-                event_emitter
-                    .borrow_mut()
-                    .processing_emitted_event_index(event_index);
-                if let Some(event_emitter_listener_indices) = file_run_context
-                    .aggregated_queries
-                    .get_event_emitter_listeners(
-                        file_run_context.language,
-                        event_emitter_index,
-                        fired_event_type_index,
-                    )
-                {
-                    event_emitter_listener_indices.for_each(
-                        |(instantiated_rule, rule_listener_index)| {
-                            run_single_on_query_match_callback(
-                                file_run_context,
-                                instantiated_rule,
-                                instantiated_per_file_rules,
-                                rule_listener_index,
-                                exited_node.into(),
-                                &mut on_found_violations,
-                                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
-                            );
-                        },
-                    );
-                }
-            }
-        }
-    }
-
     if let Some(kind_exit_rule_listener_indices) = file_run_context
         .aggregated_queries
         .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
@@ -485,46 +434,6 @@ fn run_enter_node_listeners<'a, 'b>(
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
     mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
 ) {
-    for (event_emitter_index, event_emitter) in
-        file_run_context.event_emitters.into_iter().enumerate()
-    {
-        file_run_context.set_current_event_emitter_index(Some(event_emitter_index));
-        if let Some(fired_event_type_indices) = {
-            let fired_event_type_indices = event_emitter.borrow_mut().enter_node(entered_node);
-            fired_event_type_indices
-        } {
-            for (event_index, fired_event_type_index) in
-                fired_event_type_indices.into_iter().enumerate()
-            {
-                event_emitter
-                    .borrow_mut()
-                    .processing_emitted_event_index(event_index);
-                if let Some(event_emitter_listener_indices) = file_run_context
-                    .aggregated_queries
-                    .get_event_emitter_listeners(
-                        file_run_context.language,
-                        event_emitter_index,
-                        fired_event_type_index,
-                    )
-                {
-                    event_emitter_listener_indices.for_each(
-                        |(instantiated_rule, rule_listener_index)| {
-                            run_single_on_query_match_callback(
-                                file_run_context,
-                                instantiated_rule,
-                                instantiated_per_file_rules,
-                                rule_listener_index,
-                                entered_node.into(),
-                                &mut on_found_violations,
-                                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
-                            );
-                        },
-                    );
-                }
-            }
-        }
-    }
-
     if let Some(kind_enter_rule_listener_indices) = file_run_context
         .aggregated_queries
         .get_kind_enter_rule_and_listener_indices(file_run_context.language, entered_node.kind())
@@ -615,9 +524,7 @@ pub fn run_for_slice<'a>(
         panic!("Use run_fixing_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let all_event_emitter_factories = config.get_all_event_emitter_factories();
-    let aggregated_queries =
-        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
@@ -628,8 +535,6 @@ pub fn run_for_slice<'a>(
     });
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
-    let event_emitters = aggregated_queries.get_event_emitter_instances(language, file_contents);
-    let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -648,8 +553,6 @@ pub fn run_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
-            &event_emitters,
-            &current_event_emitter_index,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -659,7 +562,6 @@ pub fn run_for_slice<'a>(
         },
     );
     drop(from_file_run_context_instance_provider);
-    drop(event_emitters);
     (violations.into_inner().unwrap(), instantiated_rules)
     // RunForSliceStatus {
     //     violations: violations.into_inner().unwrap(),
@@ -682,9 +584,7 @@ pub fn run_fixing_for_slice<'a>(
         panic!("Use run_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let all_event_emitter_factories = config.get_all_event_emitter_factories();
-    let aggregated_queries =
-        AggregatedQueries::new(&instantiated_rules, &all_event_emitter_factories);
+    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 
@@ -698,8 +598,6 @@ pub fn run_fixing_for_slice<'a>(
         Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
-    let event_emitters = aggregated_queries.get_event_emitter_instances(language, &file_contents);
-    let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
     run_per_file(
         FileRunContext::new(
             path,
@@ -718,8 +616,6 @@ pub fn run_fixing_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
-            &event_emitters,
-            &current_event_emitter_index,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -738,11 +634,9 @@ pub fn run_fixing_for_slice<'a>(
     let pending_fixes = pending_fixes.into_inner().unwrap();
     if pending_fixes.is_empty() {
         drop(from_file_run_context_instance_provider);
-        drop(event_emitters);
         return (violations, instantiated_rules);
     }
     drop(from_file_run_context_instance_provider);
-    drop(event_emitters);
     run_fixing_loop(
         &mut violations,
         file_contents,

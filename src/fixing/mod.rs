@@ -1,5 +1,4 @@
 use std::{
-    cell::Cell,
     cmp::Ordering,
     collections::HashMap,
     ops::Deref,
@@ -16,12 +15,12 @@ use tree_sitter_grep::{
 };
 
 use crate::{
-    aggregated_queries::AggregatedQueries, event_emitter::EventEmitterIndex,
-    rule::InstantiatedRule, run_per_file, Config, FileRunContext,
-    FromFileRunContextInstanceProviderFactory, MutRopeOrSlice, RuleMeta, RuleName,
+    aggregated_queries::AggregatedQueries, rule::InstantiatedRule, run_per_file, Config,
+    FileRunContext, FromFileRunContextInstanceProviderFactory, MutRopeOrSlice, RuleMeta, RuleName,
     ViolationWithContext,
 };
 
+#[allow(dead_code)]
 mod accumulated_edits;
 mod fixer;
 
@@ -79,9 +78,6 @@ pub fn run_fixing_loop<'a>(
 
         let from_file_run_context_instance_provider =
             from_file_run_context_instance_provider_factory.create();
-        let event_emitters =
-            aggregated_queries.get_event_emitter_instances(language, &file_contents);
-        let current_event_emitter_index: Cell<Option<EventEmitterIndex>> = Default::default();
         run_per_file(
             FileRunContext::new(
                 path,
@@ -98,8 +94,6 @@ pub fn run_fixing_loop<'a>(
                 instantiated_rules,
                 Some(&changed_ranges),
                 &*from_file_run_context_instance_provider,
-                &event_emitters,
-                &current_event_emitter_index,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);

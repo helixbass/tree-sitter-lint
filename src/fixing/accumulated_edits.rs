@@ -297,7 +297,7 @@ fn get_merged_newline_offsets(
                         has_passed_replacement = true;
                         push_all_replacement_newline_offsets(
                             &mut merged_newline_offsets,
-                            &replacement_newline_offsets,
+                            replacement_newline_offsets,
                             start_byte,
                         );
                         match newline_offset >= old_end_byte {
@@ -327,7 +327,7 @@ fn get_merged_newline_offsets(
                 false => {
                     push_all_replacement_newline_offsets(
                         &mut merged_newline_offsets,
-                        &replacement_newline_offsets,
+                        replacement_newline_offsets,
                         start_byte,
                     );
                     return merged_newline_offsets;

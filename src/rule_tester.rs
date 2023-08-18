@@ -10,8 +10,7 @@ use crate::{
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    EventEmitterFactory, FileRunContext, FromFileRunContextInstanceProviderFactory, Plugin,
-    RuleConfiguration,
+    FileRunContext, FromFileRunContextInstanceProviderFactory, Plugin, RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -93,22 +92,6 @@ impl RuleTester {
             plugins,
         )
         .run_tests()
-    }
-
-    pub fn run_with_event_emitter(
-        rule: Arc<dyn Rule>,
-        rule_tests: RuleTests,
-        event_emitter_factory: Arc<dyn EventEmitterFactory>,
-    ) {
-        Self::run_with_plugins(
-            rule,
-            rule_tests,
-            vec![Plugin {
-                name: "dummy-event-emitter-plugin".to_owned(),
-                rules: Default::default(),
-                event_emitter_factories: vec![event_emitter_factory],
-            }],
-        )
     }
 
     fn run_tests(&self) {
