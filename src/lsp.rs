@@ -1,7 +1,7 @@
-use std::{borrow::Cow, ops, path::Path};
+use std::{borrow::Cow, collections::HashMap, ops, path::Path};
 
-use dashmap::DashMap;
 use text_diff::Difference;
+use tokio::sync::Mutex;
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
@@ -48,7 +48,7 @@ pub trait LocalLinter: Send + Sync {
 struct Backend<TLocalLinter> {
     client: Client,
     local_linter: TLocalLinter,
-    per_file: DashMap<Url, PerFileState>,
+    per_file: Mutex<HashMap<Url, PerFileState>>,
 }
 
 impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
@@ -61,10 +61,14 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
     }
 
     async fn run_linting_and_report_diagnostics(&self, uri: &Url) {
-        let per_file_state = self.per_file.get(uri).unwrap();
+        let (file_contents, tree) = {
+            let per_file = self.per_file.lock().await;
+            let per_file_state = per_file.get(uri).unwrap();
+            (per_file_state.contents.clone(), per_file_state.tree.clone())
+        };
         let violations = self.local_linter.run_for_slice(
-            &per_file_state.contents,
-            Some(per_file_state.tree.clone()),
+            &file_contents,
+            Some(tree),
             "dummy_path",
             Default::default(),
             SupportedLanguage::Rust,
@@ -76,10 +80,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                     .into_iter()
                     .map(|violation| Diagnostic {
                         message: violation.message().into_owned(),
-                        range: tree_sitter_range_to_lsp_range(
-                            &per_file_state.contents,
-                            violation.range,
-                        ),
+                        range: tree_sitter_range_to_lsp_range(&file_contents, violation.range),
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: Some(NumberOrString::String(violation.rule.name.clone())),
                         source: Some("tree-sitter-lint".to_owned()),
@@ -92,11 +93,15 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
     }
 
     async fn run_fixing_and_report_fixes(&self, uri: &Url) {
-        let per_file_state = self.per_file.get(uri).unwrap();
-        let mut cloned_contents = per_file_state.contents.clone();
+        let (file_contents, tree) = {
+            let per_file = self.per_file.lock().await;
+            let per_file_state = per_file.get(uri).unwrap();
+            (per_file_state.contents.clone(), per_file_state.tree.clone())
+        };
+        let mut cloned_contents = file_contents.clone();
         self.local_linter.run_fixing_for_slice(
             &mut cloned_contents,
-            Some(per_file_state.tree.clone()),
+            Some(tree),
             "dummy_path",
             ArgsBuilder::default().fix(true).build().unwrap(),
             SupportedLanguage::Rust,
@@ -104,7 +109,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
         self.client
             .apply_edit(WorkspaceEdit {
                 document_changes: Some(DocumentChanges::Edits(vec![get_text_document_edits(
-                    &per_file_state.contents,
+                    &file_contents,
                     &cloned_contents,
                     uri,
                 )])),
@@ -145,13 +150,12 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let contents: Rope = (&*params.text_document.text).into();
-        self.per_file.insert(
-            params.text_document.uri.clone(),
-            PerFileState {
-                tree: parse_from_scratch(&contents),
-                contents,
-            },
-        );
+        let uri = params.text_document.uri.clone();
+        let tree = parse_from_scratch(&contents);
+        self.per_file
+            .lock()
+            .await
+            .insert(uri, PerFileState { tree, contents });
 
         self.run_linting_and_report_diagnostics(&params.text_document.uri)
             .await;
@@ -159,8 +163,9 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         {
-            let mut file_state = self
-                .per_file
+            // TODO: refine mutex-holding here?
+            let mut per_file = self.per_file.lock().await;
+            let file_state = per_file
                 .get_mut(&params.text_document.uri)
                 .expect("Changed file wasn't loaded");
             for content_change in &params.content_changes {
