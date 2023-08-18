@@ -217,6 +217,7 @@ fn get_local_binary_cargo_toml_contents(
     contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_PROJECT_NAME));
     contents.push_str("[[bin]]\n");
     contents.push_str(&format!("name = \"{}\"\n\n", LOCAL_BINARY_LSP_NAME));
+    contents.push_str("[workspace]\n");
     contents
 }
 
