@@ -313,7 +313,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             Args, Config, FileRunContext, FromFileRunContextInstanceProvider,
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
-            ViolationWithContext, lsp::{LocalLinter, self},
+            ViolationWithContext, lsp::{LocalLinter, self}, FixingForSliceRunStatus,
         };
 
         pub fn run_and_output() {
@@ -346,7 +346,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
-        ) -> Vec<ViolationWithContext> {
+        ) -> FixingForSliceRunStatus {
             tree_sitter_lint::run_fixing_for_slice(
                 file_contents,
                 tree,
@@ -354,7 +354,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 args_to_config(args),
                 language,
                 &FromFileRunContextInstanceProviderFactoryLocal,
-            ).0
+            )
         }
 
         struct LocalLinterConcrete;
@@ -378,7 +378,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
-            ) -> Vec<ViolationWithContext> {
+            ) -> FixingForSliceRunStatus {
                 run_fixing_for_slice(file_contents, tree, path, args, language)
             }
         }

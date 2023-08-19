@@ -1,8 +1,12 @@
 use std::iter::Peekable;
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use squalid::{OptionExt, VecExt};
-use tree_sitter_grep::tree_sitter::{InputEdit, Point};
+use tree_sitter_grep::{
+    ropey::Rope,
+    tree_sitter::{InputEdit, Point},
+    RopeOrSlice,
+};
 
 pub struct AccumulatedEdits {
     original_newline_offsets: Vec<usize>,
@@ -17,9 +21,10 @@ impl AccumulatedEdits {
         }
     }
 
-    pub fn add_round_of_edits(&mut self, edits: &[(InputEdit, &str)]) {
+    pub fn add_round_of_edits(&mut self, edits: &[(InputEdit, impl AsRef<str>)]) {
         let mut prev_start_byte: Option<usize> = Default::default();
         for (input_edit, replacement) in edits {
+            let replacement = replacement.as_ref();
             if let Some(prev_start_byte) = prev_start_byte {
                 assert!(
                     input_edit.old_end_byte <= prev_start_byte,
@@ -240,6 +245,48 @@ fn get_point_from_newline_offsets(start_byte: usize, newline_offsets: &[usize]) 
     }
 }
 
+pub fn get_newline_offsets_rope_or_slice(
+    rope_or_slice: RopeOrSlice<'_>,
+) -> impl Iterator<Item = usize> + '_ {
+    match rope_or_slice {
+        RopeOrSlice::Slice(slice) => Either::Left(
+            slice
+                .iter()
+                .enumerate()
+                .filter_map(|(index, byte)| (*byte == b'\n').then_some(index)),
+        ),
+        RopeOrSlice::Rope(rope) => Either::Right(RopeNewlineOffsetsIterator::new(rope)),
+    }
+}
+
+struct RopeNewlineOffsetsIterator<'a> {
+    rope: &'a Rope,
+    next_line_index: usize,
+    num_lines: usize,
+}
+
+impl<'a> RopeNewlineOffsetsIterator<'a> {
+    fn new(rope: &'a Rope) -> Self {
+        Self {
+            rope,
+            next_line_index: Default::default(),
+            num_lines: rope.len_lines(),
+        }
+    }
+}
+
+impl<'a> Iterator for RopeNewlineOffsetsIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        (self.next_line_index < self.num_lines - 1).then(|| {
+            let ret = self.rope.line_to_byte(self.next_line_index + 1) - 1;
+            self.next_line_index += 1;
+            ret
+        })
+    }
+}
+
 fn get_newline_offsets(text: &str) -> impl Iterator<Item = usize> + '_ {
     text.bytes()
         .enumerate()
@@ -338,6 +385,7 @@ fn get_merged_newline_offsets(
     }
 }
 
+#[allow(dead_code)]
 fn get_merged_newline_offsets_from_replacement(
     newline_offsets: &[usize],
     start_byte: usize,
@@ -380,6 +428,7 @@ fn get_input_edit(
     }
 }
 
+#[allow(dead_code)]
 fn get_input_edit_from_replacement(
     start_byte: usize,
     original_len: usize,

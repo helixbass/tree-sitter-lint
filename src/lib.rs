@@ -59,7 +59,7 @@ use tree_sitter::Tree;
 use tree_sitter_grep::{
     get_matches, get_parser,
     streaming_iterator::StreamingIterator,
-    tree_sitter::{Node, QueryMatch},
+    tree_sitter::{InputEdit, Node, QueryMatch},
     Parseable, RopeOrSlice, SupportedLanguage,
 };
 pub use treesitter::{
@@ -578,7 +578,7 @@ pub fn run_fixing_for_slice<'a>(
     config: Config,
     language: SupportedLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
+) -> FixingForSliceRunStatus {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if !config.fix {
@@ -635,10 +635,14 @@ pub fn run_fixing_for_slice<'a>(
     let pending_fixes = pending_fixes.into_inner().unwrap();
     if pending_fixes.is_empty() {
         drop(from_file_run_context_instance_provider);
-        return (violations, instantiated_rules);
+        return FixingForSliceRunStatus {
+            violations,
+            instantiated_rules,
+            edits: Default::default(),
+        };
     }
     drop(from_file_run_context_instance_provider);
-    run_fixing_loop(
+    let input_edits = run_fixing_loop(
         &mut violations,
         file_contents,
         pending_fixes,
@@ -650,7 +654,19 @@ pub fn run_fixing_for_slice<'a>(
         tree,
         from_file_run_context_instance_provider_factory,
     );
-    (violations, instantiated_rules)
+    FixingForSliceRunStatus {
+        violations,
+        instantiated_rules,
+        edits: input_edits,
+    }
+}
+
+pub struct FixingForSliceRunStatus {
+    violations: Vec<ViolationWithContext>,
+    #[allow(dead_code)]
+    instantiated_rules: Vec<InstantiatedRule>,
+    #[allow(dead_code)]
+    edits: Vec<InputEdit>,
 }
 
 fn get_tree_sitter_grep_args(

@@ -32,7 +32,6 @@ squalid = { git = "https://github.com/helixbass/squalid", rev = "bfefff7" }
 quote = "1.0.32"
 Inflector = "0.11.4"
 dashmap = "5.5.0"
-text-diff = "0.4.0"
 tower-lsp = "0.19.0"
 tokio = { version = "1.29.1", features = ["full"] }
 better_any = "0.2.0"

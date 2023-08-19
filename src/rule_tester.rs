@@ -10,7 +10,8 @@ use crate::{
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    FileRunContext, FromFileRunContextInstanceProviderFactory, Plugin, RuleConfiguration,
+    FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
+    RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -217,7 +218,7 @@ impl RuleTester {
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
         let mut file_contents = invalid_test.code.clone().into_bytes();
-        let (violations, _) = crate::run_fixing_for_slice(
+        let FixingForSliceRunStatus { violations, .. } = crate::run_fixing_for_slice(
             &mut file_contents,
             None,
             "tmp.rs",

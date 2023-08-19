@@ -20,11 +20,13 @@ use crate::{
     ViolationWithContext,
 };
 
-#[allow(dead_code)]
 mod accumulated_edits;
 mod fixer;
 
+pub use accumulated_edits::AccumulatedEdits;
 pub use fixer::{Fixer, PendingFix};
+
+use self::accumulated_edits::get_newline_offsets_rope_or_slice;
 
 const MAX_FIX_ITERATIONS: usize = 10;
 
@@ -41,19 +43,23 @@ pub fn run_fixing_loop<'a>(
     instantiated_rules: &[InstantiatedRule],
     tree: Tree,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) {
+) -> Vec<InputEdit> {
     let mut file_contents = file_contents.into();
     let mut old_tree = tree;
+    let mut accumulated_edits = AccumulatedEdits::new(
+        get_newline_offsets_rope_or_slice(RopeOrSlice::from(&file_contents)).collect(),
+    );
     for _ in 0..MAX_FIX_ITERATIONS {
         let _span = debug_span!("single fixing loop pass").entered();
 
-        let input_edits = apply_fixes(&mut file_contents, pending_fixes);
-        for input_edit in &input_edits {
+        let input_edits_and_replacements = apply_fixes(&mut file_contents, pending_fixes);
+        for (input_edit, _) in &input_edits_and_replacements {
             old_tree.edit(input_edit);
         }
+        accumulated_edits.add_round_of_edits(&input_edits_and_replacements);
 
         if config.single_fixing_pass {
-            return;
+            return accumulated_edits.get_input_edits();
         }
 
         pending_fixes = Default::default();
@@ -111,13 +117,14 @@ pub fn run_fixing_loop<'a>(
             break;
         }
     }
+    accumulated_edits.get_input_edits()
 }
 
 #[instrument(level = "debug", skip_all)]
 pub fn apply_fixes(
     file_contents: &mut MutRopeOrSlice,
     pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
-) -> Vec<InputEdit> {
+) -> Vec<(InputEdit, String)> {
     let non_conflicting_sorted_pending_fixes =
         get_sorted_non_conflicting_pending_fixes(pending_fixes);
     non_conflicting_sorted_pending_fixes
@@ -125,7 +132,7 @@ pub fn apply_fixes(
         .rev()
         .map(|PendingFix { range, replacement }| {
             file_contents.splice(range.start_byte..range.end_byte, &replacement);
-            get_input_edit(range, &replacement)
+            (get_input_edit(range, &replacement), replacement)
         })
         .collect()
 }
