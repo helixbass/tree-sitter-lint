@@ -281,7 +281,6 @@ fn tree_sitter_range_to_lsp_range(file_contents: &Rope, range: tree_sitter::Rang
     byte_offset_range_to_lsp_range(file_contents, range.start_byte..range.end_byte)
 }
 
-
 fn get_text_document_edits(
     edits: &[InputEdit],
     uri: &Url,
@@ -295,22 +294,26 @@ fn get_text_document_edits(
         edits: {
             let mut adjustment: isize = 0;
             edits
-            .into_iter()
-            .map(|edit| {
-                let ret = TextEdit {
-                range: Range {
-                    start: point_to_position(edit.start_position),
-                    end: point_to_position(edit.old_end_position),
-                },
-                new_text: new_contents
-                    .slice(usize::try_from(edit.start_byte as isize + adjustment).unwrap()..usize::try_from(edit.new_end_byte as isize + adjustment).unwrap())
-                    .into(),
-            };
-                adjustment += edit.new_end_byte as isize - edit.old_end_byte as isize;
-                ret
-            })
-            .map(OneOf::Left)
-            .collect()
+                .into_iter()
+                .map(|edit| {
+                    let ret = TextEdit {
+                        range: Range {
+                            start: point_to_position(edit.start_position),
+                            end: point_to_position(edit.old_end_position),
+                        },
+                        new_text: new_contents
+                            .slice(
+                                usize::try_from(edit.start_byte as isize + adjustment).unwrap()
+                                    ..usize::try_from(edit.new_end_byte as isize + adjustment)
+                                        .unwrap(),
+                            )
+                            .into(),
+                    };
+                    adjustment += edit.new_end_byte as isize - edit.old_end_byte as isize;
+                    ret
+                })
+                .map(OneOf::Left)
+                .collect()
         },
     }
 }
