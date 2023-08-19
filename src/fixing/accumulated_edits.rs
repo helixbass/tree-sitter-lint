@@ -1,13 +1,14 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, ops};
 
 use itertools::{Either, Itertools};
 use squalid::{OptionExt, VecExt};
 use tree_sitter_grep::{
     ropey::Rope,
-    tree_sitter::{InputEdit, Point},
+    tree_sitter::{InputEdit, Point, Range},
     RopeOrSlice,
 };
 
+#[derive(Clone, Debug)]
 pub struct AccumulatedEdits {
     original_newline_offsets: Vec<usize>,
     edits: Vec<AccumulatedEdit>,
@@ -214,14 +215,262 @@ impl AccumulatedEdits {
             })
             .collect()
     }
+
+    pub fn get_new_ranges(&self) -> Vec<Range> {
+        let mut adjustment_so_far: isize = 0;
+        let mut next_original_newline_offset_index = 0;
+        let mut newlines_adjustment_so_far: isize = 0;
+        let mut last_seen_replacement_newline_offset_from_end_of_its_replacement_chunk: Option<
+            usize,
+        > = Default::default();
+        self.edits
+            .iter()
+            .enumerate()
+            .map(|(index, edit)| {
+                let mut most_recent_passed_newline_was_original = false;
+                while self
+                    .original_newline_offsets
+                    .get(next_original_newline_offset_index)
+                    .matches(|&newline_offset| newline_offset < edit.original_start_byte)
+                {
+                    most_recent_passed_newline_was_original = true;
+                    next_original_newline_offset_index += 1;
+                }
+                let bytes_from_preceding_newline_offset_to_edit_start =
+                    match most_recent_passed_newline_was_original
+                        || last_seen_replacement_newline_offset_from_end_of_its_replacement_chunk
+                            .is_none()
+                    {
+                        true => {
+                            let preceding_newline_offset = match next_original_newline_offset_index
+                            {
+                                0 => 0,
+                                next_original_newline_offset_index => {
+                                    self.original_newline_offsets
+                                        [next_original_newline_offset_index - 1]
+                                }
+                            };
+                            edit.original_start_byte - preceding_newline_offset
+                        }
+                        false => {
+                            assert!(index > 0);
+                            let original_end_of_preceding_edit =
+                                self.edits[index - 1].original_end_byte();
+                            let gap_between_this_edit_and_preceding_edit =
+                                edit.original_start_byte - original_end_of_preceding_edit;
+                            last_seen_replacement_newline_offset_from_end_of_its_replacement_chunk
+                                .unwrap()
+                                + gap_between_this_edit_and_preceding_edit
+                        }
+                    };
+                let start_row = usize::try_from(
+                    (next_original_newline_offset_index as isize) + newlines_adjustment_so_far,
+                )
+                .unwrap();
+                let ret = Range {
+                    start_byte: usize::try_from(
+                        edit.original_start_byte as isize + adjustment_so_far,
+                    )
+                    .unwrap(),
+                    end_byte: usize::try_from(
+                        (edit.original_start_byte + edit.replacement_len) as isize
+                            + adjustment_so_far,
+                    )
+                    .unwrap(),
+                    start_point: Point {
+                        row: start_row,
+                        column: bytes_from_preceding_newline_offset_to_edit_start,
+                    },
+                    end_point: Point {
+                        row: start_row + edit.replacement_newline_offsets.len(),
+                        column: if let Some(last_edit_replacement_newline_offset) =
+                            edit.replacement_newline_offsets.last()
+                        {
+                            edit.replacement_len - last_edit_replacement_newline_offset
+                        } else {
+                            bytes_from_preceding_newline_offset_to_edit_start + edit.replacement_len
+                        },
+                    },
+                };
+                newlines_adjustment_so_far += {
+                    let mut num_original_newlines_replaced_by_this_edit = 0;
+                    while self.original_newline_offsets[next_original_newline_offset_index]
+                        < edit.original_end_byte()
+                    {
+                        num_original_newlines_replaced_by_this_edit += 1;
+                        next_original_newline_offset_index += 1;
+                    }
+                    edit.replacement_newline_offsets.len() as isize
+                        - num_original_newlines_replaced_by_this_edit as isize
+                };
+                if let Some(last_edit_replacement_newline_offset) =
+                    edit.replacement_newline_offsets.last()
+                {
+                    last_seen_replacement_newline_offset_from_end_of_its_replacement_chunk =
+                        Some(edit.replacement_len - last_edit_replacement_newline_offset);
+                }
+                adjustment_so_far += edit.replacement_len as isize - edit.original_len as isize;
+                ret
+            })
+            .collect()
+    }
+
+    pub fn get_old_ranges_and_new_byte_ranges(&self) -> Vec<(Range, ops::Range<usize>)> {
+        let mut adjustment: isize = 0;
+        let mut next_original_newline_offset_index = 0;
+        self.edits
+            .iter()
+            .map(|edit| {
+                while self
+                    .original_newline_offsets
+                    .get(next_original_newline_offset_index)
+                    .matches(|&newline_offset| newline_offset < edit.original_start_byte)
+                {
+                    next_original_newline_offset_index += 1;
+                }
+                let start_column = match next_original_newline_offset_index {
+                    0 => 0,
+                    next_original_newline_offset_index => {
+                        edit.original_end_byte()
+                            - self.original_newline_offsets[next_original_newline_offset_index]
+                    }
+                };
+                let ret = (
+                    Range {
+                        start_byte: edit.original_start_byte,
+                        end_byte: edit.original_end_byte(),
+                        start_point: Point {
+                            row: next_original_newline_offset_index,
+                            column: match next_original_newline_offset_index {
+                                0 => 0,
+                                next_original_newline_offset_index => {
+                                    edit.original_end_byte()
+                                        - self.original_newline_offsets
+                                            [next_original_newline_offset_index]
+                                }
+                            },
+                        },
+                        end_point: Point {
+                            row: next_original_newline_offset_index
+                                + edit.replacement_newline_offsets.len(),
+                            column: if let Some(last_edit_replacement_newline_offset) =
+                                edit.replacement_newline_offsets.last()
+                            {
+                                edit.replacement_len - last_edit_replacement_newline_offset
+                            } else {
+                                start_column + edit.replacement_len
+                            },
+                        },
+                    },
+                    usize::try_from(edit.original_start_byte as isize + adjustment).unwrap()
+                        ..usize::try_from(edit.new_end_byte() as isize + adjustment).unwrap(),
+                );
+                adjustment += edit.replacement_len as isize - edit.original_len as isize;
+                ret
+            })
+            .collect()
+    }
+
+    pub fn get_new_line_range(&self, old_range: ops::Range<usize>) -> ops::Range<usize> {
+        let mut next_original_newline_offset_index = 0;
+        let mut newlines_adjustment_so_far: isize = 0;
+        for edit in &self.edits {
+            if edit.original_end_byte() < old_range.start {
+                while self
+                    .original_newline_offsets
+                    .get(next_original_newline_offset_index)
+                    .matches(|&newline_offset| newline_offset < edit.original_start_byte)
+                {
+                    next_original_newline_offset_index += 1;
+                }
+                newlines_adjustment_so_far += {
+                    let mut num_original_newlines_replaced_by_this_edit = 0;
+                    while self.original_newline_offsets[next_original_newline_offset_index]
+                        < edit.original_end_byte()
+                    {
+                        num_original_newlines_replaced_by_this_edit += 1;
+                        next_original_newline_offset_index += 1;
+                    }
+                    edit.replacement_newline_offsets.len() as isize
+                        - num_original_newlines_replaced_by_this_edit as isize
+                };
+                continue;
+            }
+            if edit.original_start_byte >= old_range.end {
+                break;
+            }
+            return usize::try_from(
+                next_original_newline_offset_index as isize + newlines_adjustment_so_far,
+            )
+            .unwrap()..{
+                usize::try_from(
+                    (edit.replacement_newline_offsets.len()
+                        + match old_range.end > edit.original_end_byte() {
+                            false => 0,
+                            true => {
+                                while self
+                                    .original_newline_offsets
+                                    .get(next_original_newline_offset_index)
+                                    .matches(|&newline_offset| {
+                                        newline_offset < edit.original_end_byte()
+                                    })
+                                {
+                                    next_original_newline_offset_index += 1;
+                                }
+                                let mut num_newlines_past_end_of_edit = 0;
+                                while self
+                                    .original_newline_offsets
+                                    .get(next_original_newline_offset_index)
+                                    .matches(|&newline_offset| {
+                                        newline_offset < edit.original_end_byte()
+                                    })
+                                {
+                                    next_original_newline_offset_index += 1;
+                                    num_newlines_past_end_of_edit += 1;
+                                }
+                                num_newlines_past_end_of_edit
+                            }
+                        }) as isize
+                        + newlines_adjustment_so_far,
+                )
+                .unwrap()
+            };
+        }
+        usize::try_from(next_original_newline_offset_index as isize + newlines_adjustment_so_far)
+            .unwrap()
+            ..usize::try_from(
+                {
+                    while self
+                        .original_newline_offsets
+                        .get(next_original_newline_offset_index)
+                        .matches(|&newline_offset| newline_offset < old_range.end)
+                    {
+                        next_original_newline_offset_index += 1;
+                    }
+                    next_original_newline_offset_index
+                } as isize
+                    + newlines_adjustment_so_far,
+            )
+            .unwrap()
+    }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AccumulatedEdit {
     original_start_byte: usize,
     original_len: usize,
     replacement_len: usize,
     replacement_newline_offsets: Vec<usize>,
+}
+
+impl AccumulatedEdit {
+    pub fn original_end_byte(&self) -> usize {
+        self.original_start_byte + self.original_len
+    }
+
+    pub fn new_end_byte(&self) -> usize {
+        self.original_start_byte + self.replacement_len
+    }
 }
 
 #[derive(Debug)]
@@ -245,9 +494,10 @@ fn get_point_from_newline_offsets(start_byte: usize, newline_offsets: &[usize]) 
     }
 }
 
-pub fn get_newline_offsets_rope_or_slice(
-    rope_or_slice: RopeOrSlice<'_>,
-) -> impl Iterator<Item = usize> + '_ {
+pub fn get_newline_offsets_rope_or_slice<'a>(
+    rope_or_slice: impl Into<RopeOrSlice<'a>>,
+) -> impl Iterator<Item = usize> + 'a {
+    let rope_or_slice = rope_or_slice.into();
     match rope_or_slice {
         RopeOrSlice::Slice(slice) => Either::Left(
             slice

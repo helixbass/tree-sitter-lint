@@ -36,7 +36,7 @@ use crate::{
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, Fixer, SourceTextProvider,
+    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider,
 };
 
 pub struct FileRunContext<'a, 'b> {
@@ -50,7 +50,7 @@ pub struct FileRunContext<'a, 'b> {
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
-    pub run_kind: RunKind,
+    pub run_kind: RunKind<'a>,
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -86,7 +86,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         instantiated_rules: &'a [InstantiatedRule],
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
-        run_kind: RunKind,
+        run_kind: RunKind<'a>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -481,14 +481,19 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum RunKind {
+#[derive(Copy, Clone)]
+pub enum RunKind<'a> {
     CommandLineNonfixing,
     CommandLineFixingInitial,
     CommandLineFixingFixingLoop,
     NonfixingForSlice,
-    FixingForSliceInitial,
-    FixingForSliceFixingLoop,
+    FixingForSliceInitial {
+        context: &'a FixingForSliceRunContext,
+    },
+    FixingForSliceFixingLoop {
+        context: &'a FixingForSliceRunContext,
+        all_violations_from_last_pass: &'a [ViolationWithContext],
+    },
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {

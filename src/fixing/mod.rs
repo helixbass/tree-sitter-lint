@@ -23,10 +23,8 @@ use crate::{
 mod accumulated_edits;
 mod fixer;
 
-pub use accumulated_edits::AccumulatedEdits;
+pub use accumulated_edits::{get_newline_offsets_rope_or_slice, AccumulatedEdits};
 pub use fixer::{Fixer, PendingFix};
-
-use self::accumulated_edits::get_newline_offsets_rope_or_slice;
 
 const MAX_FIX_ITERATIONS: usize = 10;
 
@@ -43,8 +41,8 @@ pub fn run_fixing_loop<'a>(
     instantiated_rules: &[InstantiatedRule],
     tree: Tree,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-    run_kind: RunKind,
-) -> Vec<InputEdit> {
+    initial_run_kind: RunKind,
+) -> AccumulatedEdits {
     let mut file_contents = file_contents.into();
     let mut old_tree = tree;
     let mut accumulated_edits = AccumulatedEdits::new(
@@ -60,10 +58,11 @@ pub fn run_fixing_loop<'a>(
         accumulated_edits.add_round_of_edits(&input_edits_and_replacements);
 
         if config.single_fixing_pass {
-            return accumulated_edits.get_input_edits();
+            return accumulated_edits;
         }
 
         pending_fixes = Default::default();
+        let all_violations_from_last_pass = violations.clone();
         if config.report_fixed_violations {
             *violations = violations
                 .iter()
@@ -101,7 +100,15 @@ pub fn run_fixing_loop<'a>(
                 instantiated_rules,
                 Some(&changed_ranges),
                 &*from_file_run_context_instance_provider,
-                run_kind,
+                match initial_run_kind {
+                    RunKind::FixingForSliceInitial { context } => {
+                        RunKind::FixingForSliceFixingLoop {
+                            context,
+                            all_violations_from_last_pass: &all_violations_from_last_pass,
+                        }
+                    }
+                    _ => RunKind::CommandLineFixingFixingLoop,
+                },
             ),
             |reported_violations| {
                 violations.extend(reported_violations);
@@ -119,7 +126,7 @@ pub fn run_fixing_loop<'a>(
             break;
         }
     }
-    accumulated_edits.get_input_edits()
+    accumulated_edits
 }
 
 #[instrument(level = "debug", skip_all)]

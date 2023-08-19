@@ -238,6 +238,7 @@ impl RuleTester {
                 .unwrap(),
             self.language,
             &*self.from_file_run_context_instance_provider_factory,
+            Default::default(),
         );
 
         if !self.check_that_violations_match_expected(&violations, invalid_test) {

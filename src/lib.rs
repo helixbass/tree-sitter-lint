@@ -36,8 +36,8 @@ pub use context::{
     QueryMatchContext, RunKind, SkipOptions, SkipOptionsBuilder,
 };
 use dashmap::DashMap;
-pub use fixing::Fixer;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
+pub use fixing::{AccumulatedEdits, Fixer};
 pub use node::{compare_nodes, NodeExt};
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
@@ -59,7 +59,7 @@ use tree_sitter::Tree;
 use tree_sitter_grep::{
     get_matches, get_parser,
     streaming_iterator::StreamingIterator,
-    tree_sitter::{InputEdit, Node, QueryMatch},
+    tree_sitter::{Node, QueryMatch},
     Parseable, RopeOrSlice, SupportedLanguage,
 };
 pub use treesitter::{
@@ -215,7 +215,7 @@ pub fn run(
                     &instantiated_rules,
                     tree,
                     from_file_run_context_instance_provider_factory,
-                    RunKind::CommandLineFixingFixingLoop,
+                    RunKind::CommandLineFixingInitial,
                 );
                 (path, (file_contents, violations))
             },
@@ -585,6 +585,7 @@ pub fn run_fixing_for_slice<'a>(
     config: Config,
     language: SupportedLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
+    context: FixingForSliceRunContext,
 ) -> FixingForSliceRunStatus {
     let file_contents = file_contents.into();
     let path = path.as_ref();
@@ -624,7 +625,7 @@ pub fn run_fixing_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
-            RunKind::FixingForSliceInitial,
+            RunKind::FixingForSliceInitial { context: &context },
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -650,7 +651,7 @@ pub fn run_fixing_for_slice<'a>(
         };
     }
     drop(from_file_run_context_instance_provider);
-    let input_edits = run_fixing_loop(
+    let accumulated_edits = run_fixing_loop(
         &mut violations,
         file_contents,
         pending_fixes,
@@ -661,12 +662,12 @@ pub fn run_fixing_for_slice<'a>(
         &instantiated_rules,
         tree,
         from_file_run_context_instance_provider_factory,
-        RunKind::FixingForSliceFixingLoop,
+        RunKind::FixingForSliceInitial { context: &context },
     );
     FixingForSliceRunStatus {
         violations,
         instantiated_rules,
-        edits: input_edits,
+        edits: Some(accumulated_edits),
     }
 }
 
@@ -675,7 +676,13 @@ pub struct FixingForSliceRunStatus {
     #[allow(dead_code)]
     instantiated_rules: Vec<InstantiatedRule>,
     #[allow(dead_code)]
-    edits: Vec<InputEdit>,
+    edits: Option<AccumulatedEdits>,
+}
+
+#[derive(Default)]
+pub struct FixingForSliceRunContext {
+    pub last_fixing_run_violations: Option<Vec<ViolationWithContext>>,
+    pub edits_since_last_fixing_run: Option<AccumulatedEdits>,
 }
 
 fn get_tree_sitter_grep_args(
