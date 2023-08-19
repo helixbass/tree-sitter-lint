@@ -314,6 +314,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
             ViolationWithContext, lsp::{LocalLinter, self}, FixingForSliceRunStatus,
+            FixingForSliceRunContext,
         };
 
         pub fn run_and_output() {
@@ -346,6 +347,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
+            context: FixingForSliceRunContext,
         ) -> FixingForSliceRunStatus {
             tree_sitter_lint::run_fixing_for_slice(
                 file_contents,
@@ -354,6 +356,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 args_to_config(args),
                 language,
                 &FromFileRunContextInstanceProviderFactoryLocal,
+                context,
             )
         }
 
@@ -378,8 +381,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
+                context: FixingForSliceRunContext,
             ) -> FixingForSliceRunStatus {
-                run_fixing_for_slice(file_contents, tree, path, args, language)
+                run_fixing_for_slice(file_contents, tree, path, args, language, context)
             }
         }
 
