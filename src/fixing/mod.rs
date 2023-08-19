@@ -17,7 +17,7 @@ use tree_sitter_grep::{
 use crate::{
     aggregated_queries::AggregatedQueries, rule::InstantiatedRule, run_per_file, Config,
     FileRunContext, FromFileRunContextInstanceProviderFactory, MutRopeOrSlice, RuleMeta, RuleName,
-    ViolationWithContext,
+    RunKind, ViolationWithContext,
 };
 
 mod accumulated_edits;
@@ -43,6 +43,7 @@ pub fn run_fixing_loop<'a>(
     instantiated_rules: &[InstantiatedRule],
     tree: Tree,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
+    run_kind: RunKind,
 ) -> Vec<InputEdit> {
     let mut file_contents = file_contents.into();
     let mut old_tree = tree;
@@ -100,6 +101,7 @@ pub fn run_fixing_loop<'a>(
                 instantiated_rules,
                 Some(&changed_ranges),
                 &*from_file_run_context_instance_provider,
+                run_kind,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);

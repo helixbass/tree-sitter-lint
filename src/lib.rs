@@ -33,7 +33,7 @@ pub use context::{
     CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
     FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
     FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
-    QueryMatchContext, SkipOptions, SkipOptionsBuilder,
+    QueryMatchContext, RunKind, SkipOptions, SkipOptionsBuilder,
 };
 use dashmap::DashMap;
 pub use fixing::Fixer;
@@ -129,6 +129,11 @@ pub fn run(
                     &instantiated_rules,
                     None,
                     &*from_file_run_context_instance_provider,
+                    if config.fix {
+                        RunKind::CommandLineFixingInitial
+                    } else {
+                        RunKind::CommandLineNonfixing
+                    },
                 ),
                 |violations| {
                     all_violations
@@ -210,6 +215,7 @@ pub fn run(
                     &instantiated_rules,
                     tree,
                     from_file_run_context_instance_provider_factory,
+                    RunKind::CommandLineFixingFixingLoop,
                 );
                 (path, (file_contents, violations))
             },
@@ -554,6 +560,7 @@ pub fn run_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            RunKind::NonfixingForSlice,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -617,6 +624,7 @@ pub fn run_fixing_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            RunKind::FixingForSliceInitial,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -653,6 +661,7 @@ pub fn run_fixing_for_slice<'a>(
         &instantiated_rules,
         tree,
         from_file_run_context_instance_provider_factory,
+        RunKind::FixingForSliceFixingLoop,
     );
     FixingForSliceRunStatus {
         violations,

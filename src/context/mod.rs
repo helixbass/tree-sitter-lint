@@ -50,6 +50,7 @@ pub struct FileRunContext<'a, 'b> {
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+    pub run_kind: RunKind,
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -67,6 +68,7 @@ impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
             instantiated_rules: self.instantiated_rules,
             changed_ranges: self.changed_ranges,
             from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
+            run_kind: self.run_kind,
         }
     }
 }
@@ -84,6 +86,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         instantiated_rules: &'a [InstantiatedRule],
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+        run_kind: RunKind,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -97,6 +100,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             instantiated_rules,
             changed_ranges,
             from_file_run_context_instance_provider,
+            run_kind,
         }
     }
 }
@@ -475,6 +479,16 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
     fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
         self.file_run_context.slice(range)
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RunKind {
+    CommandLineNonfixing,
+    CommandLineFixingInitial,
+    CommandLineFixingFixingLoop,
+    NonfixingForSlice,
+    FixingForSliceInitial,
+    FixingForSliceFixingLoop,
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
