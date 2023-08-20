@@ -151,9 +151,6 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
-                if !self.file_run_context.config.report_fixed_violations {
-                    return;
-                }
             }
         }
         let violation = violation.contextualize(self, had_fixes);
@@ -481,7 +478,7 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum RunKind<'a> {
     CommandLineNonfixing,
     CommandLineFixingInitial,

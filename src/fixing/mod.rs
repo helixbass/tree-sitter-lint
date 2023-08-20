@@ -58,6 +58,13 @@ pub fn run_fixing_loop<'a>(
         accumulated_edits.add_round_of_edits(&input_edits_and_replacements);
 
         if config.single_fixing_pass {
+            if !config.report_fixed_violations {
+                *violations = violations
+                    .iter()
+                    .filter(|violation| !violation.had_fixes)
+                    .cloned()
+                    .collect();
+            }
             return accumulated_edits;
         }
 
@@ -125,6 +132,13 @@ pub fn run_fixing_loop<'a>(
             debug!("no fixes reported, exiting fixing loop");
             break;
         }
+    }
+    if !config.report_fixed_violations {
+        *violations = violations
+            .iter()
+            .filter(|violation| !violation.had_fixes)
+            .cloned()
+            .collect();
     }
     accumulated_edits
 }

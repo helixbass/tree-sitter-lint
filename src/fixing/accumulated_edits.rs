@@ -299,8 +299,11 @@ impl AccumulatedEdits {
                 };
                 newlines_adjustment_so_far += {
                     let mut num_original_newlines_replaced_by_this_edit = 0;
-                    while self.original_newline_offsets[next_original_newline_offset_index]
-                        < edit.original_end_byte()
+                    while self
+                        .original_newline_offsets
+                        .get(next_original_newline_offset_index)
+                        .copied()
+                        .matches(|newline_offset| newline_offset < edit.original_end_byte())
                     {
                         num_original_newlines_replaced_by_this_edit += 1;
                         next_original_newline_offset_index += 1;

@@ -679,7 +679,7 @@ pub struct FixingForSliceRunStatus {
     edits: Option<AccumulatedEdits>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FixingForSliceRunContext {
     pub last_fixing_run_violations: Option<Vec<ViolationWithContext>>,
     pub edits_since_last_fixing_run: Option<AccumulatedEdits>,
