@@ -1,7 +1,7 @@
-use std::{iter::Peekable, ops};
+use std::{cmp, iter::Peekable, ops};
 
 use itertools::{Either, Itertools};
-use squalid::{OptionExt, VecExt};
+use squalid::{EverythingExt, OptionExt, VecExt};
 use tree_sitter_grep::{
     ropey::Rope,
     tree_sitter::{InputEdit, Point, Range},
@@ -33,7 +33,8 @@ impl AccumulatedEdits {
                 );
             }
 
-            let (overlapping_edits, adjustment) = self.get_overlapping_edits(input_edit);
+            let (overlapping_edits, adjustment) =
+                self.get_overlapping_edits(input_edit.start_byte..input_edit.old_end_byte);
             match overlapping_edits {
                 OverlappingEditsOrInsertionPoint::InsertionPoint(insertion_index) => {
                     self.edits.insert(
@@ -163,7 +164,7 @@ impl AccumulatedEdits {
 
     fn get_overlapping_edits(
         &self,
-        input_edit: &InputEdit,
+        old_range: ops::Range<usize>,
     ) -> (OverlappingEditsOrInsertionPoint, isize) {
         let mut adjustment = 0;
         let mut index = 0;
@@ -171,11 +172,10 @@ impl AccumulatedEdits {
         let mut has_seen_overlap = false;
         while index < self.edits.len() {
             let existing_edit = &self.edits[index];
-            let input_edit_original_start: usize = (input_edit.start_byte as isize - adjustment)
-                .try_into()
-                .unwrap();
+            let input_edit_original_start: usize =
+                (old_range.start as isize - adjustment).try_into().unwrap();
             let input_edit_original_old_end =
-                input_edit_original_start + (input_edit.old_end_byte - input_edit.start_byte);
+                input_edit_original_start + (old_range.end - old_range.start);
             if input_edit_original_start
                 >= existing_edit.original_start_byte + existing_edit.replacement_len
             {
@@ -244,13 +244,17 @@ impl AccumulatedEdits {
                         true => {
                             let preceding_newline_offset = match next_original_newline_offset_index
                             {
-                                0 => 0,
+                                0 => -1,
                                 next_original_newline_offset_index => {
                                     self.original_newline_offsets
                                         [next_original_newline_offset_index - 1]
+                                        as isize
                                 }
                             };
-                            edit.original_start_byte - preceding_newline_offset
+                            usize::try_from(
+                                edit.original_start_byte as isize - preceding_newline_offset,
+                            )
+                            .unwrap()
                         }
                         false => {
                             assert!(index > 0);
@@ -279,16 +283,17 @@ impl AccumulatedEdits {
                     .unwrap(),
                     start_point: Point {
                         row: start_row,
-                        column: bytes_from_preceding_newline_offset_to_edit_start,
+                        column: bytes_from_preceding_newline_offset_to_edit_start - 1,
                     },
                     end_point: Point {
                         row: start_row + edit.replacement_newline_offsets.len(),
                         column: if let Some(last_edit_replacement_newline_offset) =
                             edit.replacement_newline_offsets.last()
                         {
-                            edit.replacement_len - last_edit_replacement_newline_offset
+                            edit.replacement_len - (last_edit_replacement_newline_offset + 1)
                         } else {
-                            bytes_from_preceding_newline_offset_to_edit_start + edit.replacement_len
+                            (bytes_from_preceding_newline_offset_to_edit_start - 1)
+                                + edit.replacement_len
                         },
                     },
                 };
@@ -329,10 +334,12 @@ impl AccumulatedEdits {
                     next_original_newline_offset_index += 1;
                 }
                 let start_column = match next_original_newline_offset_index {
-                    0 => 0,
+                    0 => edit.original_start_byte,
                     next_original_newline_offset_index => {
-                        edit.original_end_byte()
-                            - self.original_newline_offsets[next_original_newline_offset_index]
+                        edit.original_start_byte
+                            - (self.original_newline_offsets
+                                [next_original_newline_offset_index - 1]
+                                + 1)
                     }
                 };
                 let ret = (
@@ -341,14 +348,7 @@ impl AccumulatedEdits {
                         end_byte: edit.original_end_byte(),
                         start_point: Point {
                             row: next_original_newline_offset_index,
-                            column: match next_original_newline_offset_index {
-                                0 => 0,
-                                next_original_newline_offset_index => {
-                                    edit.original_end_byte()
-                                        - self.original_newline_offsets
-                                            [next_original_newline_offset_index]
-                                }
-                            },
+                            column: start_column,
                         },
                         end_point: Point {
                             row: next_original_newline_offset_index
@@ -356,9 +356,9 @@ impl AccumulatedEdits {
                             column: if let Some(last_edit_replacement_newline_offset) =
                                 edit.replacement_newline_offsets.last()
                             {
-                                edit.replacement_len - last_edit_replacement_newline_offset
+                                edit.replacement_len - (last_edit_replacement_newline_offset + 1)
                             } else {
-                                start_column + edit.replacement_len
+                                start_column + edit.original_len
                             },
                         },
                     },
@@ -372,86 +372,137 @@ impl AccumulatedEdits {
     }
 
     pub fn get_new_line_range(&self, old_range: ops::Range<usize>) -> ops::Range<usize> {
-        let mut next_original_newline_offset_index = 0;
-        let mut newlines_adjustment_so_far: isize = 0;
-        for edit in &self.edits {
-            if edit.original_end_byte() < old_range.start {
-                while self
+        let overlapping_edits = self.get_overlapping_edits(old_range.clone()).0;
+        match overlapping_edits {
+            OverlappingEditsOrInsertionPoint::InsertionPoint(index) => {
+                // TODO: this could be more efficient
+                let num_replacement_newlines_before_index: usize = self
+                    .edits
+                    .iter()
+                    .take(index)
+                    .map(|edit| edit.replacement_newline_offsets.len())
+                    .sum();
+                let num_non_replaced_newlines_before_start = self
                     .original_newline_offsets
-                    .get(next_original_newline_offset_index)
-                    .matches(|&newline_offset| newline_offset < edit.original_start_byte)
-                {
-                    next_original_newline_offset_index += 1;
-                }
-                newlines_adjustment_so_far += {
-                    let mut num_original_newlines_replaced_by_this_edit = 0;
-                    while self.original_newline_offsets[next_original_newline_offset_index]
-                        < edit.original_end_byte()
-                    {
-                        num_original_newlines_replaced_by_this_edit += 1;
-                        next_original_newline_offset_index += 1;
-                    }
-                    edit.replacement_newline_offsets.len() as isize
-                        - num_original_newlines_replaced_by_this_edit as isize
+                    .iter()
+                    .take_while(|&&newline_offset| newline_offset < old_range.start)
+                    .filter(|&&newline_offset| {
+                        !self
+                            .edits
+                            .iter()
+                            .any(|edit| edit.contains_old_byte(newline_offset))
+                    })
+                    .count();
+                let num_newlines_before_start =
+                    num_replacement_newlines_before_index + num_non_replaced_newlines_before_start;
+                num_newlines_before_start
+                    ..num_newlines_before_start
+                        + self
+                            .original_newline_offsets
+                            .iter()
+                            .filter(|newline_offset| old_range.contains(newline_offset))
+                            .count()
+                        + 1
+            }
+            OverlappingEditsOrInsertionPoint::OverlappingEdits(overlapping_edits) => {
+                // TODO: this could be more efficient
+                let num_replacement_newlines_before_first_overlapping_edit_index: usize = self
+                    .edits
+                    .iter()
+                    .take(overlapping_edits[0])
+                    .map(|edit| edit.replacement_newline_offsets.len())
+                    .sum();
+                let num_non_replaced_newlines_before_start = self
+                    .original_newline_offsets
+                    .iter()
+                    .take_while(|&&newline_offset| newline_offset < old_range.start)
+                    .filter(|&&newline_offset| {
+                        !self
+                            .edits
+                            .iter()
+                            .any(|edit| edit.contains_old_byte(newline_offset))
+                    })
+                    .count();
+                let num_non_replaced_newlines_before_first_overlapping_edit_index = self
+                    .original_newline_offsets
+                    .iter()
+                    .take_while(|&&newline_offset| {
+                        newline_offset < self.edits[overlapping_edits[0]].original_start_byte
+                    })
+                    .filter(|&&newline_offset| {
+                        !self
+                            .edits
+                            .iter()
+                            .any(|edit| edit.contains_old_byte(newline_offset))
+                    })
+                    .count();
+                let num_newlines_before_start =
+                    num_replacement_newlines_before_first_overlapping_edit_index
+                        + cmp::min(
+                            num_non_replaced_newlines_before_start,
+                            num_non_replaced_newlines_before_first_overlapping_edit_index,
+                        );
+                let num_replacement_newlines_in_overlapping_edits: usize = overlapping_edits
+                    .iter()
+                    .map(|&edit_index| self.edits[edit_index].replacement_newline_offsets.len())
+                    .sum();
+                let num_newlines_in_gaps_between_overlapping_edits = self
+                    .original_newline_offsets
+                    .iter()
+                    .skip_while(|&&newline_offset| {
+                        newline_offset < self.edits[overlapping_edits[0]].original_end_byte()
+                    })
+                    .take_while(|&&newline_offset| {
+                        newline_offset
+                            < self.edits[overlapping_edits.last().copied().unwrap()]
+                                .original_start_byte
+                    })
+                    .filter(|&&newline_offset| {
+                        !self
+                            .edits
+                            .iter()
+                            .any(|edit| edit.contains_old_byte(newline_offset))
+                    })
+                    .count();
+                let num_newlines_from_beginning_of_first_overlapping_edit_to_end_of_last_overlapping_edit =
+                    num_replacement_newlines_in_overlapping_edits
+                        + num_newlines_in_gaps_between_overlapping_edits;
+                let hangs_off_right = old_range.end
+                    > self.edits[overlapping_edits.last().copied().unwrap()].original_end_byte();
+                let num_newlines_in_range_but_after_end_of_last_overlapping_edit =
+                    if hangs_off_right {
+                        self.original_newline_offsets
+                            .iter()
+                            .skip_while(|&&newline_offset| {
+                                newline_offset
+                                    < self.edits[overlapping_edits.last().copied().unwrap()]
+                                        .original_end_byte()
+                            })
+                            .take_while(|&&newline_offset| newline_offset < old_range.end)
+                            .count()
+                    } else {
+                        0
+                    };
+                let last_byte_in_range_is_a_newline = if hangs_off_right {
+                    self.original_newline_offsets.contains(&(old_range.end - 1))
+                } else {
+                    (&self.edits[overlapping_edits.last().copied().unwrap()]).thrush(|edit| {
+                        edit.replacement_newline_offsets.last().copied().matches(
+                            |replacement_newline_offset| {
+                                replacement_newline_offset == edit.replacement_len - 1
+                            },
+                        )
+                    })
                 };
-                continue;
+                num_newlines_before_start..num_newlines_before_start +
+                    num_newlines_from_beginning_of_first_overlapping_edit_to_end_of_last_overlapping_edit +
+                    num_newlines_in_range_but_after_end_of_last_overlapping_edit - if last_byte_in_range_is_a_newline {
+                        1
+                    } else {
+                        0
+                    } + 1
             }
-            if edit.original_start_byte >= old_range.end {
-                break;
-            }
-            return usize::try_from(
-                next_original_newline_offset_index as isize + newlines_adjustment_so_far,
-            )
-            .unwrap()..{
-                usize::try_from(
-                    (edit.replacement_newline_offsets.len()
-                        + match old_range.end > edit.original_end_byte() {
-                            false => 0,
-                            true => {
-                                while self
-                                    .original_newline_offsets
-                                    .get(next_original_newline_offset_index)
-                                    .matches(|&newline_offset| {
-                                        newline_offset < edit.original_end_byte()
-                                    })
-                                {
-                                    next_original_newline_offset_index += 1;
-                                }
-                                let mut num_newlines_past_end_of_edit = 0;
-                                while self
-                                    .original_newline_offsets
-                                    .get(next_original_newline_offset_index)
-                                    .matches(|&newline_offset| {
-                                        newline_offset < edit.original_end_byte()
-                                    })
-                                {
-                                    next_original_newline_offset_index += 1;
-                                    num_newlines_past_end_of_edit += 1;
-                                }
-                                num_newlines_past_end_of_edit
-                            }
-                        }) as isize
-                        + newlines_adjustment_so_far,
-                )
-                .unwrap()
-            };
         }
-        usize::try_from(next_original_newline_offset_index as isize + newlines_adjustment_so_far)
-            .unwrap()
-            ..usize::try_from(
-                {
-                    while self
-                        .original_newline_offsets
-                        .get(next_original_newline_offset_index)
-                        .matches(|&newline_offset| newline_offset < old_range.end)
-                    {
-                        next_original_newline_offset_index += 1;
-                    }
-                    next_original_newline_offset_index
-                } as isize
-                    + newlines_adjustment_so_far,
-            )
-            .unwrap()
     }
 }
 
@@ -470,6 +521,10 @@ impl AccumulatedEdit {
 
     pub fn new_end_byte(&self) -> usize {
         self.original_start_byte + self.replacement_len
+    }
+
+    pub fn contains_old_byte(&self, old_byte: usize) -> bool {
+        self.original_start_byte <= old_byte && old_byte < self.original_end_byte()
     }
 }
 
@@ -1130,5 +1185,215 @@ use whee::whoa;
             )
             .0,]
         )
+    }
+
+    #[test]
+    fn test_get_new_ranges_single_round_of_edits() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
+        ]);
+
+        assert_eq!(
+            accumulated_edits.get_new_ranges(),
+            [
+                Range {
+                    start_byte: 10,
+                    end_byte: 10,
+                    start_point: Point { row: 0, column: 10 },
+                    end_point: Point { row: 0, column: 10 },
+                },
+                Range {
+                    start_byte: 35,
+                    end_byte: 40,
+                    start_point: Point { row: 2, column: 9 },
+                    end_point: Point { row: 2, column: 14 },
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_get_new_ranges_remove_newline() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "foo::bar;\n", "foo::b;"),
+        ]);
+
+        assert_eq!(
+            accumulated_edits.get_new_ranges(),
+            [
+                Range {
+                    start_byte: 10,
+                    end_byte: 11,
+                    start_point: Point { row: 0, column: 10 },
+                    end_point: Point { row: 0, column: 11 },
+                },
+                Range {
+                    start_byte: 34,
+                    end_byte: 39,
+                    start_point: Point { row: 1, column: 9 },
+                    end_point: Point { row: 1, column: 14 },
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_get_new_ranges_replacement_includes_newline() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "bar::baz;", "bar::bz;\nuse bz::boo;"),
+        ]);
+
+        assert_eq!(
+            accumulated_edits.get_new_ranges(),
+            [
+                Range {
+                    start_byte: 24,
+                    end_byte: 38,
+                    start_point: Point { row: 1, column: 10 },
+                    end_point: Point { row: 2, column: 11 },
+                },
+                Range {
+                    start_byte: 49,
+                    end_byte: 54,
+                    start_point: Point { row: 3, column: 9 },
+                    end_point: Point { row: 3, column: 14 },
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_get_old_ranges_and_new_byte_ranges_single_round_of_edits() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee", "baz::hello"),
+            get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
+        ]);
+
+        assert_eq!(
+            accumulated_edits.get_old_ranges_and_new_byte_ranges(),
+            [
+                (
+                    Range {
+                        start_byte: 10,
+                        end_byte: 12,
+                        start_point: Point { row: 0, column: 10 },
+                        end_point: Point { row: 0, column: 12 },
+                    },
+                    10..10
+                ),
+                (
+                    Range {
+                        start_byte: 37,
+                        end_byte: 41,
+                        start_point: Point { row: 2, column: 9 },
+                        end_point: Point { row: 2, column: 13 },
+                    },
+                    35..40
+                )
+            ]
+        )
+    }
+
+    #[test]
+    fn test_get_new_line_range_single_round_of_edits() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+use bzz::woo;"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee;", "baz::hello;\n"),
+            get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
+        ]);
+
+        // before any edit
+        assert_eq!(accumulated_edits.get_new_line_range(2..7), 0..1);
+
+        // between edits, single line
+        assert_eq!(accumulated_edits.get_new_line_range(18..20), 1..2);
+
+        // inside edit
+        assert_eq!(accumulated_edits.get_new_line_range(37..39), 2..3);
+
+        // hanging off left edge of edit
+        assert_eq!(accumulated_edits.get_new_line_range(34..39), 2..3);
+
+        // hanging off right edge of edit and through subsequent newline
+        assert_eq!(accumulated_edits.get_new_line_range(37..59), 2..5);
+
+        // hanging off right edge of edit and past subsequent newline
+        assert_eq!(accumulated_edits.get_new_line_range(37..60), 2..6);
+    }
+
+    #[test]
+    fn test_get_new_line_range_nontrailing_newline_in_replacement() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+use bzz::woo;"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "baz::whee;", "baz::hello;\n "),
+            get_input_edit_and_replacement(source_text, "foo::bar", "foo::b"),
+        ]);
+
+        // before any edit
+        assert_eq!(accumulated_edits.get_new_line_range(2..7), 0..1);
+
+        // between edits, single line
+        assert_eq!(accumulated_edits.get_new_line_range(18..20), 1..2);
+
+        // inside edit
+        assert_eq!(accumulated_edits.get_new_line_range(37..39), 2..4);
+
+        // hanging off left edge of edit
+        assert_eq!(accumulated_edits.get_new_line_range(34..39), 2..4);
+
+        // hanging off right edge of edit and up through subsequent newline
+        assert_eq!(accumulated_edits.get_new_line_range(37..59), 2..5);
+
+        // hanging off right edge of edit and past subsequent newline
+        assert_eq!(accumulated_edits.get_new_line_range(37..60), 2..6);
     }
 }
