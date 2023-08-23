@@ -134,6 +134,13 @@ impl AccumulatedEdits {
                                 get_newline_offsets(replacement)
                                     .map(|newline_offset| left_inset + newline_offset),
                             );
+                            while stretched.replacement_newline_offsets.get(index).matches(
+                                |&replacement_newline_offset| {
+                                    replacement_newline_offset < left_inset + input_edit_old_len
+                                },
+                            ) {
+                                index += 1;
+                            }
                             replacement_newline_offsets.extend(
                                 stretched
                                     .replacement_newline_offsets
@@ -345,6 +352,21 @@ impl AccumulatedEdits {
                                 + 1)
                     }
                 };
+                let newline_offsets_in_original = {
+                    let mut next_original_newline_offset_index_local =
+                        next_original_newline_offset_index;
+                    let mut newline_offsets_in_original: Vec<usize> = Default::default();
+                    while let Some(original_newline_offset) = self
+                        .original_newline_offsets
+                        .get(next_original_newline_offset_index_local)
+                        .filter(|&&newline_offset| newline_offset < edit.original_end_byte())
+                        .copied()
+                    {
+                        newline_offsets_in_original.push(original_newline_offset);
+                        next_original_newline_offset_index_local += 1;
+                    }
+                    newline_offsets_in_original
+                };
                 let ret = (
                     Range {
                         start_byte: edit.original_start_byte,
@@ -355,11 +377,11 @@ impl AccumulatedEdits {
                         },
                         end_point: Point {
                             row: next_original_newline_offset_index
-                                + edit.replacement_newline_offsets.len(),
-                            column: if let Some(last_edit_replacement_newline_offset) =
-                                edit.replacement_newline_offsets.last()
+                                + newline_offsets_in_original.len(),
+                            column: if let Some(last_newline_offset_in_original) =
+                                newline_offsets_in_original.last()
                             {
-                                edit.replacement_len - (last_edit_replacement_newline_offset + 1)
+                                edit.original_end_byte() - (last_newline_offset_in_original + 1)
                             } else {
                                 start_column + edit.original_len
                             },
