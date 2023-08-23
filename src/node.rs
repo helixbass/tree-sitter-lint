@@ -1,9 +1,12 @@
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering, collections::HashSet};
 
 use squalid::{return_default_if_false, return_default_if_none};
-use tree_sitter_grep::tree_sitter::{Node, TreeCursor};
+use tree_sitter_grep::{
+    tree_sitter::{Node, TreeCursor},
+    SupportedLanguage,
+};
 
-use crate::rule_tester::compare_ranges;
+use crate::{rule_tester::compare_ranges, SourceTextProvider};
 
 pub trait NodeExt<'a> {
     fn is_descendant_of(&self, node: Node) -> bool;
@@ -18,6 +21,15 @@ pub trait NodeExt<'a> {
     fn find_first_descendant_of_kind(&self, kind: &str) -> Option<Node<'a>>;
     fn get_first_child_of_kind(&self, kind: &str) -> Node<'a>;
     fn next_named_sibling_of_kinds(&self, kinds: &[&str]) -> Node<'a>;
+    fn non_comment_children(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentChildren<'a>;
+    fn non_comment_named_children(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentNamedChildren<'a>;
+    fn text<'b>(&self, source_text_provider: &impl SourceTextProvider<'b>) -> Cow<'b, str>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -113,6 +125,28 @@ impl<'a> NodeExt<'a> for Node<'a> {
             }
         }
     }
+
+    fn non_comment_children(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentChildren<'a> {
+        let language = language.into();
+
+        NonCommentChildren::new(*self, language.comment_kinds())
+    }
+
+    fn non_comment_named_children(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentNamedChildren<'a> {
+        let language = language.into();
+
+        NonCommentNamedChildren::new(*self, language.comment_kinds())
+    }
+
+    fn text<'b>(&self, source_text_provider: &impl SourceTextProvider<'b>) -> Cow<'b, str> {
+        source_text_provider.node_text(*self)
+    }
 }
 
 fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
@@ -141,5 +175,71 @@ pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
                 Ordering::Less
             }
         }
+    }
+}
+
+pub struct NonCommentChildren<'a> {
+    cursor: TreeCursor<'a>,
+    is_done: bool,
+    comment_kinds: &'static HashSet<&'static str>,
+}
+
+impl<'a> NonCommentChildren<'a> {
+    pub fn new(node: Node<'a>, comment_kinds: &'static HashSet<&'static str>) -> Self {
+        let mut cursor = node.walk();
+        let is_done = !cursor.goto_first_child();
+        Self {
+            cursor,
+            is_done,
+            comment_kinds,
+        }
+    }
+}
+
+impl<'a> Iterator for NonCommentChildren<'a> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.is_done {
+            let node = self.cursor.node();
+            self.is_done = !self.cursor.goto_next_sibling();
+            if !self.comment_kinds.contains(&node.kind()) {
+                return Some(node);
+            }
+        }
+        None
+    }
+}
+
+pub struct NonCommentNamedChildren<'a> {
+    cursor: TreeCursor<'a>,
+    is_done: bool,
+    comment_kinds: &'static HashSet<&'static str>,
+}
+
+impl<'a> NonCommentNamedChildren<'a> {
+    pub fn new(node: Node<'a>, comment_kinds: &'static HashSet<&'static str>) -> Self {
+        let mut cursor = node.walk();
+        let is_done = !cursor.goto_first_child();
+        Self {
+            cursor,
+            is_done,
+            comment_kinds,
+        }
+    }
+}
+
+impl<'a> Iterator for NonCommentNamedChildren<'a> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.is_done {
+            let node = self.cursor.node();
+            self.is_done = !self.cursor.goto_next_sibling();
+            if node.is_named() && !self.comment_kinds.contains(&node.kind()) {
+                return Some(node);
+            }
+        }
+        None
     }
 }

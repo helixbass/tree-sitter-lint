@@ -115,6 +115,12 @@ impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
     }
 }
 
+impl From<FileRunContext<'_, '_>> for SupportedLanguage {
+    fn from(value: FileRunContext<'_, '_>) -> Self {
+        value.language
+    }
+}
+
 pub struct QueryMatchContext<'a, 'b> {
     pub file_run_context: FileRunContext<'a, 'b>,
     pub(crate) rule: &'a InstantiatedRule,
@@ -475,6 +481,12 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
 
     fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
         self.file_run_context.slice(range)
+    }
+}
+
+impl From<&'_ QueryMatchContext<'_, '_>> for SupportedLanguage {
+    fn from(value: &'_ QueryMatchContext<'_, '_>) -> Self {
+        value.file_run_context.language
     }
 }
 
