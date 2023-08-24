@@ -1,12 +1,17 @@
 use std::{borrow::Cow, cmp::Ordering, collections::HashSet};
 
-use squalid::{return_default_if_false, return_default_if_none};
+use squalid::{return_default_if_false, return_default_if_none, OptionExt};
 use tree_sitter_grep::{
     tree_sitter::{Node, TreeCursor},
     SupportedLanguage,
 };
 
-use crate::{rule_tester::compare_ranges, SourceTextProvider};
+use crate::{
+    rule_tester::compare_ranges, QueryMatchContext, SkipOptions, SkipOptionsBuilder,
+    SourceTextProvider,
+};
+
+pub type Kind = &'static str;
 
 pub trait NodeExt<'a> {
     fn is_descendant_of(&self, node: Node) -> bool;
@@ -30,6 +35,32 @@ pub trait NodeExt<'a> {
         language: impl Into<SupportedLanguage>,
     ) -> NonCommentNamedChildren<'a>;
     fn text<'b>(&self, source_text_provider: &impl SourceTextProvider<'b>) -> Cow<'b, str>;
+    fn non_comment_children_and_field_names(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentChildrenAndFieldNames<'a>;
+    fn is_only_non_comment_named_sibling(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn has_trailing_comments(&self, context: &QueryMatchContext<'a, '_>) -> bool;
+    fn maybe_first_non_comment_named_child(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> Option<Node<'a>>;
+    fn first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a>;
+    fn skip_nodes_of_types(
+        &self,
+        kinds: &[Kind],
+        language: impl Into<SupportedLanguage>,
+    ) -> Node<'a>;
+    fn skip_nodes_of_type(&self, kind: Kind, language: impl Into<SupportedLanguage>) -> Node<'a>;
+    fn next_ancestor_not_of_types(&self, kinds: &[Kind]) -> Node<'a>;
+    fn next_ancestor_not_of_type(&self, kind: Kind) -> Node<'a>;
+    fn has_child_of_kind(&self, kind: Kind) -> bool;
+    fn maybe_first_child_of_kind(&self, kind: Kind) -> Option<Node<'a>>;
+    fn has_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn when_kind(&self, kind: Kind) -> Option<Node<'a>>;
+    fn is_first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn is_last_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -147,6 +178,120 @@ impl<'a> NodeExt<'a> for Node<'a> {
     fn text<'b>(&self, source_text_provider: &impl SourceTextProvider<'b>) -> Cow<'b, str> {
         source_text_provider.node_text(*self)
     }
+
+    fn non_comment_children_and_field_names(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentChildrenAndFieldNames<'a> {
+        let language = language.into();
+
+        NonCommentChildrenAndFieldNames::new(*self, language.comment_kinds())
+    }
+
+    fn is_only_non_comment_named_sibling(&self, language: impl Into<SupportedLanguage>) -> bool {
+        assert!(self.is_named());
+        let parent = return_default_if_none!(self.parent());
+        parent.non_comment_named_children(language).count() == 1
+    }
+
+    fn has_trailing_comments(&self, context: &QueryMatchContext<'a, '_>) -> bool {
+        let language: SupportedLanguage = context.into();
+
+        language.comment_kinds().contains(
+            &context
+                .get_last_token(
+                    *self,
+                    Option::<SkipOptions<fn(Node) -> bool>>::Some(
+                        SkipOptionsBuilder::default()
+                            .include_comments(true)
+                            .build()
+                            .unwrap(),
+                    ),
+                )
+                .kind(),
+        )
+    }
+
+    fn maybe_first_non_comment_named_child(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> Option<Node<'a>> {
+        self.non_comment_named_children(language).next()
+    }
+
+    fn first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a> {
+        self.non_comment_named_children(language).next().unwrap()
+    }
+
+    fn skip_nodes_of_types(
+        &self,
+        kinds: &[Kind],
+        language: impl Into<SupportedLanguage>,
+    ) -> Node<'a> {
+        skip_nodes_of_types(*self, kinds, language)
+    }
+
+    fn skip_nodes_of_type(&self, kind: Kind, language: impl Into<SupportedLanguage>) -> Node<'a> {
+        skip_nodes_of_type(*self, kind, language)
+    }
+
+    fn next_ancestor_not_of_types(&self, kinds: &[Kind]) -> Node<'a> {
+        let mut node = self.parent().unwrap();
+        while kinds.contains(&node.kind()) {
+            node = node.parent().unwrap();
+        }
+        node
+    }
+
+    fn next_ancestor_not_of_type(&self, kind: Kind) -> Node<'a> {
+        let mut node = self.parent().unwrap();
+        while node.kind() == kind {
+            node = node.parent().unwrap();
+        }
+        node
+    }
+
+    fn has_child_of_kind(&self, kind: Kind) -> bool {
+        self.maybe_first_child_of_kind(kind).is_some()
+    }
+
+    fn maybe_first_child_of_kind(&self, kind: Kind) -> Option<Node<'a>> {
+        let mut cursor = self.walk();
+        let ret = self
+            .children(&mut cursor)
+            .find(|child| child.kind() == kind);
+        ret
+    }
+
+    fn has_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> bool {
+        self.non_comment_named_children(language).count() > 0
+    }
+
+    fn when_kind(&self, kind: Kind) -> Option<Node<'a>> {
+        (self.kind() == kind).then_some(*self)
+    }
+
+    fn is_first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool {
+        self.parent()
+            .matches(|parent| parent.maybe_first_non_comment_named_child(language) == Some(*self))
+    }
+
+    fn is_last_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool {
+        let language = language.into();
+
+        let mut current_node = *self;
+        while let Some(next_sibling) = current_node.next_named_sibling() {
+            if !language.comment_kinds().contains(&next_sibling.kind()) {
+                return false;
+            }
+            current_node = next_sibling;
+        }
+        true
+    }
+
+    fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize {
+        self.non_comment_named_children(language).count()
+    }
 }
 
 fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
@@ -211,6 +356,40 @@ impl<'a> Iterator for NonCommentChildren<'a> {
     }
 }
 
+pub struct NonCommentChildrenAndFieldNames<'a> {
+    cursor: TreeCursor<'a>,
+    is_done: bool,
+    comment_kinds: &'static HashSet<&'static str>,
+}
+
+impl<'a> NonCommentChildrenAndFieldNames<'a> {
+    pub fn new(node: Node<'a>, comment_kinds: &'static HashSet<&'static str>) -> Self {
+        let mut cursor = node.walk();
+        let is_done = !cursor.goto_first_child();
+        Self {
+            cursor,
+            is_done,
+            comment_kinds,
+        }
+    }
+}
+
+impl<'a> Iterator for NonCommentChildrenAndFieldNames<'a> {
+    type Item = (Node<'a>, Option<&'static str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.is_done {
+            let node = self.cursor.node();
+            let field_name = self.cursor.field_name();
+            self.is_done = !self.cursor.goto_next_sibling();
+            if !self.comment_kinds.contains(&node.kind()) {
+                return Some((node, field_name));
+            }
+        }
+        None
+    }
+}
+
 pub struct NonCommentNamedChildren<'a> {
     cursor: TreeCursor<'a>,
     is_done: bool,
@@ -242,4 +421,50 @@ impl<'a> Iterator for NonCommentNamedChildren<'a> {
         }
         None
     }
+}
+
+pub fn skip_nodes_of_type(
+    mut node: Node,
+    kind: Kind,
+    language: impl Into<SupportedLanguage>,
+) -> Node {
+    let language = language.into();
+    let comment_kinds = language.comment_kinds();
+
+    while node.kind() == kind {
+        let mut cursor = node.walk();
+        if !cursor.goto_first_child() {
+            return node;
+        }
+        while comment_kinds.contains(&cursor.node().kind()) || !cursor.node().is_named() {
+            if !cursor.goto_next_sibling() {
+                return node;
+            }
+        }
+        node = cursor.node();
+    }
+    node
+}
+
+pub fn skip_nodes_of_types<'a>(
+    mut node: Node<'a>,
+    kinds: &[Kind],
+    language: impl Into<SupportedLanguage>,
+) -> Node<'a> {
+    let language = language.into();
+    let comment_kinds = language.comment_kinds();
+
+    while kinds.contains(&node.kind()) {
+        let mut cursor = node.walk();
+        if !cursor.goto_first_child() {
+            return node;
+        }
+        while comment_kinds.contains(&cursor.node().kind()) || !cursor.node().is_named() {
+            if !cursor.goto_next_sibling() {
+                return node;
+            }
+        }
+        node = cursor.node();
+    }
+    node
 }

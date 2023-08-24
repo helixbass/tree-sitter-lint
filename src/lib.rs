@@ -30,7 +30,7 @@ use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
 pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
 pub use context::{
-    CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
+    get_tokens, CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
     FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
     FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
     QueryMatchContext, RunKind, SkipOptions, SkipOptionsBuilder,
@@ -38,7 +38,7 @@ pub use context::{
 use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use fixing::{AccumulatedEdits, Fixer};
-pub use node::{compare_nodes, NodeExt};
+pub use node::{compare_nodes, NodeExt, NonCommentChildren};
 pub use plugin::Plugin;
 pub use proc_macros::{builder_args, rule, rule_tests, violation};
 use rayon::prelude::*;
@@ -471,7 +471,7 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
 ) {
     trace!("running single on query match callback");
 
-    let mut query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
+    let query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
     instantiated_per_file_rules
         .entry(instantiated_rule.meta.name.clone())
         .or_insert_with(|| {
@@ -497,7 +497,7 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
             rule_instance_per_file.on_query_match(
                 rule_listener_index,
                 node_or_captures,
-                &mut query_match_context,
+                &query_match_context,
             );
         });
 

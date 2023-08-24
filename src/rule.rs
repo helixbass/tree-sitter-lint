@@ -130,7 +130,7 @@ pub trait RuleInstancePerFile<'a> {
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a, '_>,
+        context: &QueryMatchContext<'a, '_>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }

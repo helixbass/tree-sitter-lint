@@ -10,7 +10,7 @@ use better_any::{TidAble, TidExt};
 use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
-    tree_sitter::{Range, Tree},
+    tree_sitter::{InputEdit, Range, Tree},
     RopeOrSlice, SupportedLanguage,
 };
 
@@ -22,7 +22,8 @@ mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use count_options::{CountOptions, CountOptionsBuilder};
-use get_tokens::{get_tokens, get_tokens_after_node};
+pub use get_tokens::get_tokens;
+use get_tokens::get_tokens_after_node;
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
@@ -502,6 +503,7 @@ pub enum RunKind<'a> {
     FixingForSliceFixingLoop {
         context: &'a FixingForSliceRunContext,
         all_violations_from_last_pass: &'a [ViolationWithContext],
+        all_fixes_from_last_pass: &'a [(InputEdit, String)],
     },
 }
 

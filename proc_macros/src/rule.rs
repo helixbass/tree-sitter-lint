@@ -225,6 +225,7 @@ impl Parse for Rule {
         let mut allow_self_conflicting_fixes: Option<Expr> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
+            #[allow(clippy::collapsible_if)]
             if key.to_string() == "options_type" {
                 if input.parse::<Token![!]>().is_ok() {
                     are_options_required = true;
@@ -780,7 +781,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl<'a> #crate_name::RuleInstancePerFile<'a> for #rule_instance_per_file_struct_name<'a> {
-            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a, '_>) {
+            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &#crate_name::QueryMatchContext<'a, '_>) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks

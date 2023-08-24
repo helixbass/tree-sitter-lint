@@ -112,6 +112,7 @@ pub fn run_fixing_loop<'a>(
                         RunKind::FixingForSliceFixingLoop {
                             context,
                             all_violations_from_last_pass: &all_violations_from_last_pass,
+                            all_fixes_from_last_pass: &input_edits_and_replacements,
                         }
                     }
                     _ => RunKind::CommandLineFixingFixingLoop,
