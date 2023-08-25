@@ -28,7 +28,7 @@ rayon = "1.7.0"
 serde = "1.0.175"
 serde_yaml = "0.9.25"
 serde_json = "1.0.103"
-squalid = { git = "https://github.com/helixbass/squalid", rev = "bfefff7" }
+squalid = { git = "https://github.com/helixbass/squalid", rev = "1b5e01f" }
 quote = "1.0.32"
 Inflector = "0.11.4"
 dashmap = "5.5.0"

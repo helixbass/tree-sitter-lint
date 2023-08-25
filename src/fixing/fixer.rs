@@ -72,4 +72,8 @@ impl PendingFix {
     pub fn new(range: Range, replacement: String) -> Self {
         Self { range, replacement }
     }
+
+    pub fn is_insert(&self) -> bool {
+        self.range.start_byte == self.range.end_byte
+    }
 }

@@ -185,6 +185,7 @@ struct Rule {
     languages: Vec<Ident>,
     messages: Option<HashMap<Expr, Expr>>,
     allow_self_conflicting_fixes: Option<Expr>,
+    concatenate_adjacent_insert_fixes: Option<Expr>,
 }
 
 impl Rule {
@@ -223,6 +224,7 @@ impl Parse for Rule {
         let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         let mut are_options_required: bool = Default::default();
         let mut allow_self_conflicting_fixes: Option<Expr> = Default::default();
+        let mut concatenate_adjacent_insert_fixes: Option<Expr> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             #[allow(clippy::collapsible_if)]
@@ -296,6 +298,13 @@ impl Parse for Rule {
                     );
                     allow_self_conflicting_fixes = Some(input.parse()?);
                 }
+                "concatenate_adjacent_insert_fixes" => {
+                    assert!(
+                        concatenate_adjacent_insert_fixes.is_none(),
+                        "Already saw 'concatenate_adjacent_insert_fixes' key"
+                    );
+                    concatenate_adjacent_insert_fixes = Some(input.parse()?);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -312,6 +321,7 @@ impl Parse for Rule {
             messages,
             are_options_required,
             allow_self_conflicting_fixes,
+            concatenate_adjacent_insert_fixes,
         })
     }
 }
@@ -529,6 +539,10 @@ fn get_rule_rule_impl(
         Some(allow_self_conflicting_fixes) => quote!(#allow_self_conflicting_fixes),
         None => quote!(false),
     };
+    let concatenate_adjacent_insert_fixes = match rule.concatenate_adjacent_insert_fixes.as_ref() {
+        Some(concatenate_adjacent_insert_fixes) => quote!(#concatenate_adjacent_insert_fixes),
+        None => quote!(false),
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
             fn meta(&self) -> std::sync::Arc<#crate_name::RuleMeta> {
@@ -538,6 +552,7 @@ fn get_rule_rule_impl(
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
                     messages: #messages,
                     allow_self_conflicting_fixes: #allow_self_conflicting_fixes,
+                    concatenate_adjacent_insert_fixes: #concatenate_adjacent_insert_fixes,
                 })
             }
 

@@ -1,6 +1,6 @@
 use std::{borrow::Cow, cmp::Ordering, collections::HashSet};
 
-use squalid::{return_default_if_false, return_default_if_none, OptionExt};
+use squalid::{return_default_if_false, return_default_if_none, OptionExt, Contains};
 use tree_sitter_grep::{
     tree_sitter::{Node, TreeCursor},
     SupportedLanguage,
@@ -62,6 +62,8 @@ pub trait NodeExt<'a> {
     fn is_last_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
     fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize;
     fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a>;
+    fn has_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> bool;
+    fn maybe_first_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> Option<Node<'a>>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -296,6 +298,18 @@ impl<'a> NodeExt<'a> for Node<'a> {
 
     fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a> {
         self.non_comment_children(language).next().unwrap()
+    }
+
+    fn has_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> bool {
+        self.maybe_first_child_of_kinds(kinds).is_some()
+    }
+
+    fn maybe_first_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> Option<Node<'a>> {
+        let mut cursor = self.walk();
+        let ret = self
+            .children(&mut cursor)
+            .find(|child| kinds.contains_(&child.kind()));
+        ret
     }
 }
 

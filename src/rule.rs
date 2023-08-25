@@ -17,6 +17,7 @@ pub struct RuleMeta {
     pub languages: Vec<SupportedLanguage>,
     pub messages: Option<HashMap<String, String>>,
     pub allow_self_conflicting_fixes: bool,
+    pub concatenate_adjacent_insert_fixes: bool,
 }
 
 pub trait Rule: Send + Sync {

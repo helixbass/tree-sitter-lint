@@ -7,6 +7,7 @@ use std::{
 };
 
 use dashmap::DashMap;
+use squalid::OptionExt;
 use tracing::{debug, debug_span, instrument};
 use tree_sitter_grep::{
     get_parser,
@@ -245,6 +246,28 @@ fn get_non_overlapping_subset(sorted_pending_fixes: &[PendingFix]) -> Vec<Pendin
         .collect()
 }
 
+fn concatenate_adjacent_insert_fixes(sorted_pending_fixes: &mut Vec<PendingFix>) {
+    let mut with_concatenations: Vec<PendingFix> = Vec::with_capacity(sorted_pending_fixes.len());
+    let mut prev_pending_fix: Option<&PendingFix> = Default::default();
+    for pending_fix in &*sorted_pending_fixes {
+        if prev_pending_fix.matches(|prev_pending_fix| {
+            prev_pending_fix.is_insert()
+                && pending_fix.is_insert()
+                && prev_pending_fix.range.start_byte == pending_fix.range.start_byte
+        }) {
+            with_concatenations
+                .last_mut()
+                .unwrap()
+                .replacement
+                .push_str(&pending_fix.replacement);
+        } else {
+            with_concatenations.push(pending_fix.clone());
+        }
+        prev_pending_fix = Some(pending_fix);
+    }
+    *sorted_pending_fixes = with_concatenations;
+}
+
 fn get_sorted_non_conflicting_pending_fixes(
     pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
 ) -> Vec<PendingFix> {
@@ -252,6 +275,9 @@ fn get_sorted_non_conflicting_pending_fixes(
         Default::default(),
         |accumulated_fixes, (rule_name, (mut pending_fixes_for_rule, rule_meta))| {
             pending_fixes_for_rule.sort_by(compare_pending_fixes);
+            if rule_meta.concatenate_adjacent_insert_fixes {
+                concatenate_adjacent_insert_fixes(&mut pending_fixes_for_rule);
+            }
             if has_overlapping_ranges(&pending_fixes_for_rule) {
                 if !rule_meta.allow_self_conflicting_fixes {
                     panic!("Rule {:?} tried to apply self-conflicting fixes: {pending_fixes_for_rule:#?}", rule_name);

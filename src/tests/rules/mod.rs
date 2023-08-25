@@ -11,6 +11,7 @@ use proc_macros::{
 };
 use tree_sitter_grep::RopeOrSlice;
 
+mod meta;
 mod options;
 mod rule_tester;
 mod state;
