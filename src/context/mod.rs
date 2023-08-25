@@ -7,6 +7,7 @@ use std::{
 };
 
 use better_any::{TidAble, TidExt};
+use itertools::Itertools;
 use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
@@ -472,6 +473,28 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                 prev_token = token;
                 ret
             })
+    }
+
+    pub fn get_last_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        count_options: Option<impl Into<CountOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut count_options = count_options.map(Into::into).unwrap_or_default();
+        let language = self.file_run_context.language;
+        get_backward_tokens(node)
+            .take(count_options.count())
+            .filter(move |node| {
+                count_options.filter().map_or(true, |filter| filter(*node))
+                    && if count_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+            .collect_vec()
+            .into_iter()
+            .rev()
     }
 }
 

@@ -61,6 +61,7 @@ pub trait NodeExt<'a> {
     fn is_first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
     fn is_last_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
     fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize;
+    fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -291,6 +292,10 @@ impl<'a> NodeExt<'a> for Node<'a> {
 
     fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize {
         self.non_comment_named_children(language).count()
+    }
+
+    fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a> {
+        self.non_comment_children(language).next().unwrap()
     }
 }
 
