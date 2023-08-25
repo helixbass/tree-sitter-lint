@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
@@ -213,6 +215,69 @@ fn test_rule_test_null_option_value() {
                     options => {
                         field => null,
                     }
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_rule_test_nested_arrow_separated_option_value() {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Options {
+        field: HashMap<String, String>,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "nested-option-value",
+            listeners => [
+                r#"
+                  (function_item) @c
+                "# => |node, context| {
+                    if self.field.contains_key("foo") {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            options_type => Options,
+            state => {
+                [per-run]
+                field: HashMap<String, String> = options.field.clone(),
+            },
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        field => {
+                            bar => "abc",
+                        }
+                    }
+                },
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                },
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        field => { foo => "abc" },
+                    },
+                    errors => 1,
                 },
             ]
         },

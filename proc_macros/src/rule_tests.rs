@@ -5,7 +5,9 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, token, Expr, Ident, Token,
+    parse_macro_input,
+    spanned::Spanned,
+    token, Expr, Ident, Token,
 };
 
 use crate::{
@@ -14,7 +16,7 @@ use crate::{
 };
 
 enum RuleOptions {
-    Map(HashMap<ExprOrIdent, Expr>),
+    Map(HashMap<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>),
     List(Vec<ExprOrArrowSeparatedKeyValuePairs>),
     Expr(Expr),
 }
@@ -33,8 +35,29 @@ impl Parse for RuleOptions {
             }
             Self::List(items)
         } else if input.peek(token::Brace) {
-            let mut map: HashMap<ExprOrIdent, Expr> = Default::default();
-            parse_data(&mut map, input)?;
+            let mut map: HashMap<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs> =
+                Default::default();
+            let data_content;
+            braced!(data_content in input);
+            while !data_content.is_empty() {
+                let key: Result<Expr, _> = data_content.parse();
+                let key: ExprOrIdent = match key {
+                    Ok(key) => Ok(key.into()),
+                    Err(err) => {
+                        if let Ok(key) = data_content.parse::<Token![type]>() {
+                            Ok(Ident::new("type_", key.span()).into())
+                        } else {
+                            Err(err)
+                        }
+                    }
+                }?;
+                data_content.parse::<Token![=>]>()?;
+                let value: ExprOrArrowSeparatedKeyValuePairs = data_content.parse()?;
+                map.insert(key, value);
+                if !data_content.is_empty() {
+                    data_content.parse::<Token![,]>()?;
+                }
+            }
             Self::Map(map)
         } else {
             let expr: Expr = input.parse()?;
@@ -49,7 +72,12 @@ impl ToTokens for RuleOptions {
         let yaml = match self {
             RuleOptions::Map(map) => {
                 let keys = map.keys();
-                let values = map.values();
+                let values = map.values().map(|value| match value {
+                    ExprOrArrowSeparatedKeyValuePairs::Expr(value) => quote!(#value),
+                    ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(value) => {
+                        value.to_yaml()
+                    }
+                });
                 quote! {
                     { #(#keys: #values),* }
                 }

@@ -186,7 +186,7 @@ impl AccumulatedEdits {
             if input_edit_original_start
                 >= existing_edit.original_start_byte + existing_edit.replacement_len
             {
-                assert!(!has_seen_overlap);
+                assert!(!has_seen_overlap, "Expected not to have seen overlap, edits: {:#?}, index: {index:#?}, old_range: {old_range:#?}, adjustment: {adjustment:#?}", self.edits);
                 adjustment +=
                     existing_edit.replacement_len as isize - existing_edit.original_len as isize;
                 index += 1;
