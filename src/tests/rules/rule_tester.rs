@@ -283,3 +283,64 @@ fn test_rule_test_nested_arrow_separated_option_value() {
         },
     );
 }
+
+#[test]
+fn test_rule_test_option_value_array_literal() {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Options {
+        field: Vec<String>,
+    }
+
+    RuleTester::run(
+        rule! {
+            name => "array-option-value",
+            listeners => [
+                r#"
+                  (function_item) @c
+                "# => |node, context| {
+                    if !self.field.is_empty() {
+                        context.report(violation! {
+                            node => node,
+                            message => "whee",
+                        });
+                    }
+                }
+            ],
+            options_type => Options,
+            state => {
+                [per-run]
+                field: Vec<String> = options.field.clone(),
+            },
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        field => [],
+                    }
+                },
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                },
+            ],
+            invalid => [
+                {
+                    code => r#"
+                        fn whee() {}
+                    "#,
+                    options => {
+                        field => ["abc"],
+                    },
+                    errors => 1,
+                },
+            ]
+        },
+    );
+}

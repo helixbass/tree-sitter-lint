@@ -108,6 +108,9 @@ impl Parse for ExprOrArrowSeparatedKeyValuePairs {
             };
         }
         if input.peek(token::Bracket) {
+            if let Ok(expr) = input.parse::<Expr>() {
+                return Ok(Self::Expr(expr));
+            }
             let bracketed_input;
             bracketed!(bracketed_input in input);
             let arrow_separated_key_value_pairs = bracketed_input
