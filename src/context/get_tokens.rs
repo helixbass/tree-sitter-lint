@@ -39,11 +39,11 @@ macro_rules! loop_done {
     };
 }
 
-pub fn get_tokens(node: Node) -> impl Iterator<Item = Node> {
+pub fn get_tokens(node: Node) -> TokenWalker {
     TokenWalker::new(node)
 }
 
-struct TokenWalker<'a> {
+pub struct TokenWalker<'a> {
     state: TokenWalkerState,
     cursor: TreeCursor<'a>,
     original_node: Node<'a>,

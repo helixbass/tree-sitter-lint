@@ -8,7 +8,7 @@ use tree_sitter_grep::{
 
 use crate::{
     rule_tester::compare_ranges, QueryMatchContext, SkipOptions, SkipOptionsBuilder,
-    SourceTextProvider,
+    SourceTextProvider, get_tokens, context::TokenWalker,
 };
 
 pub type Kind = &'static str;
@@ -64,6 +64,7 @@ pub trait NodeExt<'a> {
     fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a>;
     fn has_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> bool;
     fn maybe_first_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> Option<Node<'a>>;
+    fn tokens(&self) -> TokenWalker<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -310,6 +311,10 @@ impl<'a> NodeExt<'a> for Node<'a> {
             .children(&mut cursor)
             .find(|child| kinds.contains_(&child.kind()));
         ret
+    }
+
+    fn tokens(&self) -> TokenWalker<'a> {
+        get_tokens(*self)
     }
 }
 

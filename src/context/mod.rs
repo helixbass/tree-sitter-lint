@@ -23,7 +23,7 @@ mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use count_options::{CountOptions, CountOptionsBuilder};
-pub use get_tokens::get_tokens;
+pub use get_tokens::{get_tokens, TokenWalker};
 use get_tokens::get_tokens_after_node;
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
