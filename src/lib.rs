@@ -40,7 +40,7 @@ use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use fixing::{AccumulatedEdits, Fixer};
 pub use node::{compare_nodes, NodeExt, NonCommentChildren};
 pub use plugin::Plugin;
-pub use proc_macros::{builder_args, rule, rule_tests, violation};
+pub use proc_macros::{builder_args, instance_provider_factory, rule, rule_tests, violation};
 use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{

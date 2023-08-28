@@ -11,7 +11,7 @@ use crate::{
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
     FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
-    RuleConfiguration,
+    RuleConfiguration
 };
 
 pub struct RuleTester {
@@ -84,6 +84,21 @@ impl RuleTester {
         )
         .run_tests()
     }
+
+    // pub fn run_with_provided_types<
+    //     TProvidedTypes: for<'a> FromFileRunContextProvidedTypes<'a> + Send + Sync + 'static,
+    // >(
+    //     rule: Arc<dyn Rule>,
+    //     rule_tests: RuleTests,
+    // ) {
+    //     Self::new(
+    //         rule,
+    //         rule_tests,
+    //         Box::new(get_instance_provider_factory_for_provided_types::<TProvidedTypes>()),
+    //         Default::default(),
+    //     )
+    //     .run_tests()
+    // }
 
     pub fn run_with_plugins(rule: Arc<dyn Rule>, rule_tests: RuleTests, plugins: Vec<Plugin>) {
         Self::new(
