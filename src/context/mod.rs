@@ -38,7 +38,7 @@ use crate::{
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider, config::Environment,
+    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider, environment::Environment,
 };
 
 pub struct FileRunContext<'a, 'b> {

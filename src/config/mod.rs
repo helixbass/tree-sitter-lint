@@ -12,6 +12,7 @@ use tracing::{instrument, trace_span};
 use crate::{
     rule::{InstantiatedRule, Rule, RuleOptions},
     Plugin,
+    environment::Environment,
 };
 
 mod config_file;
@@ -68,7 +69,6 @@ impl Args {
 }
 
 pub type PluginIndex = usize;
-pub type Environment = serde_json::Map<String, serde_json::Value>;
 
 #[derive(Builder)]
 #[builder(setter(strip_option, into), pattern = "owned")]

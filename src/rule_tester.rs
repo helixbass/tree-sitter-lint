@@ -6,7 +6,8 @@ use squalid::NonEmpty;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
 use crate::{
-    config::{ConfigBuilder, ErrorLevel, Environment},
+    config::{ConfigBuilder, ErrorLevel},
+    environment::{Environment, deep_merged},
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
@@ -23,6 +24,7 @@ pub struct RuleTester {
     plugins: Vec<Plugin>,
     should_aggregate_results: bool,
     aggregated_results: RefCell<Vec<TestResult>>,
+    environment: Environment,
 }
 
 impl RuleTester {
@@ -33,6 +35,7 @@ impl RuleTester {
             dyn FromFileRunContextInstanceProviderFactory,
         >,
         plugins: Vec<Plugin>,
+        environment: Environment,
     ) -> Self {
         if !rule.meta().fixable
             && rule_tests.invalid_tests.iter().any(|invalid_test| {
@@ -56,6 +59,7 @@ impl RuleTester {
             plugins,
             should_aggregate_results: env::var("RULE_TEST_SUMMARY").ok().is_non_empty(),
             aggregated_results: Default::default(),
+            environment,
         }
     }
 
@@ -64,6 +68,7 @@ impl RuleTester {
             rule,
             rule_tests,
             Box::new(DummyFromFileRunContextInstanceProviderFactory),
+            Default::default(),
             Default::default(),
         )
         .run_tests()
@@ -80,6 +85,7 @@ impl RuleTester {
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
+            Default::default(),
             Default::default(),
         )
         .run_tests()
@@ -106,6 +112,25 @@ impl RuleTester {
             rule_tests,
             Box::new(DummyFromFileRunContextInstanceProviderFactory),
             plugins,
+            Default::default(),
+        )
+        .run_tests()
+    }
+
+    pub fn run_with_instance_provider_and_environment(
+        rule: Arc<dyn Rule>,
+        rule_tests: RuleTests,
+        from_file_run_context_instance_provider_factory: Box<
+            dyn FromFileRunContextInstanceProviderFactory,
+        >,
+        environment: Environment,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            from_file_run_context_instance_provider_factory,
+            Default::default(),
+            environment,
         )
         .run_tests()
     }
@@ -200,7 +225,7 @@ impl RuleTester {
                     options: valid_test.options.clone(),
                 }])
                 .all_plugins(self.plugins.clone())
-                .environment(valid_test.environment.clone().unwrap_or_default())
+                .environment(deep_merged(&self.environment, &valid_test.environment.clone().unwrap_or_default()))
                 .build()
                 .unwrap(),
             self.language,
@@ -247,7 +272,7 @@ impl RuleTester {
                     options: invalid_test.options.clone(),
                 }])
                 .all_plugins(self.plugins.clone())
-                .environment(invalid_test.environment.clone().unwrap_or_default())
+                .environment(deep_merged(&self.environment, &invalid_test.environment.clone().unwrap_or_default()))
                 .fix(true)
                 .report_fixed_violations(true)
                 .single_fixing_pass(true)

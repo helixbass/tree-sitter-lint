@@ -4,6 +4,7 @@ mod aggregated_queries;
 mod cli;
 mod config;
 mod context;
+mod environment;
 mod fixing;
 pub mod lsp;
 mod macros;
