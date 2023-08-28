@@ -38,7 +38,7 @@ use crate::{
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider,
+    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider, config::Environment,
 };
 
 pub struct FileRunContext<'a, 'b> {
@@ -53,6 +53,7 @@ pub struct FileRunContext<'a, 'b> {
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
     pub run_kind: RunKind<'a>,
+    pub environment: &'a Environment,
 }
 
 impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
@@ -71,6 +72,7 @@ impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
             changed_ranges: self.changed_ranges,
             from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
             run_kind: self.run_kind,
+            environment: self.environment,
         }
     }
 }
@@ -89,6 +91,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         changed_ranges: Option<&'a [Range]>,
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
         run_kind: RunKind<'a>,
+        environment: &'a Environment,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -103,6 +106,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             changed_ranges,
             from_file_run_context_instance_provider,
             run_kind,
+            environment,
         }
     }
 }

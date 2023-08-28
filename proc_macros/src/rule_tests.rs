@@ -139,6 +139,7 @@ struct SingleValidRuleTestSpec {
     code: Expr,
     options: Option<RuleOptions>,
     only: Option<Expr>,
+    environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
 }
 
 impl Parse for SingleValidRuleTestSpec {
@@ -146,6 +147,7 @@ impl Parse for SingleValidRuleTestSpec {
         let mut code: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
         let mut only: Option<Expr> = Default::default();
+        let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
         if input.peek(token::Brace) {
             let content;
             braced!(content in input);
@@ -162,6 +164,9 @@ impl Parse for SingleValidRuleTestSpec {
                     "only" => {
                         only = Some(content.parse()?);
                     }
+                    "environment" => {
+                        environment = Some(content.parse()?);
+                    }
                     _ => panic!("didn't expect key '{}'", key),
                 }
                 if !content.is_empty() {
@@ -175,6 +180,7 @@ impl Parse for SingleValidRuleTestSpec {
             code: code.expect("Expected 'code'"),
             options,
             only,
+            environment,
         })
     }
 }
@@ -194,11 +200,22 @@ impl ToTokens for SingleValidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let environment = match self.environment.as_ref() {
+            Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
+            Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
+                let environment = environment.to_yaml();
+                quote! {
+                    Some(tree_sitter_lint::serde_yaml::from_str(stringify!(#environment)).unwrap())
+                }
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestValid::new(
                 #code,
                 #options,
-                #only
+                #only,
+                #environment
             )
         }
         .to_tokens(tokens)
@@ -460,6 +477,7 @@ struct SingleInvalidRuleTestSpec {
     output: Option<Expr>,
     options: Option<RuleOptions>,
     only: Option<Expr>,
+    environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
 }
 
 impl Parse for SingleInvalidRuleTestSpec {
@@ -469,6 +487,7 @@ impl Parse for SingleInvalidRuleTestSpec {
         let mut output: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
         let mut only: Option<Expr> = Default::default();
+        let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
         let content;
         braced!(content in input);
         while !content.is_empty() {
@@ -490,6 +509,9 @@ impl Parse for SingleInvalidRuleTestSpec {
                 "only" => {
                     only = Some(content.parse()?);
                 }
+                "environment" => {
+                    environment = Some(content.parse()?);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !content.is_empty() {
@@ -502,6 +524,7 @@ impl Parse for SingleInvalidRuleTestSpec {
             output,
             options,
             only,
+            environment,
         })
     }
 }
@@ -531,13 +554,24 @@ impl ToTokens for SingleInvalidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let environment = match self.environment.as_ref() {
+            Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
+            Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
+                let environment = environment.to_yaml();
+                quote! {
+                    Some(tree_sitter_lint::serde_yaml::from_str(stringify!(#environment)).unwrap())
+                }
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
                 #errors,
                 #output,
                 #options,
-                #only
+                #only,
+                #environment
             )
         }
         .to_tokens(tokens)

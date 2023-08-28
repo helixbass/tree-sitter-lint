@@ -6,12 +6,12 @@ use squalid::NonEmpty;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
 use crate::{
-    config::{ConfigBuilder, ErrorLevel},
+    config::{ConfigBuilder, ErrorLevel, Environment},
     context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
     FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
-    RuleConfiguration
+    RuleConfiguration,
 };
 
 pub struct RuleTester {
@@ -200,6 +200,7 @@ impl RuleTester {
                     options: valid_test.options.clone(),
                 }])
                 .all_plugins(self.plugins.clone())
+                .environment(valid_test.environment.clone().unwrap_or_default())
                 .build()
                 .unwrap(),
             self.language,
@@ -246,6 +247,7 @@ impl RuleTester {
                     options: invalid_test.options.clone(),
                 }])
                 .all_plugins(self.plugins.clone())
+                .environment(invalid_test.environment.clone().unwrap_or_default())
                 .fix(true)
                 .report_fixed_violations(true)
                 .single_fixing_pass(true)
@@ -570,27 +572,35 @@ pub struct RuleTestValid {
     pub options: Option<RuleOptions>,
     #[builder(default)]
     pub only: Option<bool>,
+    #[builder(default)]
+    pub environment: Option<Environment>,
 }
 
 impl RuleTestValid {
-    pub fn new(code: impl Into<String>, options: Option<RuleOptions>, only: Option<bool>) -> Self {
+    pub fn new(
+        code: impl Into<String>,
+        options: Option<RuleOptions>,
+        only: Option<bool>,
+        environment: Option<Environment>,
+    ) -> Self {
         Self {
             code: code.into(),
             options,
             only,
+            environment,
         }
     }
 }
 
 impl From<&str> for RuleTestValid {
     fn from(value: &str) -> Self {
-        Self::new(value, None, None)
+        Self::new(value, None, None, None)
     }
 }
 
 impl From<String> for RuleTestValid {
     fn from(value: String) -> Self {
-        Self::new(value, None, None)
+        Self::new(value, None, None, None)
     }
 }
 
@@ -605,6 +615,8 @@ pub struct RuleTestInvalid {
     pub options: Option<RuleOptions>,
     #[builder(default)]
     pub only: Option<bool>,
+    #[builder(default)]
+    pub environment: Option<Environment>,
 }
 
 impl RuleTestInvalid {
@@ -614,6 +626,7 @@ impl RuleTestInvalid {
         output: Option<impl Into<RuleTestExpectedOutput>>,
         options: Option<RuleOptions>,
         only: Option<bool>,
+        environment: Option<Environment>,
     ) -> Self {
         Self {
             code: code.into(),
@@ -621,6 +634,7 @@ impl RuleTestInvalid {
             output: output.map(Into::into),
             options,
             only,
+            environment,
         }
     }
 }

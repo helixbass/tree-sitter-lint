@@ -118,6 +118,7 @@ pub fn run_fixing_loop<'a>(
                     }
                     _ => RunKind::CommandLineFixingFixingLoop,
                 },
+                &config.environment,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);

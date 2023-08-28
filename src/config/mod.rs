@@ -62,11 +62,13 @@ impl Args {
             rules_by_plugin_prefixed_name: Default::default(),
             force_rebuild,
             single_fixing_pass: Default::default(),
+            environment: Default::default(),
         }
     }
 }
 
 pub type PluginIndex = usize;
+pub type Environment = serde_json::Map<String, serde_json::Value>;
 
 #[derive(Builder)]
 #[builder(setter(strip_option, into), pattern = "owned")]
@@ -99,6 +101,9 @@ pub struct Config {
 
     #[builder(default)]
     pub single_fixing_pass: bool,
+
+    #[builder(default)]
+    pub environment: Environment,
 }
 
 impl Config {

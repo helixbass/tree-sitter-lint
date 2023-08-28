@@ -134,6 +134,7 @@ pub fn run(
                     } else {
                         RunKind::CommandLineNonfixing
                     },
+                    &config.environment,
                 ),
                 |violations| {
                     all_violations
@@ -561,6 +562,7 @@ pub fn run_for_slice<'a>(
             None,
             &*from_file_run_context_instance_provider,
             RunKind::NonfixingForSlice,
+            &config.environment,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -626,6 +628,7 @@ pub fn run_fixing_for_slice<'a>(
             None,
             &*from_file_run_context_instance_provider,
             RunKind::FixingForSliceInitial { context: &context },
+            &config.environment,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
