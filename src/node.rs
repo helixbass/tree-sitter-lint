@@ -65,6 +65,10 @@ pub trait NodeExt<'a> {
     fn has_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> bool;
     fn maybe_first_child_of_kinds(&self, kinds: &impl Contains<Kind>) -> Option<Node<'a>>;
     fn tokens(&self) -> TokenWalker<'a>;
+    fn non_comment_named_children_and_field_names(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentNamedChildrenAndFieldNames<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -316,6 +320,15 @@ impl<'a> NodeExt<'a> for Node<'a> {
     fn tokens(&self) -> TokenWalker<'a> {
         get_tokens(*self)
     }
+
+    fn non_comment_named_children_and_field_names(
+        &self,
+        language: impl Into<SupportedLanguage>,
+    ) -> NonCommentNamedChildrenAndFieldNames<'a> {
+        let language = language.into();
+
+        NonCommentNamedChildrenAndFieldNames::new(*self, language.comment_kinds())
+    }
 }
 
 fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
@@ -441,6 +454,40 @@ impl<'a> Iterator for NonCommentNamedChildren<'a> {
             self.is_done = !self.cursor.goto_next_sibling();
             if node.is_named() && !self.comment_kinds.contains(&node.kind()) {
                 return Some(node);
+            }
+        }
+        None
+    }
+}
+
+pub struct NonCommentNamedChildrenAndFieldNames<'a> {
+    cursor: TreeCursor<'a>,
+    is_done: bool,
+    comment_kinds: &'static HashSet<&'static str>,
+}
+
+impl<'a> NonCommentNamedChildrenAndFieldNames<'a> {
+    pub fn new(node: Node<'a>, comment_kinds: &'static HashSet<&'static str>) -> Self {
+        let mut cursor = node.walk();
+        let is_done = !cursor.goto_first_child();
+        Self {
+            cursor,
+            is_done,
+            comment_kinds,
+        }
+    }
+}
+
+impl<'a> Iterator for NonCommentNamedChildrenAndFieldNames<'a> {
+    type Item = (Node<'a>, Option<&'static str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.is_done {
+            let node = self.cursor.node();
+            let field_name = self.cursor.field_name();
+            self.is_done = !self.cursor.goto_next_sibling();
+            if node.is_named() && !self.comment_kinds.contains(&node.kind()) {
+                return Some((node, field_name));
             }
         }
         None

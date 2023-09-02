@@ -54,6 +54,12 @@ impl Fixer {
                 text.into(),
             ));
     }
+
+    pub fn remove(&mut self, node: Node) {
+        self.pending_fixes
+            .get_or_insert_with(Default::default)
+            .push(PendingFix::new(node.range(), Default::default()));
+    }
 }
 
 impl IsEmpty for Fixer {

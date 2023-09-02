@@ -109,6 +109,16 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             environment,
         }
     }
+
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
+        &self,
+    ) -> &TFromFileRunContext {
+        self.from_file_run_context_instance_provider
+            .get(TFromFileRunContext::id(), *self)
+            .unwrap()
+            .downcast_ref::<TFromFileRunContext>()
+            .unwrap()
+    }
 }
 
 impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
@@ -424,12 +434,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
         &self,
     ) -> &TFromFileRunContext {
-        self.file_run_context
-            .from_file_run_context_instance_provider
-            .get(TFromFileRunContext::id(), self.file_run_context)
-            .unwrap()
-            .downcast_ref::<TFromFileRunContext>()
-            .unwrap()
+        self.file_run_context.retrieve::<TFromFileRunContext>()
     }
 
     pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
