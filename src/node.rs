@@ -69,6 +69,7 @@ pub trait NodeExt<'a> {
         &self,
         language: impl Into<SupportedLanguage>,
     ) -> NonCommentNamedChildrenAndFieldNames<'a>;
+    fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
@@ -329,6 +330,10 @@ impl<'a> NodeExt<'a> for Node<'a> {
 
         NonCommentNamedChildrenAndFieldNames::new(*self, language.comment_kinds())
     }
+
+    fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a> {
+        ChildrenOfKind::new(*self, kind)
+    }
 }
 
 fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
@@ -488,6 +493,39 @@ impl<'a> Iterator for NonCommentNamedChildrenAndFieldNames<'a> {
             self.is_done = !self.cursor.goto_next_sibling();
             if node.is_named() && !self.comment_kinds.contains(&node.kind()) {
                 return Some((node, field_name));
+            }
+        }
+        None
+    }
+}
+
+pub struct ChildrenOfKind<'a> {
+    cursor: TreeCursor<'a>,
+    is_done: bool,
+    kind: Kind,
+}
+
+impl<'a> ChildrenOfKind<'a> {
+    pub fn new(node: Node<'a>, kind: Kind) -> Self {
+        let mut cursor = node.walk();
+        let is_done = !cursor.goto_first_child();
+        Self {
+            cursor,
+            is_done,
+            kind,
+        }
+    }
+}
+
+impl<'a> Iterator for ChildrenOfKind<'a> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.is_done {
+            let node = self.cursor.node();
+            self.is_done = !self.cursor.goto_next_sibling();
+            if node.kind() == self.kind {
+                return Some(node);
             }
         }
         None

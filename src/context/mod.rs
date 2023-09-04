@@ -505,6 +505,15 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
             .into_iter()
             .rev()
     }
+
+    pub fn get_first_token_between<TFilter: FnMut(Node) -> bool>(
+        &self,
+        a: Node<'a>,
+        b: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Option<Node<'a>> {
+        self.get_tokens_between(a, b, skip_options).next()
+    }
 }
 
 impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
