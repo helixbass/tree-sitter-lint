@@ -56,6 +56,18 @@ pub fn run_fixing_loop<'a>(
         for (input_edit, _) in &input_edits_and_replacements {
             old_tree.edit(input_edit);
         }
+        use std::io::Write;
+        let mut out_log = std::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open("/Users/jrosse/prj/tree-sitter-lint/log")
+            .unwrap();
+        writeln!(
+            &mut out_log,
+            "run_fixing_loop() 1",
+        )
+        .unwrap();
         accumulated_edits.add_round_of_edits(&input_edits_and_replacements);
 
         if config.single_fixing_pass {

@@ -23,6 +23,23 @@ impl AccumulatedEdits {
     }
 
     pub fn add_round_of_edits(&mut self, edits: &[(InputEdit, impl AsRef<str>)]) {
+        use std::io::Write;
+        let mut out_log = std::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open("/Users/jrosse/prj/tree-sitter-lint/log")
+            .unwrap();
+        writeln!(
+            &mut out_log,
+            "add_round_of_edits() 1 edits: {:#?}, self edits: {:#?}",
+            edits
+                .into_iter()
+                .map(|(input_edit, replacement)| (input_edit, replacement.as_ref()))
+                .collect::<Vec<_>>(),
+            self.edits
+        )
+        .unwrap();
         let mut prev_start_byte: Option<usize> = Default::default();
         for (input_edit, replacement) in edits {
             let replacement = replacement.as_ref();
@@ -167,6 +184,12 @@ impl AccumulatedEdits {
 
             prev_start_byte = Some(input_edit.start_byte);
         }
+        writeln!(
+            &mut out_log,
+            "add_round_of_edits() 2 self edits: {:#?}",
+            self.edits
+        )
+        .unwrap();
     }
 
     fn get_overlapping_edits(
@@ -174,9 +197,9 @@ impl AccumulatedEdits {
         old_range: ops::Range<usize>,
     ) -> (OverlappingEditsOrInsertionPoint, isize) {
         let mut adjustment = 0;
+        let mut adjustment_as_of_first_overlap: Option<isize> = Default::default();
         let mut index = 0;
         let mut overlapping_indices: Vec<usize> = Default::default();
-        let mut has_seen_overlap = false;
         while index < self.edits.len() {
             let existing_edit = &self.edits[index];
             let input_edit_original_start: usize =
@@ -186,7 +209,7 @@ impl AccumulatedEdits {
             if input_edit_original_start
                 >= existing_edit.original_start_byte + existing_edit.replacement_len
             {
-                assert!(!has_seen_overlap, "Expected not to have seen overlap, edits: {:#?}, index: {index:#?}, old_range: {old_range:#?}, adjustment: {adjustment:#?}", self.edits);
+                assert!(adjustment_as_of_first_overlap.is_none(), "Expected not to have seen overlap, edits: {:#?}, index: {index:#?}, old_range: {old_range:#?}, adjustment: {adjustment:#?}", self.edits);
                 adjustment +=
                     existing_edit.replacement_len as isize - existing_edit.original_len as isize;
                 index += 1;
@@ -195,7 +218,11 @@ impl AccumulatedEdits {
             if input_edit_original_old_end <= existing_edit.original_start_byte {
                 break;
             }
-            has_seen_overlap = true;
+            if adjustment_as_of_first_overlap.is_none() {
+                adjustment_as_of_first_overlap = Some(adjustment);
+            }
+            adjustment +=
+                existing_edit.replacement_len as isize - existing_edit.original_len as isize;
             overlapping_indices.push(index);
             index += 1;
         }
@@ -204,7 +231,7 @@ impl AccumulatedEdits {
                 true => OverlappingEditsOrInsertionPoint::InsertionPoint(index),
                 false => OverlappingEditsOrInsertionPoint::OverlappingEdits(overlapping_indices),
             },
-            adjustment,
+            adjustment_as_of_first_overlap.unwrap_or(adjustment),
         )
     }
 
@@ -1420,5 +1447,48 @@ use bzz::woo;"#;
 
         // hanging off right edge of edit and past subsequent newline
         assert_eq!(accumulated_edits.get_new_line_range(37..60), 2..6);
+    }
+
+    #[test]
+    fn test_large_replacement() {
+        let source_text = r#"use foo::bar;
+use bar::baz;
+use baz::whee;
+use whee::whoa;
+"#;
+        let original_newline_offsets = get_newline_offsets(source_text).collect_vec();
+        assert_eq!(&original_newline_offsets, &[13, 27, 42, 58]);
+        let mut accumulated_edits = AccumulatedEdits::new(original_newline_offsets);
+        accumulated_edits.add_round_of_edits(&[
+            get_input_edit_and_replacement(source_text, "whee::whoa", "whee::whoo"),
+            get_input_edit_and_replacement(
+                source_text,
+                "bar::baz",
+                "whoo::hello; use whoa::brr; use brr::whoo; use hello::whoo;",
+            ),
+        ]);
+        let updated_source_text = r#"use foo::bar;
+use whoo::hello; use whoa::brr; use brr::whoo; use hello::whoo;
+use baz::hello;
+use whee::whoo;
+"#;
+        accumulated_edits.add_round_of_edits(&[get_input_edit_and_replacement(
+            updated_source_text,
+            "hello::whoo",
+            "hello::bzz",
+        )]);
+
+        assert_eq!(
+            accumulated_edits.get_input_edits(),
+            [
+                get_input_edit_and_replacement(
+                    source_text,
+                    "bar::baz",
+                    "whoo::hello; use whoa::brr; use brr::whoo; use hello::bzz;"
+                )
+                .0,
+                get_input_edit_and_replacement(source_text, "whee::whoa", "whee::whoo").0,
+            ]
+        )
     }
 }
