@@ -179,12 +179,12 @@ impl AccumulatedEdits {
         let mut overlapping_indices: Vec<usize> = Default::default();
         while index < self.edits.len() {
             let existing_edit = &self.edits[index];
-            let input_edit_original_start: usize =
-                (old_range.start as isize - adjustment).try_into().unwrap();
+            let input_edit_original_start = old_range.start as isize - adjustment;
             let input_edit_original_old_end =
-                input_edit_original_start + (old_range.end - old_range.start);
-            if input_edit_original_start
-                >= existing_edit.original_start_byte + existing_edit.replacement_len
+                input_edit_original_start + (old_range.end - old_range.start) as isize;
+            if input_edit_original_start >= 0
+                && input_edit_original_start as usize
+                    >= existing_edit.original_start_byte + existing_edit.replacement_len
             {
                 assert!(adjustment_as_of_first_overlap.is_none(), "Expected not to have seen overlap, edits: {:#?}, index: {index:#?}, old_range: {old_range:#?}, adjustment: {adjustment:#?}", self.edits);
                 adjustment +=
@@ -192,7 +192,9 @@ impl AccumulatedEdits {
                 index += 1;
                 continue;
             }
-            if input_edit_original_old_end <= existing_edit.original_start_byte {
+            if input_edit_original_old_end < 0
+                || input_edit_original_old_end as usize <= existing_edit.original_start_byte
+            {
                 break;
             }
             if adjustment_as_of_first_overlap.is_none() {

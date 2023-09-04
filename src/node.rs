@@ -52,8 +52,10 @@ pub trait NodeExt<'a> {
         language: impl Into<SupportedLanguage>,
     ) -> Node<'a>;
     fn skip_nodes_of_type(&self, kind: Kind, language: impl Into<SupportedLanguage>) -> Node<'a>;
-    fn next_ancestor_not_of_types(&self, kinds: &[Kind]) -> Node<'a>;
-    fn next_ancestor_not_of_type(&self, kind: Kind) -> Node<'a>;
+    fn ancestors(&self) -> Ancestors<'a>;
+    fn next_ancestor_not_of_kinds(&self, kinds: &[Kind]) -> Node<'a>;
+    fn next_ancestor_not_of_kind(&self, kind: Kind) -> Node<'a>;
+    fn next_ancestor_of_kind(&self, kind: Kind) -> Node<'a>;
     fn has_child_of_kind(&self, kind: Kind) -> bool;
     fn maybe_first_child_of_kind(&self, kind: Kind) -> Option<Node<'a>>;
     fn has_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> bool;
@@ -244,7 +246,11 @@ impl<'a> NodeExt<'a> for Node<'a> {
         skip_nodes_of_type(*self, kind, language)
     }
 
-    fn next_ancestor_not_of_types(&self, kinds: &[Kind]) -> Node<'a> {
+    fn ancestors(&self) -> Ancestors<'a> {
+        Ancestors::new(*self)
+    }
+
+    fn next_ancestor_not_of_kinds(&self, kinds: &[Kind]) -> Node<'a> {
         let mut node = self.parent().unwrap();
         while kinds.contains(&node.kind()) {
             node = node.parent().unwrap();
@@ -252,9 +258,17 @@ impl<'a> NodeExt<'a> for Node<'a> {
         node
     }
 
-    fn next_ancestor_not_of_type(&self, kind: Kind) -> Node<'a> {
+    fn next_ancestor_not_of_kind(&self, kind: Kind) -> Node<'a> {
         let mut node = self.parent().unwrap();
         while node.kind() == kind {
+            node = node.parent().unwrap();
+        }
+        node
+    }
+
+    fn next_ancestor_of_kind(&self, kind: Kind) -> Node<'a> {
+        let mut node = self.parent().unwrap();
+        while node.kind() != kind {
             node = node.parent().unwrap();
         }
         node
@@ -529,6 +543,28 @@ impl<'a> Iterator for ChildrenOfKind<'a> {
             }
         }
         None
+    }
+}
+
+pub struct Ancestors<'a> {
+    current_node: Option<Node<'a>>,
+}
+
+impl<'a> Ancestors<'a> {
+    pub fn new(node: Node<'a>) -> Self {
+        Self {
+            current_node: node.parent(),
+        }
+    }
+}
+
+impl<'a> Iterator for Ancestors<'a> {
+    type Item = Node<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.current_node;
+        self.current_node = self.current_node.and_then(|current_node| current_node.parent());
+        ret
     }
 }
 
