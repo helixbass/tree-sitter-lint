@@ -23,23 +23,6 @@ impl AccumulatedEdits {
     }
 
     pub fn add_round_of_edits(&mut self, edits: &[(InputEdit, impl AsRef<str>)]) {
-        use std::io::Write;
-        let mut out_log = std::fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .open("/Users/jrosse/prj/tree-sitter-lint/log")
-            .unwrap();
-        writeln!(
-            &mut out_log,
-            "add_round_of_edits() 1 edits: {:#?}, self edits: {:#?}",
-            edits
-                .into_iter()
-                .map(|(input_edit, replacement)| (input_edit, replacement.as_ref()))
-                .collect::<Vec<_>>(),
-            self.edits
-        )
-        .unwrap();
         let mut prev_start_byte: Option<usize> = Default::default();
         for (input_edit, replacement) in edits {
             let replacement = replacement.as_ref();
@@ -184,12 +167,6 @@ impl AccumulatedEdits {
 
             prev_start_byte = Some(input_edit.start_byte);
         }
-        writeln!(
-            &mut out_log,
-            "add_round_of_edits() 2 self edits: {:#?}",
-            self.edits
-        )
-        .unwrap();
     }
 
     fn get_overlapping_edits(
