@@ -107,7 +107,7 @@ pub fn run(
 ) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
-    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, None);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, config, None);
     let all_violations: DashMap<PathBuf, Vec<ViolationWithContext>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
 
@@ -691,6 +691,7 @@ pub struct FixingForSliceRunContext {
 
 fn get_tree_sitter_grep_args(
     aggregated_queries: &AggregatedQueries,
+    config: &Config,
     language: Option<SupportedLanguage>,
 ) -> tree_sitter_grep::Args {
     tree_sitter_grep::ArgsBuilder::default()
@@ -701,6 +702,7 @@ fn get_tree_sitter_grep_args(
                 .map(|(&language, aggregated_query)| (language, aggregated_query.query.clone()))
                 .collect::<HashMap<_, _>>(),
         )
+        .paths(config.paths.clone())
         .maybe_language(language)
         .build()
         .unwrap()

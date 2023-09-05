@@ -23,6 +23,8 @@ pub use config_file::{
 #[derive(Builder, Debug, Default, Parser)]
 #[builder(default, setter(into, strip_option))]
 pub struct Args {
+    pub paths: Vec<PathBuf>,
+
     #[arg(long)]
     pub rule: Option<String>,
 
@@ -51,6 +53,7 @@ impl Args {
             fix,
             report_fixed_violations,
             force_rebuild,
+            paths,
         } = self;
         Config {
             rule,
@@ -58,6 +61,7 @@ impl Args {
             all_plugins,
             fix,
             report_fixed_violations,
+            paths,
             config_file_path: Some(config_file_path),
             rule_configurations: config_file_content.rules().collect(),
             rules_by_plugin_prefixed_name: Default::default(),
@@ -104,6 +108,9 @@ pub struct Config {
 
     #[builder(default)]
     pub environment: Environment,
+
+    #[builder(default)]
+    pub paths: Vec<PathBuf>,
 }
 
 impl Config {

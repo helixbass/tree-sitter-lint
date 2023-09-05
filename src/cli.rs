@@ -208,7 +208,7 @@ fn get_local_binary_cargo_toml_contents(
         ));
     }
     contents.push_str("tracing = \"0.1.37\"\n");
-    contents.push_str("tracing-subscriber = \"0.3.17\"\n");
+    contents.push_str("tracing-subscriber = { version = \"0.3.17\", features = [\"std\", \"fmt\", \"env-filter\"] }\n");
     contents.push_str("tracing-chrome = \"0.7.1\"\n");
 
     contents.push_str("\n[patch.crates-io]\n");
@@ -247,10 +247,30 @@ fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str)
 fn get_src_bin_tree_sitter_lint_local_lsp_rs_contents(local_binary_crate_name: &str) -> String {
     let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
     quote! {
-        use tree_sitter_lint::tokio;
+        use std::env;
+
+        use tracing_chrome::ChromeLayerBuilder;
+        use tracing_subscriber::{prelude::*, EnvFilter};
+        use tree_sitter_lint::{tokio, squalid::NonEmpty};
 
         #[tokio::main]
         async fn main() {
+            if env::var("TRACE_CHROME").ok().is_non_empty() {
+                let (chrome_layer, _guard) = ChromeLayerBuilder::new().include_args(true).file("/Users/jrosse/prj/hello-world/trace.json").build();
+                tracing_subscriber::registry().with(chrome_layer).init();
+            } else if let Some(tracing_log_file_path) = env::var("TRACING_LOG_PATH").ok().non_empty() {
+                let out_log = std::fs::OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .create(true)
+                    .open(tracing_log_file_path)
+                    .unwrap();
+                tracing_subscriber::fmt()
+                    .with_env_filter(EnvFilter::from_default_env())
+                    .with_writer(out_log)
+                    .init();
+            }
+
             #local_binary_crate_name::run_lsp().await;
         }
     }
