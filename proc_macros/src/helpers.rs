@@ -32,9 +32,27 @@ pub struct ArrowSeparatedKeyValuePairs<TKey = Ident, TValue = Expr> {
 }
 
 impl ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs> {
+    #[allow(dead_code)]
     pub fn to_yaml(&self) -> proc_macro2::TokenStream {
         let keys = self.keys_and_values.keys();
         let values = self.keys_and_values.values().map(|value| value.to_yaml());
+        quote! {
+            { #(#keys: #values),* }
+        }
+    }
+
+    pub fn to_json(&self) -> proc_macro2::TokenStream {
+        let keys = self.keys_and_values.keys().map(|key| {
+            match key {
+                ExprOrIdent::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
+                    let ident = path.path.get_ident().unwrap();
+                    quote!(stringify!(#ident))
+                },
+                ExprOrIdent::Expr(key) => quote!(#key),
+                ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+            }
+        });
+        let values = self.keys_and_values.values().map(|value| value.to_json());
         quote! {
             { #(#keys: #values),* }
         }
@@ -84,11 +102,21 @@ pub enum ExprOrArrowSeparatedKeyValuePairs {
 }
 
 impl ExprOrArrowSeparatedKeyValuePairs {
+    #[allow(dead_code)]
     pub fn to_yaml(&self) -> proc_macro2::TokenStream {
         match self {
             Self::Expr(expr) => quote!(#expr),
             Self::ArrowSeparatedKeyValuePairs(arrow_separated_key_value_pairs) => {
                 arrow_separated_key_value_pairs.to_yaml()
+            }
+        }
+    }
+
+    pub fn to_json(&self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Expr(expr) => quote!(#expr),
+            Self::ArrowSeparatedKeyValuePairs(arrow_separated_key_value_pairs) => {
+                arrow_separated_key_value_pairs.to_json()
             }
         }
     }

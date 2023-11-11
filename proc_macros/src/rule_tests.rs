@@ -68,14 +68,23 @@ impl Parse for RuleOptions {
 
 impl ToTokens for RuleOptions {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let mut should_yamlize = true;
-        let yaml = match self {
+        let mut should_jsonify = true;
+        let json = match self {
             RuleOptions::Map(map) => {
-                let keys = map.keys();
+                let keys = map.keys().map(|key| {
+                    match key {
+                        ExprOrIdent::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
+                            let ident = path.path.get_ident().unwrap();
+                            quote!(stringify!(#ident))
+                        },
+                        ExprOrIdent::Expr(key) => quote!(#key),
+                        ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+                    }
+                });
                 let values = map.values().map(|value| match value {
                     ExprOrArrowSeparatedKeyValuePairs::Expr(value) => quote!(#value),
                     ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(value) => {
-                        value.to_yaml()
+                        value.to_json()
                     }
                 });
                 quote! {
@@ -83,13 +92,13 @@ impl ToTokens for RuleOptions {
                 }
             }
             RuleOptions::List(list) => {
-                let items = list.into_iter().map(|item| item.to_yaml());
+                let items = list.into_iter().map(|item| item.to_json());
                 quote! {
                     [ #(#items),* ]
                 }
             }
             RuleOptions::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
-                should_yamlize = false;
+                should_jsonify = false;
                 let ident = path.path.get_ident().unwrap();
                 quote!(#ident.clone())
             }
@@ -97,12 +106,12 @@ impl ToTokens for RuleOptions {
                 quote!(#expr)
             }
         };
-        if should_yamlize {
+        if should_jsonify {
             quote! {
-                tree_sitter_lint::serde_yaml::from_str(stringify!(#yaml)).unwrap()
+                tree_sitter_lint::serde_json::json!(#json)
             }
         } else {
-            yaml
+            json
         }
         .to_tokens(tokens)
     }
@@ -203,9 +212,12 @@ impl ToTokens for SingleValidRuleTestSpec {
         let environment = match self.environment.as_ref() {
             Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
             Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
-                let environment = environment.to_yaml();
+                let environment = environment.to_json();
                 quote! {
-                    Some(tree_sitter_lint::serde_yaml::from_str(stringify!(#environment)).unwrap())
+                    Some(match tree_sitter_lint::serde_json::json!(#environment) {
+                        tree_sitter_lint::serde_json::Value::Object(environment) => environment,
+                        _ => unreachable!(),
+                    })
                 }
             },
             None => quote!(None),
@@ -557,9 +569,12 @@ impl ToTokens for SingleInvalidRuleTestSpec {
         let environment = match self.environment.as_ref() {
             Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
             Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
-                let environment = environment.to_yaml();
+                let environment = environment.to_json();
                 quote! {
-                    Some(tree_sitter_lint::serde_yaml::from_str(stringify!(#environment)).unwrap())
+                    Some(match tree_sitter_lint::serde_json::json!(#environment) {
+                        tree_sitter_lint::serde_json::Value::Object(environment) => environment,
+                        _ => unreachable!(),
+                    })
                 }
             },
             None => quote!(None),
