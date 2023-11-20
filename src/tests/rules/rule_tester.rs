@@ -184,7 +184,7 @@ fn test_rule_test_null_option_value() {
             ],
             options_type => Options,
             state => {
-                [per-run]
+                [per-config]
                 field: Option<String> = options.field.clone(),
             },
             languages => [Rust],
@@ -246,7 +246,7 @@ fn test_rule_test_nested_arrow_separated_option_value() {
             ],
             options_type => Options,
             state => {
-                [per-run]
+                [per-config]
                 field: HashMap<String, String> = options.field.clone(),
             },
             languages => [Rust],
@@ -309,7 +309,7 @@ fn test_rule_test_option_value_array_literal() {
             ],
             options_type => Options,
             state => {
-                [per-run]
+                [per-config]
                 field: Vec<String> = options.field.clone(),
             },
             languages => [Rust],

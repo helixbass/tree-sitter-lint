@@ -20,7 +20,7 @@ use crate::{
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum RuleStateScope {
     RuleStatic,
-    PerRun,
+    PerConfig,
     PerFileRun,
 }
 
@@ -37,25 +37,25 @@ impl Parse for RuleStateScope {
             "per" => {
                 content.parse::<Token![-]>()?;
                 match &*content.parse::<Ident>()?.to_string() {
-                    "run" => Self::PerRun,
+                    "config" => Self::PerConfig,
                     "file" => {
                         content.parse::<Token![-]>()?;
                         match &*content.parse::<Ident>()?.to_string() {
                             "run" => Self::PerFileRun,
                             _ => {
                                 return Err(
-                                    content.error("Expected rule-static, per-run or per-file-run")
+                                    content.error("Expected rule-static, per-config or per-file-run")
                                 )
                             }
                         }
                     }
-                    _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+                    _ => return Err(content.error("Expected rule-static, per-config or per-file-run")),
                 }
             }
-            _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+            _ => return Err(content.error("Expected rule-static, per-config or per-file-run")),
         };
         if !content.is_empty() {
-            return Err(content.error("Expected rule-static, per-run or per-file-run"));
+            return Err(content.error("Expected rule-static, per-config or per-file-run"));
         }
         Ok(found)
     }
@@ -370,7 +370,7 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
             state
                 .scope_sections
                 .iter()
-                .filter(|scope_section| scope_section.scope == RuleStateScope::PerRun)
+                .filter(|scope_section| scope_section.scope == RuleStateScope::PerConfig)
                 .flat_map(|scope_section| scope_section.fields.iter())
                 .collect::<Vec<_>>()
         },
@@ -692,7 +692,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                     *node = parse_quote!(self.rule_instance.rule.#self_field_name);
                     return;
                 }
-                Some(RuleStateScope::PerRun) => {
+                Some(RuleStateScope::PerConfig) => {
                     let self_field_name = format_ident!("{}", self_field_name);
                     *node = parse_quote!(self.rule_instance.#self_field_name);
                     return;

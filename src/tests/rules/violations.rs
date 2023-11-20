@@ -347,7 +347,7 @@ fn test_self_field_in_data() {
         rule! {
             name => "uses-self-in-data",
             state => {
-                [per-run]
+                [per-config]
                 foo: &'static str = "abc",
             },
             listeners => [

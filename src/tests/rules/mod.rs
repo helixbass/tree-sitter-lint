@@ -58,7 +58,7 @@ fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
         name => "no_more_than_n_uses_of_foo",
         options_type => usize,
         state => {
-            [per-run]
+            [per-config]
             n: usize = options,
             [per-file-run]
             num_foos: usize

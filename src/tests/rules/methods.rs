@@ -11,7 +11,7 @@ fn test_rule_methods() {
         rule! {
             name => "has-methods",
             state => {
-                [per-run]
+                [per-config]
                 foo: bool = true,
             },
             methods => {

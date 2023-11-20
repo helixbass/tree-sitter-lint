@@ -14,7 +14,7 @@ fn test_rule_options_optional() {
             name => "optional-options",
             options_type => Option<usize>,
             state => {
-                [per-run]
+                [per-config]
                 n: usize = options.unwrap_or(2),
                 [per-file-run]
                 num_foos: usize
@@ -92,7 +92,7 @@ fn test_options_struct() {
             name => "has-options-struct",
             options_type! => Options,
             state => {
-                [per-run]
+                [per-config]
                 whee: String = options.whee,
             },
             languages => [Rust],
@@ -140,7 +140,7 @@ fn test_options_list() {
             name => "has-options-list",
             options_type => Option<Vec<OptionType>>,
             state => {
-                [per-run]
+                [per-config]
                 options: Vec<OptionType> = options.unwrap_or_default(),
             },
             listeners => [
@@ -196,7 +196,7 @@ fn test_options_default() {
             name => "has-options-with-default",
             options_type => Options,
             state => {
-                [per-run]
+                [per-config]
                 foo: String = options.foo,
             },
             listeners => [
@@ -253,7 +253,7 @@ fn test_options_variable() {
             name => "has-options-with-default",
             options_type => Options,
             state => {
-                [per-run]
+                [per-config]
                 foo: String = options.foo,
             },
             listeners => [
