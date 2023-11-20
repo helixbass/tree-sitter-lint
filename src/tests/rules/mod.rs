@@ -8,6 +8,7 @@ use proc_macros::{
 };
 
 mod meta;
+mod methods;
 mod options;
 mod provided_types;
 mod rule_tester;

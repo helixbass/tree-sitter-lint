@@ -10,7 +10,7 @@ use syn::{
     punctuated::Punctuated,
     token,
     visit_mut::{self, VisitMut},
-    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
+    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type, ImplItem,
 };
 
 use crate::{
@@ -186,6 +186,7 @@ struct Rule {
     messages: Option<HashMap<Expr, Expr>>,
     allow_self_conflicting_fixes: Option<Expr>,
     concatenate_adjacent_insert_fixes: Option<Expr>,
+    methods: Option<Vec<ImplItem>>,
 }
 
 impl Rule {
@@ -225,6 +226,7 @@ impl Parse for Rule {
         let mut are_options_required: bool = Default::default();
         let mut allow_self_conflicting_fixes: Option<Expr> = Default::default();
         let mut concatenate_adjacent_insert_fixes: Option<Expr> = Default::default();
+        let mut methods: Option<Vec<ImplItem>> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             #[allow(clippy::collapsible_if)]
@@ -305,6 +307,19 @@ impl Parse for Rule {
                     );
                     concatenate_adjacent_insert_fixes = Some(input.parse()?);
                 }
+                "methods" => {
+                    assert!(
+                        methods.is_none(),
+                        "Already saw 'methods' key"
+                    );
+                    let mut methods_present: Vec<ImplItem> = Default::default();
+                    let methods_content;
+                    braced!(methods_content in input);
+                    while !methods_content.is_empty() {
+                        methods_present.push(methods_content.parse()?);
+                    }
+                    methods = Some(methods_present);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -322,6 +337,7 @@ impl Parse for Rule {
             are_options_required,
             allow_self_conflicting_fixes,
             concatenate_adjacent_insert_fixes,
+            methods,
         })
     }
 }
@@ -402,6 +418,12 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
         &rule_instance_per_file_state_fields,
     );
 
+    let rule_instance_per_file_impl =
+        get_rule_instance_per_file_impl(
+            &rule,
+            &rule_instance_per_file_struct_name,
+        );
+
     let rule_instance_per_file_rule_instance_per_file_impl =
         get_rule_instance_per_file_rule_instance_per_file_impl(
             &rule,
@@ -422,6 +444,8 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
             #rule_instance_rule_instance_impl
 
             #rule_instance_per_file_struct_definition
+
+            #rule_instance_per_file_impl
 
             #rule_instance_per_file_rule_instance_per_file_impl
 
@@ -751,6 +775,28 @@ fn get_self_field_access_name(expr_field: &ExprField) -> Option<String> {
         Member::Named(member) => Some(member.to_string()),
         _ => None,
     }
+}
+
+fn get_rule_instance_per_file_impl(
+    rule: &Rule,
+    rule_instance_per_file_struct_name: &Ident,
+) -> proc_macro2::TokenStream {
+    rule.methods.as_ref().map_or_else(
+        Default::default,
+        |methods| {
+            let methods = methods.into_iter().map(|method| {
+                let mut method = method.clone();
+                SelfAccessRewriter { rule }.visit_impl_item_mut(&mut method);
+                method
+            }).collect::<Vec<_>>();
+
+            quote! {
+                impl<'a> #rule_instance_per_file_struct_name<'a> {
+                    #(#methods)*
+                }
+            }
+        }
+    )
 }
 
 fn get_rule_instance_per_file_rule_instance_per_file_impl(
