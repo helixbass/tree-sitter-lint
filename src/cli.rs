@@ -360,12 +360,13 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             args: Args,
             language: SupportedLanguage,
         ) -> Vec<ViolationWithContext> {
+            let path = path.as_ref();
             tree_sitter_lint::run_for_slice(
                 file_contents,
                 tree,
                 path,
                 args_to_config(args),
-                language,
+                language.supported_language_language(Some(path)),
                 &FromFileRunContextInstanceProviderFactoryLocal,
             ).0
         }
@@ -378,12 +379,13 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             language: SupportedLanguage,
             context: FixingForSliceRunContext,
         ) -> FixingForSliceRunStatus {
+            let path = path.as_ref();
             tree_sitter_lint::run_fixing_for_slice(
                 file_contents,
                 tree,
                 path,
                 args_to_config(args),
-                language,
+                language.supported_language_language(Some(path)),
                 &FromFileRunContextInstanceProviderFactoryLocal,
                 context,
             )

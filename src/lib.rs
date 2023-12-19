@@ -61,7 +61,7 @@ use tree_sitter_grep::{
     get_matches, get_parser,
     streaming_iterator::StreamingIterator,
     tree_sitter::{Node, QueryMatch},
-    Parseable, RopeOrSlice, SupportedLanguage,
+    Parseable, RopeOrSlice, SupportedLanguage, SupportedLanguageLanguage,
 };
 pub use treesitter::{
     range_between_end_and_start, range_between_ends, range_between_start_and_end,
@@ -519,13 +519,13 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
 //     pub from_file_run_context_instance_provider: Box<dyn FromFileRunContextInstanceProvider>,
 // }
 
-#[instrument(skip_all, fields(path = ?path.as_ref(), ?language))]
+#[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]
 pub fn run_for_slice<'a>(
     file_contents: impl Into<RopeOrSlice<'a>>,
     tree: Option<Tree>,
     path: impl AsRef<Path>,
     config: Config,
-    language: SupportedLanguage,
+    supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
 ) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
     let file_contents = file_contents.into();
@@ -536,7 +536,6 @@ pub fn run_for_slice<'a>(
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
-    let supported_language_language = language.supported_language_language(Some(path));
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 
@@ -582,13 +581,13 @@ pub fn run_for_slice<'a>(
     // }
 }
 
-#[instrument(skip_all, fields(path = ?path.as_ref(), ?language))]
+#[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]
 pub fn run_fixing_for_slice<'a>(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
     tree: Option<Tree>,
     path: impl AsRef<Path>,
     config: Config,
-    language: SupportedLanguage,
+    supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
     context: FixingForSliceRunContext,
 ) -> FixingForSliceRunStatus {
@@ -599,7 +598,6 @@ pub fn run_fixing_for_slice<'a>(
     }
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
-    let supported_language_language = language.supported_language_language(Some(path));
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 

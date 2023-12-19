@@ -3,12 +3,12 @@ use std::{any::TypeId, cell::RefCell, cmp::Ordering, env, iter, marker::PhantomD
 use better_any::Tid;
 use derive_builder::Builder;
 use squalid::NonEmpty;
-use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
+use tree_sitter_grep::{tree_sitter::Range, SupportedLanguageLanguage};
 
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
-    environment::{Environment, deep_merged},
     context::FromFileRunContextInstanceProvider,
+    environment::{deep_merged, Environment},
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
     FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
@@ -18,7 +18,7 @@ use crate::{
 pub struct RuleTester {
     rule: Arc<dyn Rule>,
     rule_tests: RuleTests,
-    language: SupportedLanguage,
+    supported_language_languages: Vec<SupportedLanguageLanguage>,
     from_file_run_context_instance_provider_factory:
         Box<dyn FromFileRunContextInstanceProviderFactory>,
     plugins: Vec<Plugin>,
@@ -47,12 +47,18 @@ impl RuleTester {
         {
             panic!("Specified 'output' for a non-fixable rule");
         }
-        let languages = &rule.meta().languages;
-        if languages.len() != 1 {
-            panic!("Only supporting single-language rules currently");
-        }
         Self {
-            language: languages[0],
+            supported_language_languages: rule
+                .meta()
+                .languages
+                .iter()
+                .flat_map(|language| {
+                    language
+                        .all_supported_language_languages()
+                        .into_iter()
+                        .copied()
+                })
+                .collect(),
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
@@ -175,7 +181,7 @@ impl RuleTester {
                     match test_result.outcome {
                         TestOutcome::Passed => {
                             println!(
-                                "{} {} {}",
+                                "{}{} {} {}",
                                 test_result
                                     .code
                                     .trim()
@@ -183,6 +189,11 @@ impl RuleTester {
                                     .take(30)
                                     .collect::<String>()
                                     .dimmed(),
+                                if self.supported_language_languages.len() > 1 {
+                                    format!(" ({})", test_result.supported_language_language)
+                                } else {
+                                    "".to_owned()
+                                }.dimmed(),
                                 if test_result.was_invalid { "i" } else { "v" },
                                 "✔".green()
                             );
@@ -190,7 +201,7 @@ impl RuleTester {
                         TestOutcome::Failed => {
                             saw_failure = true;
                             println!(
-                                "{} {} {}",
+                                "{}{} {} {}",
                                 test_result
                                     .code
                                     .trim()
@@ -198,6 +209,11 @@ impl RuleTester {
                                     .take(30)
                                     .collect::<String>()
                                     .dimmed(),
+                                if self.supported_language_languages.len() > 1 {
+                                    format!(" ({})", test_result.supported_language_language)
+                                } else {
+                                    "".to_owned()
+                                }.dimmed(),
                                 if test_result.was_invalid { "i" } else { "v" },
                                 "✗".red()
                             );
@@ -212,133 +228,153 @@ impl RuleTester {
     }
 
     fn run_valid_test(&self, valid_test: &RuleTestValid) {
-        let (violations, _) = crate::run_for_slice(
-            valid_test.code.as_bytes(),
-            None,
-            "tmp.rs",
-            ConfigBuilder::default()
-                .rule(self.rule.meta().name.clone())
-                .all_standalone_rules([self.rule.clone()])
-                .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name.clone(),
-                    level: ErrorLevel::Error,
-                    options: valid_test.options.clone(),
-                }])
-                .all_plugins(self.plugins.clone())
-                .environment(deep_merged(&self.environment, &valid_test.environment.clone().unwrap_or_default()))
-                .build()
-                .unwrap(),
-            self.language,
-            &*self.from_file_run_context_instance_provider_factory,
-        );
+        for &supported_language_language in &self.supported_language_languages {
+            let (violations, _) = crate::run_for_slice(
+                valid_test.code.as_bytes(),
+                None,
+                "tmp.rs",
+                ConfigBuilder::default()
+                    .rule(self.rule.meta().name.clone())
+                    .all_standalone_rules([self.rule.clone()])
+                    .rule_configurations([RuleConfiguration {
+                        name: self.rule.meta().name.clone(),
+                        level: ErrorLevel::Error,
+                        options: valid_test.options.clone(),
+                    }])
+                    .all_plugins(self.plugins.clone())
+                    .environment(deep_merged(
+                        &self.environment,
+                        &valid_test.environment.clone().unwrap_or_default(),
+                    ))
+                    .build()
+                    .unwrap(),
+                supported_language_language,
+                &*self.from_file_run_context_instance_provider_factory,
+            );
 
-        if self.should_aggregate_results {
-            self.aggregated_results
-                .borrow_mut()
-                .push(if !violations.is_empty() {
-                    TestResult {
-                        outcome: TestOutcome::Failed,
-                        code: valid_test.code.clone(),
-                        was_invalid: false,
-                    }
-                } else {
-                    TestResult {
-                        outcome: TestOutcome::Passed,
-                        code: valid_test.code.clone(),
-                        was_invalid: false,
-                    }
-                });
-            return;
+            if self.should_aggregate_results {
+                self.aggregated_results
+                    .borrow_mut()
+                    .push(if !violations.is_empty() {
+                        TestResult {
+                            outcome: TestOutcome::Failed,
+                            code: valid_test.code.clone(),
+                            was_invalid: false,
+                            supported_language_language,
+                        }
+                    } else {
+                        TestResult {
+                            outcome: TestOutcome::Passed,
+                            code: valid_test.code.clone(),
+                            was_invalid: false,
+                            supported_language_language,
+                        }
+                    });
+                continue;
+            }
+
+            assert!(
+                violations.is_empty(),
+                "Valid case failed\ntest: {valid_test:#?}\nviolations: {violations:#?}"
+            );
         }
-
-        assert!(
-            violations.is_empty(),
-            "Valid case failed\ntest: {valid_test:#?}\nviolations: {violations:#?}"
-        );
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
-        let mut file_contents = invalid_test.code.clone().into_bytes();
-        let FixingForSliceRunStatus { violations, .. } = crate::run_fixing_for_slice(
-            &mut file_contents,
-            None,
-            "tmp.rs",
-            ConfigBuilder::default()
-                .rule(self.rule.meta().name.clone())
-                .all_standalone_rules([self.rule.clone()])
-                .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name.clone(),
-                    level: ErrorLevel::Error,
-                    options: invalid_test.options.clone(),
-                }])
-                .all_plugins(self.plugins.clone())
-                .environment(deep_merged(&self.environment, &invalid_test.environment.clone().unwrap_or_default()))
-                .fix(true)
-                .report_fixed_violations(true)
-                .single_fixing_pass(true)
-                .build()
-                .unwrap(),
-            self.language,
-            &*self.from_file_run_context_instance_provider_factory,
-            Default::default(),
-        );
+        for &supported_language_language in &self.supported_language_languages {
+            let mut file_contents = invalid_test.code.clone().into_bytes();
+            let FixingForSliceRunStatus { violations, .. } = crate::run_fixing_for_slice(
+                &mut file_contents,
+                None,
+                "tmp.rs",
+                ConfigBuilder::default()
+                    .rule(self.rule.meta().name.clone())
+                    .all_standalone_rules([self.rule.clone()])
+                    .rule_configurations([RuleConfiguration {
+                        name: self.rule.meta().name.clone(),
+                        level: ErrorLevel::Error,
+                        options: invalid_test.options.clone(),
+                    }])
+                    .all_plugins(self.plugins.clone())
+                    .environment(deep_merged(
+                        &self.environment,
+                        &invalid_test.environment.clone().unwrap_or_default(),
+                    ))
+                    .fix(true)
+                    .report_fixed_violations(true)
+                    .single_fixing_pass(true)
+                    .build()
+                    .unwrap(),
+                supported_language_language,
+                &*self.from_file_run_context_instance_provider_factory,
+                Default::default(),
+            );
 
-        if !self.check_that_violations_match_expected(&violations, invalid_test) {
-            return;
-        }
-
-        match invalid_test.output.as_ref() {
-            Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
+            if !self.check_that_violations_match_expected(&violations, invalid_test, supported_language_language) {
                 if self.should_aggregate_results {
-                    if std::str::from_utf8(&file_contents).unwrap() != expected_file_contents {
-                        self.aggregated_results.borrow_mut().push(TestResult {
-                            outcome: TestOutcome::Failed,
-                            code: invalid_test.code.clone(),
-                            was_invalid: true,
-                        });
-                        return;
-                    }
+                    continue;
                 } else {
-                    assert_eq!(
-                        std::str::from_utf8(&file_contents).unwrap(),
-                        expected_file_contents,
-                        "Didn't get expected output for code {:#?}, got: {violations:#?}",
+                    return;
+                }
+            }
+
+            match invalid_test.output.as_ref() {
+                Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
+                    if self.should_aggregate_results {
+                        if std::str::from_utf8(&file_contents).unwrap() != expected_file_contents {
+                            self.aggregated_results.borrow_mut().push(TestResult {
+                                outcome: TestOutcome::Failed,
+                                code: invalid_test.code.clone(),
+                                was_invalid: true,
+                                supported_language_language,
+                            });
+                            continue;
+                        }
+                    } else {
+                        assert_eq!(
+                            std::str::from_utf8(&file_contents).unwrap(),
+                            expected_file_contents,
+                            "Didn't get expected output for code {:#?}, got: {violations:#?}",
+                            invalid_test.code
+                        );
+                    }
+                }
+                Some(RuleTestExpectedOutput::NoOutput) => {
+                    if self.should_aggregate_results {
+                        if violations.iter().any(|violation| violation.had_fixes) {
+                            self.aggregated_results.borrow_mut().push(TestResult {
+                                outcome: TestOutcome::Failed,
+                                code: invalid_test.code.clone(),
+                                was_invalid: true,
+                                supported_language_language,
+                            });
+                            continue;
+                        }
+                    } else {
+                        assert!(
+                        !violations.iter().any(|violation| violation.had_fixes),
+                        "Unexpected fixing violation was reported for code {:#?}, got: {violations:#?}",
                         invalid_test.code
                     );
-                }
-            }
-            Some(RuleTestExpectedOutput::NoOutput) => {
-                if self.should_aggregate_results {
-                    if violations.iter().any(|violation| violation.had_fixes) {
-                        self.aggregated_results.borrow_mut().push(TestResult {
-                            outcome: TestOutcome::Failed,
-                            code: invalid_test.code.clone(),
-                            was_invalid: true,
-                        });
-                        return;
                     }
-                } else {
-                    assert!(
-                    !violations.iter().any(|violation| violation.had_fixes),
-                    "Unexpected fixing violation was reported for code {:#?}, got: {violations:#?}",
-                    invalid_test.code
-                );
                 }
+                _ => (),
             }
-            _ => (),
-        }
 
-        self.aggregated_results.borrow_mut().push(TestResult {
-            outcome: TestOutcome::Passed,
-            code: invalid_test.code.clone(),
-            was_invalid: true,
-        });
+            self.aggregated_results.borrow_mut().push(TestResult {
+                outcome: TestOutcome::Passed,
+                code: invalid_test.code.clone(),
+                was_invalid: true,
+                supported_language_language,
+            });
+        }
     }
 
     fn check_that_violations_match_expected(
         &self,
         violations: &[ViolationWithContext],
         invalid_test: &RuleTestInvalid,
+        supported_language_language: SupportedLanguageLanguage,
     ) -> bool {
         if self.should_aggregate_results {
             if violations.len()
@@ -351,6 +387,7 @@ impl RuleTester {
                     outcome: TestOutcome::Failed,
                     code: invalid_test.code.clone(),
                     was_invalid: true,
+                    supported_language_language,
                 });
                 return false;
             }
@@ -374,6 +411,7 @@ impl RuleTester {
                     &violation,
                     expected_violation,
                     invalid_test,
+                    supported_language_language,
                 ) {
                     return false;
                 }
@@ -388,6 +426,7 @@ impl RuleTester {
         violation: &ViolationWithContext,
         expected_violation: &RuleTestExpectedError,
         invalid_test: &RuleTestInvalid,
+        supported_language_language: SupportedLanguageLanguage,
     ) -> bool {
         if let Some(message) = expected_violation.message.as_ref() {
             if self.should_aggregate_results {
@@ -396,6 +435,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -416,6 +456,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -436,6 +477,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -456,6 +498,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -476,6 +519,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -496,6 +540,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -518,6 +563,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -542,6 +588,7 @@ impl RuleTester {
                         outcome: TestOutcome::Failed,
                         code: invalid_test.code.clone(),
                         was_invalid: true,
+                        supported_language_language,
                     });
                     return false;
                 }
@@ -750,6 +797,7 @@ struct TestResult {
     outcome: TestOutcome,
     code: String,
     was_invalid: bool,
+    supported_language_language: SupportedLanguageLanguage,
 }
 
 #[derive(Clone, Default)]

@@ -23,7 +23,7 @@ macro_rules! assert_fixed_content {
                 .fix(true)
                 .build()
                 .unwrap(),
-            $crate::tree_sitter_grep::SupportedLanguage::Rust,
+            $crate::tree_sitter_grep::SupportedLanguageLanguage::Rust,
             &$crate::rule_tester::DummyFromFileRunContextInstanceProviderFactory,
             Default::default(),
         );
