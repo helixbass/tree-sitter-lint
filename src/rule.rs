@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
 use tracing::{instrument, trace_span};
-use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
+use tree_sitter_grep::{tree_sitter::{QueryMatch, QueryError}, SupportedLanguage};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
@@ -150,10 +150,10 @@ pub struct RuleListenerQuery {
 
 impl RuleListenerQuery {
     #[instrument(level = "trace")]
-    pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
+    pub fn resolve(&self, language: Language) -> Result<ResolvedRuleListenerQuery, QueryError> {
         let span = trace_span!("parse individual rule listener query").entered();
 
-        let query = Query::new(language, &self.query).unwrap();
+        let query = Query::new(language, &self.query)?;
 
         span.exit();
 
@@ -175,11 +175,11 @@ impl RuleListenerQuery {
 
         span.exit();
 
-        ResolvedRuleListenerQuery {
+        Ok(ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
             match_by: resolved_match_by,
-        }
+        })
     }
 }
 

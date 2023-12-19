@@ -12,7 +12,7 @@ use tracing::{debug, debug_span, instrument};
 use tree_sitter_grep::{
     get_parser,
     tree_sitter::{InputEdit, Point, Range, Tree},
-    Parseable, RopeOrSlice, SupportedLanguage,
+    Parseable, RopeOrSlice, SupportedLanguageLanguage,
 };
 
 use crate::{
@@ -38,7 +38,7 @@ pub fn run_fixing_loop<'a>(
     aggregated_queries: &AggregatedQueries,
     path: &Path,
     config: &Config,
-    language: SupportedLanguage,
+    language: SupportedLanguageLanguage,
     instantiated_rules: &[InstantiatedRule],
     tree: Tree,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
@@ -306,7 +306,7 @@ impl AllPendingFixes {
         file_contents: &[u8],
         rule_meta: &Arc<RuleMeta>,
         fixes: Vec<PendingFix>,
-        language: SupportedLanguage,
+        language: SupportedLanguageLanguage,
         tree: Tree,
     ) {
         self.entry(path.to_owned())
@@ -334,12 +334,12 @@ impl Deref for AllPendingFixes {
 pub struct PerFilePendingFixes {
     pub file_contents: Vec<u8>,
     pub pending_fixes: HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>,
-    pub language: SupportedLanguage,
+    pub language: SupportedLanguageLanguage,
     pub tree: Tree,
 }
 
 impl PerFilePendingFixes {
-    fn new(file_contents: Vec<u8>, language: SupportedLanguage, tree: Tree) -> Self {
+    fn new(file_contents: Vec<u8>, language: SupportedLanguageLanguage, tree: Tree) -> Self {
         Self {
             file_contents,
             pending_fixes: Default::default(),

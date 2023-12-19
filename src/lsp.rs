@@ -292,7 +292,7 @@ fn parse_from_scratch(contents: &Rope) -> Tree {
 fn parse(contents: &Rope, old_tree: Option<&Tree>) -> Tree {
     let mut parser = Parser::new();
     parser
-        .set_language(SupportedLanguage::Rust.language())
+        .set_language(SupportedLanguage::Rust.language(None))
         .unwrap();
     contents.parse(&mut parser, old_tree).unwrap()
 }

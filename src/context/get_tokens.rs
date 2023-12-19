@@ -182,7 +182,7 @@ mod tests {
     fn test_all_tokens_text(text: &str, all_tokens_text: &[&str]) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
@@ -223,7 +223,7 @@ mod tests {
     ) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
@@ -255,7 +255,7 @@ mod tests {
     ) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(

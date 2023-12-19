@@ -115,16 +115,17 @@ pub fn run(
 
     tree_sitter_grep::run_with_single_per_file_callback(
         tree_sitter_grep_args,
-        |dir_entry, language, file_contents, tree, query| {
+        |dir_entry, supported_language_language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
+            let path = dir_entry.path();
             run_per_file(
                 FileRunContext::new(
-                    dir_entry.path(),
+                    path,
                     file_contents,
                     tree,
                     config,
-                    language,
+                    supported_language_language,
                     &aggregated_queries,
                     query,
                     &instantiated_rules,
@@ -149,7 +150,7 @@ pub fn run(
                         file_contents,
                         &instantiated_rule.meta,
                         fixes,
-                        language,
+                        supported_language_language,
                         tree.clone(),
                     )
                 },
@@ -240,7 +241,7 @@ pub fn run(
         .collect()
 }
 
-#[instrument(skip_all, fields(path = ?file_run_context.path, language = ?file_run_context.language))]
+#[instrument(skip_all, fields(path = ?file_run_context.path, language = ?file_run_context.language()))]
 fn run_per_file<'a, 'b>(
     file_run_context: FileRunContext<'a, 'b>,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
@@ -252,12 +253,12 @@ fn run_per_file<'a, 'b>(
     let mut saw_match = false;
     let wildcard_listener_pattern_index = file_run_context
         .aggregated_queries
-        .get_wildcard_listener_pattern_index(file_run_context.language);
+        .get_wildcard_listener_pattern_index(file_run_context.supported_language_language);
 
     let span = debug_span!("loop through query matches").entered();
 
     get_matches(
-        file_run_context.language.language(),
+        file_run_context.supported_language_language.language(),
         file_run_context.file_contents,
         file_run_context.query,
         Some(file_run_context.tree),
@@ -340,7 +341,7 @@ fn run_match<'a, 'b, 'c>(
     let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = file_run_context
         .aggregated_queries
         .get_rule_and_listener_index_and_capture_index(
-            file_run_context.language,
+            file_run_context.supported_language_language,
             query_match.pattern_index,
         );
 
@@ -399,7 +400,7 @@ fn run_match<'a, 'b, 'c>(
                     query_match,
                     file_run_context
                         .aggregated_queries
-                        .get_query_for_language(file_run_context.language),
+                        .get_query_for_language(file_run_context.supported_language_language),
                 )
                 .into(),
                 on_found_violations,
@@ -419,7 +420,7 @@ fn run_exit_node_listeners<'a, 'b>(
 ) {
     if let Some(kind_exit_rule_listener_indices) = file_run_context
         .aggregated_queries
-        .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
+        .get_kind_exit_rule_and_listener_indices(file_run_context.supported_language_language, exited_node.kind())
     {
         kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
             run_single_on_query_match_callback(
@@ -445,7 +446,7 @@ fn run_enter_node_listeners<'a, 'b>(
 ) {
     if let Some(kind_enter_rule_listener_indices) = file_run_context
         .aggregated_queries
-        .get_kind_enter_rule_and_listener_indices(file_run_context.language, entered_node.kind())
+        .get_kind_enter_rule_and_listener_indices(file_run_context.supported_language_language, entered_node.kind())
     {
         kind_enter_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
             run_single_on_query_match_callback(
@@ -535,11 +536,12 @@ pub fn run_for_slice<'a>(
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
+    let supported_language_language = language.supported_language_language(Some(path));
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 
         file_contents
-            .parse(&mut get_parser(language.language()), None)
+            .parse(&mut get_parser(supported_language_language.language()), None)
             .unwrap()
     });
     let from_file_run_context_instance_provider =
@@ -550,11 +552,11 @@ pub fn run_for_slice<'a>(
             file_contents,
             &tree,
             &config,
-            language,
+            supported_language_language,
             &aggregated_queries,
             &aggregated_queries
                 .per_language
-                .get(&language)
+                .get(&supported_language_language)
                 .unwrap()
                 .query,
             &instantiated_rules,
@@ -597,11 +599,12 @@ pub fn run_fixing_for_slice<'a>(
     }
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let supported_language_language = language.supported_language_language(Some(path));
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
 
         RopeOrSlice::<'_>::from(&file_contents)
-            .parse(&mut get_parser(language.language()), None)
+            .parse(&mut get_parser(supported_language_language.language()), None)
             .unwrap()
     });
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
@@ -616,11 +619,11 @@ pub fn run_fixing_for_slice<'a>(
             &file_contents,
             &tree,
             &config,
-            language,
+            supported_language_language,
             &aggregated_queries,
             &aggregated_queries
                 .per_language
-                .get(&language)
+                .get(&supported_language_language)
                 .unwrap()
                 .query,
             &instantiated_rules,
@@ -662,7 +665,7 @@ pub fn run_fixing_for_slice<'a>(
         &aggregated_queries,
         path,
         &config,
-        language,
+        supported_language_language,
         &instantiated_rules,
         tree,
         from_file_run_context_instance_provider_factory,

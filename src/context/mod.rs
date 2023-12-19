@@ -12,7 +12,7 @@ use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
     tree_sitter::{InputEdit, Range, Tree},
-    RopeOrSlice, SupportedLanguage,
+    RopeOrSlice, SupportedLanguage, SupportedLanguageLanguage,
 };
 
 mod backward_tokens;
@@ -46,7 +46,7 @@ pub struct FileRunContext<'a, 'b> {
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
     pub config: &'a Config,
-    pub language: SupportedLanguage,
+    pub supported_language_language: SupportedLanguageLanguage,
     pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
@@ -65,7 +65,7 @@ impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
             file_contents: self.file_contents,
             tree: self.tree,
             config: self.config,
-            language: self.language,
+            supported_language_language: self.supported_language_language,
             aggregated_queries: self.aggregated_queries,
             query: self.query,
             instantiated_rules: self.instantiated_rules,
@@ -84,7 +84,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
         config: &'a Config,
-        language: SupportedLanguage,
+        supported_language_language: SupportedLanguageLanguage,
         aggregated_queries: &'a AggregatedQueries,
         query: &'a Arc<Query>,
         instantiated_rules: &'a [InstantiatedRule],
@@ -99,7 +99,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             file_contents,
             tree,
             config,
-            language,
+            supported_language_language,
             aggregated_queries,
             query,
             instantiated_rules,
@@ -119,6 +119,10 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             .downcast_ref::<TFromFileRunContext>()
             .unwrap()
     }
+
+    pub fn language(&self) -> SupportedLanguage {
+        self.supported_language_language.supported_language()
+    }
 }
 
 impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
@@ -133,7 +137,7 @@ impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
 
 impl From<FileRunContext<'_, '_>> for SupportedLanguage {
     fn from(value: FileRunContext<'_, '_>) -> Self {
-        value.language
+        value.language()
     }
 }
 
@@ -202,7 +206,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     ) -> Option<Node<'enclosing_node>> {
         let query = query
             .into()
-            .into_parsed(self.file_run_context.language.language());
+            .into_parsed(self.file_run_context.supported_language_language.language());
         let captures = tree_sitter_grep::get_captures_for_enclosing_node(
             self.file_run_context.file_contents,
             &query,
@@ -235,7 +239,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     ) -> usize {
         let query = query
             .into()
-            .into_parsed(self.file_run_context.language.language());
+            .into_parsed(self.file_run_context.supported_language_language.language());
         tree_sitter_grep::get_captures_for_enclosing_node(
             self.file_run_context.file_contents,
             &query,
@@ -269,7 +273,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_tokens(node)
             .skip(skip_options.skip())
             .filter(move |node| {
@@ -301,7 +305,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -331,7 +335,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -340,7 +344,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     }
 
     pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         let end = end.start_byte();
         get_tokens_after_node(start)
             .take_while(|node| node.start_byte() < end)
@@ -362,7 +366,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -385,7 +389,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -408,7 +412,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
         let b_start = b.start_byte();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_tokens_after_node(a)
             .take_while(move |token| token.start_byte() < b_start)
             .skip(skip_options.skip())
@@ -423,12 +427,12 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     }
 
     pub fn get_comments_after(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         get_tokens_after_node(node).take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn language(&self) -> SupportedLanguage {
-        self.file_run_context.language
+        self.file_run_context.language()
     }
 
     pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
@@ -438,12 +442,12 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     }
 
     pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         get_tokens_before_node(node).take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn get_comments_inside(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         get_tokens(node).filter(|node| comment_kinds.contains(node.kind()))
     }
 
@@ -453,7 +457,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         count_options: Option<impl Into<CountOptions<TFilter>>>,
     ) -> impl Iterator<Item = Node<'a>> {
         let mut count_options = count_options.map(Into::into).unwrap_or_default();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_tokens(node)
             .take(count_options.count())
             .filter(move |node| {
@@ -490,7 +494,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         count_options: Option<impl Into<CountOptions<TFilter>>>,
     ) -> impl Iterator<Item = Node<'a>> {
         let mut count_options = count_options.map(Into::into).unwrap_or_default();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_backward_tokens(node)
             .take(count_options.count())
             .filter(move |node| {
@@ -528,7 +532,7 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
 
 impl From<&'_ QueryMatchContext<'_, '_>> for SupportedLanguage {
     fn from(value: &'_ QueryMatchContext<'_, '_>) -> Self {
-        value.file_run_context.language
+        value.file_run_context.language()
     }
 }
 
