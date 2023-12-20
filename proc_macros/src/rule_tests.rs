@@ -149,6 +149,7 @@ struct SingleValidRuleTestSpec {
     options: Option<RuleOptions>,
     only: Option<Expr>,
     environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
+    supported_language_languages: Option<Vec<Ident>>,
 }
 
 impl Parse for SingleValidRuleTestSpec {
@@ -157,6 +158,7 @@ impl Parse for SingleValidRuleTestSpec {
         let mut options: Option<RuleOptions> = Default::default();
         let mut only: Option<Expr> = Default::default();
         let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
+        let mut supported_language_languages: Option<Vec<Ident>> = Default::default();
         if input.peek(token::Brace) {
             let content;
             braced!(content in input);
@@ -176,6 +178,18 @@ impl Parse for SingleValidRuleTestSpec {
                     "environment" => {
                         environment = Some(content.parse()?);
                     }
+                    "supported_language_languages" => {
+                        assert!(supported_language_languages.is_none(), "Already saw 'supported_language_languages' key");
+                        let supported_language_languages_content;
+                        bracketed!(supported_language_languages_content in content);
+                        let supported_language_languages = supported_language_languages.get_or_insert_with(|| Default::default());
+                        while !supported_language_languages_content.is_empty() {
+                            supported_language_languages.push(supported_language_languages_content.parse()?);
+                            if !supported_language_languages_content.is_empty() {
+                                supported_language_languages_content.parse::<Token![,]>()?;
+                            }
+                        }
+                    }
                     _ => panic!("didn't expect key '{}'", key),
                 }
                 if !content.is_empty() {
@@ -190,6 +204,7 @@ impl Parse for SingleValidRuleTestSpec {
             options,
             only,
             environment,
+            supported_language_languages,
         })
     }
 }
@@ -222,12 +237,19 @@ impl ToTokens for SingleValidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let supported_language_languages = match self.supported_language_languages.as_ref() {
+            Some(supported_language_languages) => quote! {
+                Some(vec![#(tree_sitter_lint::tree_sitter_grep::SupportedLanguageLanguage::#supported_language_languages),*])
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestValid::new(
                 #code,
                 #options,
                 #only,
-                #environment
+                #environment,
+                #supported_language_languages
             )
         }
         .to_tokens(tokens)
@@ -490,6 +512,7 @@ struct SingleInvalidRuleTestSpec {
     options: Option<RuleOptions>,
     only: Option<Expr>,
     environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
+    supported_language_languages: Option<Vec<Ident>>,
 }
 
 impl Parse for SingleInvalidRuleTestSpec {
@@ -500,6 +523,7 @@ impl Parse for SingleInvalidRuleTestSpec {
         let mut options: Option<RuleOptions> = Default::default();
         let mut only: Option<Expr> = Default::default();
         let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
+        let mut supported_language_languages: Option<Vec<Ident>> = Default::default();
         let content;
         braced!(content in input);
         while !content.is_empty() {
@@ -524,6 +548,18 @@ impl Parse for SingleInvalidRuleTestSpec {
                 "environment" => {
                     environment = Some(content.parse()?);
                 }
+                "supported_language_languages" => {
+                    assert!(supported_language_languages.is_none(), "Already saw 'supported_language_languages' key");
+                    let supported_language_languages_content;
+                    bracketed!(supported_language_languages_content in content);
+                    let supported_language_languages = supported_language_languages.get_or_insert_with(|| Default::default());
+                    while !supported_language_languages_content.is_empty() {
+                        supported_language_languages.push(supported_language_languages_content.parse()?);
+                        if !supported_language_languages_content.is_empty() {
+                            supported_language_languages_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !content.is_empty() {
@@ -537,6 +573,7 @@ impl Parse for SingleInvalidRuleTestSpec {
             options,
             only,
             environment,
+            supported_language_languages,
         })
     }
 }
@@ -579,6 +616,12 @@ impl ToTokens for SingleInvalidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let supported_language_languages = match self.supported_language_languages.as_ref() {
+            Some(supported_language_languages) => quote! {
+                Some(vec![#(tree_sitter_lint::tree_sitter_grep::SupportedLanguageLanguage::#supported_language_languages),*])
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
@@ -586,7 +629,8 @@ impl ToTokens for SingleInvalidRuleTestSpec {
                 #output,
                 #options,
                 #only,
-                #environment
+                #environment,
+                #supported_language_languages,
             )
         }
         .to_tokens(tokens)

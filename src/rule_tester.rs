@@ -193,7 +193,8 @@ impl RuleTester {
                                     format!(" ({})", test_result.supported_language_language)
                                 } else {
                                     "".to_owned()
-                                }.dimmed(),
+                                }
+                                .dimmed(),
                                 if test_result.was_invalid { "i" } else { "v" },
                                 "✔".green()
                             );
@@ -213,7 +214,8 @@ impl RuleTester {
                                     format!(" ({})", test_result.supported_language_language)
                                 } else {
                                     "".to_owned()
-                                }.dimmed(),
+                                }
+                                .dimmed(),
                                 if test_result.was_invalid { "i" } else { "v" },
                                 "✗".red()
                             );
@@ -228,7 +230,28 @@ impl RuleTester {
     }
 
     fn run_valid_test(&self, valid_test: &RuleTestValid) {
+        if let Some(supported_language_languages) = valid_test.supported_language_languages.as_ref()
+        {
+            for &supported_language_language in supported_language_languages {
+                if !self
+                    .supported_language_languages
+                    .contains(&supported_language_language)
+                {
+                    panic!(
+                        "Invalid supported_language_languages specified: {supported_language_languages:#?}, valid languages are: {:#?}",
+                        self.supported_language_languages
+                    );
+                }
+            }
+        }
+
         for &supported_language_language in &self.supported_language_languages {
+            if let Some(supported_language_languages) = valid_test.supported_language_languages.as_ref() {
+                if !supported_language_languages.contains(&supported_language_language) {
+                    continue;
+                }
+            }
+
             let (violations, _) = crate::run_for_slice(
                 valid_test.code.as_bytes(),
                 None,
@@ -281,7 +304,28 @@ impl RuleTester {
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
+        if let Some(supported_language_languages) = invalid_test.supported_language_languages.as_ref()
+        {
+            for &supported_language_language in supported_language_languages {
+                if !self
+                    .supported_language_languages
+                    .contains(&supported_language_language)
+                {
+                    panic!(
+                        "Invalid supported_language_languages specified: {supported_language_languages:#?}, valid languages are: {:#?}",
+                        self.supported_language_languages
+                    );
+                }
+            }
+        }
+
         for &supported_language_language in &self.supported_language_languages {
+            if let Some(supported_language_languages) = invalid_test.supported_language_languages.as_ref() {
+                if !supported_language_languages.contains(&supported_language_language) {
+                    continue;
+                }
+            }
+
             let mut file_contents = invalid_test.code.clone().into_bytes();
             let FixingForSliceRunStatus { violations, .. } = crate::run_fixing_for_slice(
                 &mut file_contents,
@@ -310,7 +354,11 @@ impl RuleTester {
                 Default::default(),
             );
 
-            if !self.check_that_violations_match_expected(&violations, invalid_test, supported_language_language) {
+            if !self.check_that_violations_match_expected(
+                &violations,
+                invalid_test,
+                supported_language_language,
+            ) {
                 if self.should_aggregate_results {
                     continue;
                 } else {
@@ -646,6 +694,8 @@ pub struct RuleTestValid {
     pub only: Option<bool>,
     #[builder(default)]
     pub environment: Option<Environment>,
+    #[builder(default)]
+    pub supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
 }
 
 impl RuleTestValid {
@@ -654,25 +704,27 @@ impl RuleTestValid {
         options: Option<RuleOptions>,
         only: Option<bool>,
         environment: Option<Environment>,
+        supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
     ) -> Self {
         Self {
             code: code.into(),
             options,
             only,
             environment,
+            supported_language_languages,
         }
     }
 }
 
 impl From<&str> for RuleTestValid {
     fn from(value: &str) -> Self {
-        Self::new(value, None, None, None)
+        Self::new(value, None, None, None, None)
     }
 }
 
 impl From<String> for RuleTestValid {
     fn from(value: String) -> Self {
-        Self::new(value, None, None, None)
+        Self::new(value, None, None, None, None)
     }
 }
 
@@ -689,6 +741,8 @@ pub struct RuleTestInvalid {
     pub only: Option<bool>,
     #[builder(default)]
     pub environment: Option<Environment>,
+    #[builder(default)]
+    pub supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
 }
 
 impl RuleTestInvalid {
@@ -699,6 +753,7 @@ impl RuleTestInvalid {
         options: Option<RuleOptions>,
         only: Option<bool>,
         environment: Option<Environment>,
+        supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
     ) -> Self {
         Self {
             code: code.into(),
@@ -707,6 +762,7 @@ impl RuleTestInvalid {
             options,
             only,
             environment,
+            supported_language_languages,
         }
     }
 }
