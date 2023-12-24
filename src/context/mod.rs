@@ -42,6 +42,7 @@ use crate::{
     AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider,
 };
 
+#[derive(Copy, Clone)]
 pub struct FileRunContext<'a, 'b> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
@@ -50,32 +51,13 @@ pub struct FileRunContext<'a, 'b> {
     pub supported_language_language: SupportedLanguageLanguage,
     pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
+    #[allow(dead_code)]
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
+    #[allow(dead_code)]
     changed_ranges: Option<&'a [Range]>,
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
     pub run_kind: RunKind<'a>,
     pub environment: &'a Environment,
-}
-
-impl<'a, 'b> Copy for FileRunContext<'a, 'b> {}
-
-impl<'a, 'b> Clone for FileRunContext<'a, 'b> {
-    fn clone(&self) -> Self {
-        Self {
-            path: self.path,
-            file_contents: self.file_contents,
-            tree: self.tree,
-            config: self.config,
-            supported_language_language: self.supported_language_language,
-            aggregated_queries: self.aggregated_queries,
-            query: self.query,
-            instantiated_rules: self.instantiated_rules,
-            changed_ranges: self.changed_ranges,
-            from_file_run_context_instance_provider: self.from_file_run_context_instance_provider,
-            run_kind: self.run_kind,
-            environment: self.environment,
-        }
-    }
 }
 
 impl<'a, 'b> FileRunContext<'a, 'b> {
