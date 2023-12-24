@@ -28,6 +28,7 @@ pub struct ParsedConfigFileContent {
     #[serde(default)]
     pub rules: Rules,
     pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
+    #[serde(default)]
     pub extends: Vec<ConfigurationReference>,
 }
 

@@ -231,12 +231,14 @@ fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str)
         use tree_sitter_lint::squalid::NonEmpty;
 
         fn main() {
-            if env::var("TRACE_CHROME").ok().is_non_empty() {
-                let (chrome_layer, _guard) = ChromeLayerBuilder::new().include_args(true).build();
+            let _guard = if env::var("TRACE_CHROME").ok().is_non_empty() {
+                let (chrome_layer, guard) = ChromeLayerBuilder::new().include_args(true).build();
                 tracing_subscriber::registry().with(chrome_layer).init();
+                Some(guard)
             } else {
                 tracing_subscriber::fmt::init();
-            }
+                None
+            };
 
             #local_binary_crate_name::run_and_output();
         }

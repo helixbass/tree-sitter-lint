@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tree_sitter_lint::{
     better_any::tid, rule, tree_sitter_grep::RopeOrSlice, violation, FileRunContext,
-    FromFileRunContext, Plugin, Rule,
+    FromFileRunContext, Plugin, PluginBuilder, Rule,
 };
 
 // pub type ProvidedTypes<'a> = ();
@@ -30,14 +30,15 @@ impl<'a> FromFileRunContext<'a> for Foo<'a> {
 tid! { impl<'a> TidAble<'a> for Foo<'a> }
 
 pub fn instantiate() -> Plugin {
-    Plugin {
-        name: "replace-foo-with".to_owned(),
-        rules: vec![
+    PluginBuilder::default()
+        .name("replace-foo-with")
+        .rules(vec![
             replace_foo_with_bar_rule(),
             replace_foo_with_something_rule(),
             starts_with_use_rule(),
-        ],
-    }
+        ])
+        .build()
+        .unwrap()
 }
 
 fn replace_foo_with_bar_rule() -> Arc<dyn Rule> {

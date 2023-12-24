@@ -8,7 +8,7 @@ tree-sitter-lint = { path = "../.." }
 local_rules = { path = "../local_rules" }
 tree-sitter-lint-plugin-replace-foo-with = { path = "../.././tests/fixtures/tree-sitter-lint-plugin-replace-foo-with" }
 tracing = "0.1.37"
-tracing-subscriber = "0.3.17"
+tracing-subscriber = { version = "0.3.17", features = ["std", "fmt", "env-filter"] }
 tracing-chrome = "0.7.1"
 
 [patch.crates-io]
