@@ -7,6 +7,7 @@ use std::{
 use clap::Parser;
 use derive_builder::Builder;
 use serde::Deserialize;
+use tracing::{instrument, trace_span};
 
 use crate::{
     rule::{InstantiatedRule, Rule, RuleOptions},
@@ -16,7 +17,7 @@ use crate::{
 mod config_file;
 pub use config_file::{find_config_file, load_config_file, ParsedConfigFile};
 
-#[derive(Builder, Default, Parser)]
+#[derive(Builder, Debug, Default, Parser)]
 #[builder(default, setter(into, strip_option))]
 pub struct Args {
     #[arg(long)]
@@ -120,6 +121,8 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
         ),
     > {
         self.rules_by_plugin_prefixed_name.get_or_init(|| {
+            let _span = trace_span!("rules by plugin prefixed name init").entered();
+
             let mut rules_by_plugin_prefixed_name: HashMap<
                 String,
                 (
@@ -148,6 +151,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
     }
 
     #[allow(clippy::type_complexity)]
+    #[instrument(level = "trace", skip(self))]
     fn get_active_rules_and_associated_plugins_and_options(
         &self,
     ) -> Vec<(
@@ -209,6 +213,7 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn get_instantiated_rules(
         &self,
     ) -> Vec<InstantiatedRule<TFromFileRunContextInstanceProviderFactory>> {
@@ -219,12 +224,15 @@ impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProvi
         }
         let active_rules_and_associated_plugins_and_options =
             self.filter_based_on_rule_argument(active_rules_and_associated_plugins_and_options);
-        active_rules_and_associated_plugins_and_options
-            .into_iter()
-            .map(|(rule, plugin_index, rule_config)| {
-                InstantiatedRule::new(rule.clone(), plugin_index, rule_config, self)
-            })
-            .collect()
+
+        trace_span!("instantiate rules").in_scope(|| {
+            active_rules_and_associated_plugins_and_options
+                .into_iter()
+                .map(|(rule, plugin_index, rule_config)| {
+                    InstantiatedRule::new(rule.clone(), plugin_index, rule_config, self)
+                })
+                .collect()
+        })
     }
 
     pub fn get_plugin_name(&self, plugin_index: PluginIndex) -> &str {

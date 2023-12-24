@@ -162,12 +162,13 @@ impl RuleListenerQuery {
         let query = Query::new(language, &self.query).unwrap();
         let resolved_match_by = match &self.match_by {
             MatchBy::PerCapture { capture_name } => ResolvedMatchBy::PerCapture {
-                capture_index: match capture_name.as_ref() {
+                capture_name: match capture_name.as_ref() {
                     None => match query.capture_names().len() {
                         0 => panic!("Expected capture"),
-                        _ => 0,
+                        _ => query.capture_names()[0].clone(),
                     },
-                    Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+                    // Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+                    Some(capture_name) => capture_name.clone(),
                 },
             },
             MatchBy::PerMatch => ResolvedMatchBy::PerMatch,
@@ -181,7 +182,7 @@ impl RuleListenerQuery {
 }
 
 pub enum ResolvedMatchBy {
-    PerCapture { capture_index: u32 },
+    PerCapture { capture_name: String },
     PerMatch,
 }
 
@@ -189,17 +190,6 @@ pub struct ResolvedRuleListenerQuery {
     pub query: Query,
     pub query_text: String,
     pub match_by: ResolvedMatchBy,
-}
-
-impl ResolvedRuleListenerQuery {
-    pub fn capture_name(&self) -> &str {
-        match &self.match_by {
-            ResolvedMatchBy::PerCapture { capture_index } => {
-                &self.query.capture_names()[*capture_index as usize]
-            }
-            _ => panic!("Called capture_name() for PerMatch"),
-        }
-    }
 }
 
 pub type RuleOptions = serde_json::Value;

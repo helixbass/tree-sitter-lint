@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
 use derive_builder::Builder;
 use tree_sitter_grep::tree_sitter::Range;
@@ -23,6 +23,18 @@ pub struct Violation<'a> {
     pub data: Option<ViolationData>,
     #[builder(default)]
     pub range: Option<Range>,
+}
+
+impl<'a> fmt::Debug for Violation<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Violation")
+            .field("message_or_message_id", &self.message_or_message_id)
+            .field("node", &self.node)
+            .field("has_fix", &self.fix.is_some())
+            .field("data", &self.data)
+            .field("range", &self.range)
+            .finish()
+    }
 }
 
 impl<'a> Violation<'a> {

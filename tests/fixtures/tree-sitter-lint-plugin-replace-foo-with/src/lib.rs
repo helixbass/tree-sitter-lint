@@ -18,7 +18,6 @@ impl<'a> FromFileRunContext<'a> for Foo<'a> {
     fn from_file_run_context(
         file_run_context: FileRunContext<'a, '_, impl FromFileRunContextInstanceProviderFactory>,
     ) -> Self {
-        println!("instantiating Foo for {:#?}", file_run_context.path);
         Self {
             text: match &file_run_context.file_contents {
                 RopeOrSlice::Slice(file_contents) => {
