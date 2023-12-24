@@ -1,12 +1,13 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
+use tracing::{instrument, trace_span};
 use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
     context::{FileRunContext, QueryMatchContext},
     tree_sitter::{Language, Node, Query},
-    Config, FromFileRunContextInstanceProviderFactory,
+    Config,
 };
 
 #[derive(Clone, Debug)]
@@ -17,47 +18,37 @@ pub struct RuleMeta {
     pub messages: Option<HashMap<String, String>>,
 }
 
-pub trait Rule<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->: Send + Sync
-{
+pub trait Rule: Send + Sync {
     fn meta(&self) -> RuleMeta;
     fn instantiate(
         self: Arc<Self>,
-        config: &Config<TFromFileRunContextInstanceProviderFactory>,
+        config: &Config,
         rule_configuration: &RuleConfiguration,
-    ) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
+    ) -> Arc<dyn RuleInstance>;
 }
 
-pub trait RuleInstance<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->: Send + Sync
-{
+pub trait RuleInstance: Send + Sync {
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_context: FileRunContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
-    ) -> Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>;
-    fn rule(&self) -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>;
+        file_run_context: FileRunContext<'a, '_>,
+    ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
+    fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
 
-pub struct InstantiatedRule<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-> {
+pub struct InstantiatedRule {
     pub meta: RuleMeta,
-    pub rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
-    pub rule_instance: Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>,
+    pub rule: Arc<dyn Rule>,
+    pub rule_instance: Arc<dyn RuleInstance>,
     pub plugin_index: Option<PluginIndex>,
 }
 
-impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
-    InstantiatedRule<TFromFileRunContextInstanceProviderFactory>
-{
+impl InstantiatedRule {
     pub fn new(
-        rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
+        rule: Arc<dyn Rule>,
         plugin_index: Option<PluginIndex>,
         rule_configuration: &RuleConfiguration,
-        config: &Config<TFromFileRunContextInstanceProviderFactory>,
+        config: &Config,
     ) -> Self {
         Self {
             meta: rule.meta(),
@@ -133,33 +124,39 @@ impl<'a, 'b> ops::Index<&str> for Captures<'a, 'b> {
     }
 }
 
-pub trait RuleInstancePerFile<
-    'a,
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->
-{
+pub trait RuleInstancePerFile<'a> {
     fn on_query_match<'b>(
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
+        context: &mut QueryMatchContext<'a, '_>,
     );
-    fn rule_instance(&self) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
+    fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
 
+#[derive(Debug)]
 pub enum MatchBy {
     PerCapture { capture_name: Option<String> },
     PerMatch,
 }
 
+#[derive(Debug)]
 pub struct RuleListenerQuery {
     pub query: String,
     pub match_by: MatchBy,
 }
 
 impl RuleListenerQuery {
+    #[instrument(level = "trace")]
     pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
+        let span = trace_span!("parse individual rule listener query").entered();
+
         let query = Query::new(language, &self.query).unwrap();
+
+        span.exit();
+
+        let span = trace_span!("resolve capture name").entered();
+
         let resolved_match_by = match &self.match_by {
             MatchBy::PerCapture { capture_name } => ResolvedMatchBy::PerCapture {
                 capture_name: match capture_name.as_ref() {
@@ -173,6 +170,9 @@ impl RuleListenerQuery {
             },
             MatchBy::PerMatch => ResolvedMatchBy::PerMatch,
         };
+
+        span.exit();
+
         ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
@@ -193,5 +193,3 @@ pub struct ResolvedRuleListenerQuery {
 }
 
 pub type RuleOptions = serde_json::Value;
-
-pub const ROOT_EXIT: &str = "__tree_sitter_lint_program_exit";

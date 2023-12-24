@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tree_sitter_lint::{FromFileRunContextInstanceProviderFactory, Rule};
+use tree_sitter_lint::Rule;
 
 mod rules;
 
@@ -9,7 +9,7 @@ use rules::{
     require_blazing_keyword_rule,
 };
 
-pub fn get_rules<T: FromFileRunContextInstanceProviderFactory>() -> Vec<Arc<dyn Rule<T>>> {
+pub fn get_rules() -> Vec<Arc<dyn Rule>> {
     vec![
         no_default_default_rule(),
         no_lazy_static_rule(),

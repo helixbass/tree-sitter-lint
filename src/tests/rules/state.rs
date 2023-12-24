@@ -6,7 +6,7 @@ use proc_macros::{
 };
 use tree_sitter_grep::tree_sitter::Node;
 
-use crate::{FromFileRunContextInstanceProviderFactory, Rule, RuleTester};
+use crate::{Rule, RuleTester};
 
 #[test]
 fn test_per_file_run_state() {
@@ -39,9 +39,7 @@ fn test_per_file_run_state() {
     );
 }
 
-fn no_more_than_5_uses_of_foo_rule<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->() -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>> {
+fn no_more_than_5_uses_of_foo_rule() -> Arc<dyn Rule> {
     rule! {
         name => "no_more_than_5_uses_of_foo",
         state => {

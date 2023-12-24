@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use crate::{FromFileRunContextInstanceProviderFactory, Rule};
+use crate::Rule;
 
 #[derive(Clone)]
-pub struct Plugin<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
-> {
+pub struct Plugin {
     pub name: String,
-    pub rules: Vec<Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>>,
+    pub rules: Vec<Arc<dyn Rule>>,
 }

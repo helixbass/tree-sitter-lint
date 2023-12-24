@@ -1,29 +1,27 @@
-use std::{path::Path, sync::Arc};
+use std::{any::TypeId, path::Path, sync::Arc};
 
 use tree_sitter_lint::{
-    better_any::TidAble,
+    better_any::Tid,
     clap::Parser,
     lsp::{self, LocalLinter},
     tree_sitter::Tree,
     tree_sitter_grep::{RopeOrSlice, SupportedLanguage},
-    Args, Config, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
+    Args, Config, FileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
     FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
     ViolationWithContext,
 };
 
 pub fn run_and_output() {
-    tracing_subscriber::fmt::init();
-
     tree_sitter_lint::run_and_output(
         args_to_config(Args::parse()),
-        FromFileRunContextInstanceProviderFactoryLocal,
+        &FromFileRunContextInstanceProviderFactoryLocal,
     );
 }
 
 pub fn run_for_slice<'a>(
     file_contents: impl Into<RopeOrSlice<'a>>,
-    tree: Option<&Tree>,
+    tree: Option<Tree>,
     path: impl AsRef<Path>,
     args: Args,
     language: SupportedLanguage,
@@ -40,7 +38,7 @@ pub fn run_for_slice<'a>(
 
 pub fn run_fixing_for_slice<'a>(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
-    tree: Option<&Tree>,
+    tree: Option<Tree>,
     path: impl AsRef<Path>,
     args: Args,
     language: SupportedLanguage,
@@ -61,7 +59,7 @@ impl LocalLinter for LocalLinterConcrete {
     fn run_for_slice<'a>(
         &self,
         file_contents: impl Into<RopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -72,7 +70,7 @@ impl LocalLinter for LocalLinterConcrete {
     fn run_fixing_for_slice<'a>(
         &self,
         file_contents: impl Into<MutRopeOrSlice<'a>>,
-        tree: Option<&Tree>,
+        tree: Option<Tree>,
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
@@ -85,28 +83,26 @@ pub async fn run_lsp() {
     lsp::run(LocalLinterConcrete).await;
 }
 
-fn args_to_config<T: FromFileRunContextInstanceProviderFactory>(args: Args) -> Config<T> {
+fn args_to_config(args: Args) -> Config {
     args.load_config_file_and_into_config(all_plugins(), all_standalone_rules())
 }
 
-fn all_plugins<T: FromFileRunContextInstanceProviderFactory>() -> Vec<Plugin<T>> {
+fn all_plugins() -> Vec<Plugin> {
     vec![tree_sitter_lint_plugin_replace_foo_with::instantiate()]
 }
 
-fn all_standalone_rules<T: FromFileRunContextInstanceProviderFactory>() -> Vec<Arc<dyn Rule<T>>> {
+fn all_standalone_rules() -> Vec<Arc<dyn Rule>> {
     local_rules::get_rules()
 }
 
 struct FromFileRunContextInstanceProviderFactoryLocal;
 
 impl FromFileRunContextInstanceProviderFactory for FromFileRunContextInstanceProviderFactoryLocal {
-    type Provider<'a> = FromFileRunContextInstanceProviderLocal<'a>;
-
-    fn create<'a>(&self) -> Self::Provider<'a> {
-        FromFileRunContextInstanceProviderLocal {
+    fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a> {
+        Box::new(FromFileRunContextInstanceProviderLocal {
             tree_sitter_lint_plugin_replace_foo_with_provided_instances:
                 tree_sitter_lint_plugin_replace_foo_with::ProvidedTypes::<'a>::once_lock_storage(),
-        }
+        })
     }
 }
 
@@ -116,13 +112,12 @@ struct FromFileRunContextInstanceProviderLocal<'a> {
 }
 
 impl<'a> FromFileRunContextInstanceProvider<'a> for FromFileRunContextInstanceProviderLocal<'a> {
-    type Parent = FromFileRunContextInstanceProviderFactoryLocal;
-
-    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+    fn get(
         &self,
-        file_run_context: FileRunContext<'a, '_, Self::Parent>,
-    ) -> Option<&T> {
+        type_id: TypeId,
+        file_run_context: FileRunContext<'a, '_>,
+    ) -> Option<&dyn Tid<'a>> {
         self.tree_sitter_lint_plugin_replace_foo_with_provided_instances
-            .get::<T>(file_run_context)
+            .get(type_id, file_run_context)
     }
 }

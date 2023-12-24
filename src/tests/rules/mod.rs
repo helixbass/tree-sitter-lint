@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::{
-    mem,
+    any::TypeId,
     sync::{Arc, OnceLock},
 };
 
@@ -18,7 +18,7 @@ mod violations;
 
 use crate::{
     rule::Rule, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, RuleTester, ROOT_EXIT,
+    FromFileRunContextInstanceProviderFactory, RuleTester,
 };
 
 #[test]
@@ -56,9 +56,7 @@ fn test_rule_options() {
     );
 }
 
-fn no_more_than_n_uses_of_foo_rule<
-    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
->() -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>> {
+fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
     rule! {
         name => "no_more_than_n_uses_of_foo",
         options_type => usize,
@@ -153,7 +151,7 @@ fn test_root_exit_listener() {
         rule! {
             name => "uses-root-exit-listener",
             listeners => [
-                ROOT_EXIT => |node, context| {
+                "source_file:exit" => |node, context| {
                     let mut cursor = node.walk();
                     if node.named_children(&mut cursor).count() != 1 {
                         context.report(violation! {
@@ -197,7 +195,7 @@ fn test_root_exit_listener_amid_other_listeners() {
                         message => "function",
                     });
                 },
-                ROOT_EXIT => |node, context| {
+                "source_file:exit" => |node, context| {
                     let mut cursor = node.walk();
                     if node.named_children(&mut cursor).count() != 1 {
                         context.report(violation! {
@@ -293,7 +291,7 @@ fn test_rule_test_errors_variable() {
 
 #[test]
 fn test_retrieve() {
-    use better_any::{tid, Tid, TidAble};
+    use better_any::{tid, Tid};
 
     #[derive(Clone)]
     struct Foo<'a> {
@@ -302,13 +300,7 @@ fn test_retrieve() {
     }
 
     impl<'a> FromFileRunContext<'a> for Foo<'a> {
-        fn from_file_run_context(
-            file_run_context: FileRunContext<
-                'a,
-                '_,
-                impl FromFileRunContextInstanceProviderFactory,
-            >,
-        ) -> Self {
+        fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self {
             Self {
                 text: match &file_run_context.file_contents {
                     RopeOrSlice::Slice(file_contents) => {
@@ -328,19 +320,16 @@ fn test_retrieve() {
     }
 
     impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
-        type Parent = FooProviderFactory;
-
-        fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+        fn get(
             &self,
-            file_run_context: FileRunContext<'a, '_, Self::Parent>,
-        ) -> Option<&T> {
-            match T::id() {
-                id if id == Foo::<'a>::id() => Some(unsafe {
-                    mem::transmute::<&Foo<'a>, &T>(
-                        self.foo_instance
-                            .get_or_init(|| Foo::from_file_run_context(file_run_context)),
-                    )
-                }),
+            type_id: TypeId,
+            file_run_context: FileRunContext<'a, '_>,
+        ) -> Option<&dyn Tid<'a>> {
+            match type_id {
+                id if id == Foo::<'a>::id() => Some(
+                    self.foo_instance
+                        .get_or_init(|| Foo::from_file_run_context(file_run_context)),
+                ),
                 _ => None,
             }
         }
@@ -349,12 +338,10 @@ fn test_retrieve() {
     struct FooProviderFactory;
 
     impl FromFileRunContextInstanceProviderFactory for FooProviderFactory {
-        type Provider<'a> = FooProvider<'a>;
-
-        fn create<'a>(&self) -> Self::Provider<'a> {
-            FooProvider {
+        fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a> {
+            Box::new(FooProvider {
                 foo_instance: Default::default(),
-            }
+            })
         }
     }
 
@@ -386,6 +373,6 @@ fn test_retrieve() {
                 },
             ]
         },
-        FooProviderFactory,
+        Box::new(FooProviderFactory),
     );
 }
