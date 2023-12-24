@@ -155,15 +155,6 @@ fn regenerate_local_binary(
 }
 
 fn release_build_local_binary(local_binary_project_directory: &Path) {
-    // TODO: remove this once https://github.com/rust-lang/cc-rs/issues/900 is resolved
-    let output = Command::new("cargo")
-        .args(["update", "-p", "cc", "--precise", "1.0.83"])
-        .current_dir(local_binary_project_directory)
-        .output()
-        .expect("Failed to execute cargo release build command");
-    if !output.status.success() {
-        panic!("Cargo release build of local binary project failed");
-    }
     let output = Command::new("cargo")
         .args(["build", "--release", "--bin", LOCAL_BINARY_PROJECT_NAME])
         .current_dir(local_binary_project_directory)
