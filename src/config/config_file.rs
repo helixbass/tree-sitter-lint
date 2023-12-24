@@ -25,6 +25,7 @@ pub type Rules = HashMap<String, RuleConfigurationValue>;
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ParsedConfigFileContent {
     pub plugins: Plugins,
+    #[serde(default)]
     pub rules: Rules,
     pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
     pub extends: Vec<ConfigurationReference>,
@@ -43,7 +44,7 @@ pub struct PluginSpecValue {
 #[derive(Builder, Clone, Deserialize)]
 pub struct RuleConfigurationValue {
     pub level: ErrorLevel,
-    #[builder(setter(strip_option))]
+    #[builder(default, setter(strip_option))]
     pub options: Option<RuleOptions>,
 }
 
