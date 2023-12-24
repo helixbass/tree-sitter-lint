@@ -1,12 +1,30 @@
 use std::collections::HashMap;
 
 use quote::ToTokens;
-use syn::{braced, bracketed, parse::ParseStream, spanned::Spanned, token, Expr, Ident, Token};
+use syn::{
+    braced, bracketed,
+    parse::{Parse, ParseStream},
+    spanned::Spanned,
+    token, Expr, Ident, Token,
+};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum ExprOrIdent {
     Expr(Expr),
     Ident(Ident),
+}
+
+impl Parse for ExprOrIdent {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        input
+            .parse::<Ident>()
+            .map(Self::Ident)
+            .or_else(|_| -> syn::Result<_> {
+                let key = input.parse::<Token![type]>()?;
+                Ok(Self::Ident(Ident::new("type_", key.span())))
+            })
+            .or_else(|_| Ok(Self::Expr(input.parse::<Expr>()?)))
+    }
 }
 
 impl ToTokens for ExprOrIdent {

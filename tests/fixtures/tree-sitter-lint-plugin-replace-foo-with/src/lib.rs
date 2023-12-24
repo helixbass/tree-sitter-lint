@@ -69,7 +69,7 @@ fn replace_foo_with_something_rule() -> Arc<dyn Rule> {
         fixable => true,
         options_type => String,
         state => {
-            [per-run]
+            [per-config]
             replacement: String = options,
         },
         listeners => [

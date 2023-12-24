@@ -4,7 +4,8 @@ mod aggregated_queries;
 mod cli;
 mod config;
 mod context;
-mod event_emitter;
+mod environment;
+mod fixing;
 pub mod lsp;
 mod macros;
 mod node;
@@ -15,41 +16,41 @@ mod slice;
 #[cfg(test)]
 mod tests;
 mod text;
+mod treesitter;
 mod violation;
 
 use std::{
-    cmp::Ordering,
     collections::HashMap,
     fs,
-    ops::Deref,
     path::{Path, PathBuf},
     process,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
-pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, RuleConfiguration};
-use context::PendingFix;
+pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
 pub use context::{
-    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
-    FromFileRunContextProvidedTypesOnceLockStorage, QueryMatchContext, SkipOptions,
-    SkipOptionsBuilder,
+    get_tokens, CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
+    FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
+    FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
+    QueryMatchContext, RunKind, SkipOptions, SkipOptionsBuilder,
 };
 use dashmap::DashMap;
-pub use event_emitter::{Event, EventEmitter};
-pub use node::NodeExt;
+use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
+pub use fixing::{AccumulatedEdits, Fixer};
+pub use node::{compare_nodes, NodeExt, NonCommentChildren};
 pub use plugin::Plugin;
-pub use proc_macros::{builder_args, rule, rule_tests, violation};
+pub use proc_macros::{builder_args, instance_provider_factory, rule, rule_tests, violation};
 use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
 pub use rule::{
     MatchBy, NodeOrCaptures, Rule, RuleInstance, RuleInstancePerFile, RuleListenerQuery, RuleMeta,
 };
 pub use rule_tester::{
-    RuleTestExpectedError, RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid,
-    RuleTestValid, RuleTester, RuleTests,
+    DummyFromFileRunContextInstanceProviderFactory, RuleTestExpectedError,
+    RuleTestExpectedErrorBuilder, RuleTestExpectedOutput, RuleTestInvalid, RuleTestInvalidBuilder,
+    RuleTestValid, RuleTestValidBuilder, RuleTester, RuleTests,
 };
 pub use slice::MutRopeOrSlice;
 use squalid::EverythingExt;
@@ -59,15 +60,21 @@ use tree_sitter::Tree;
 use tree_sitter_grep::{
     get_matches, get_parser,
     streaming_iterator::StreamingIterator,
-    tree_sitter::{InputEdit, Node, Point, QueryMatch, Range},
-    Parseable, RopeOrSlice, SupportedLanguage,
+    tree_sitter::{Node, QueryMatch},
+    Parseable, RopeOrSlice, SupportedLanguage, SupportedLanguageLanguage,
 };
-pub use violation::{ViolationBuilder, ViolationWithContext};
+pub use treesitter::{
+    range_between_end_and_start, range_between_ends, range_between_start_and_end,
+    range_between_starts,
+};
+pub use violation::{ViolationBuilder, ViolationData, ViolationWithContext};
 
 pub extern crate better_any;
 pub extern crate clap;
+pub extern crate const_format;
 pub extern crate serde_json;
 pub extern crate serde_yaml;
+pub extern crate squalid;
 pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
@@ -93,8 +100,6 @@ pub fn run_and_output(
     process::exit(1);
 }
 
-const MAX_FIX_ITERATIONS: usize = 10;
-
 #[instrument(level = "debug", skip_all)]
 pub fn run(
     config: &Config,
@@ -102,7 +107,7 @@ pub fn run(
 ) -> Vec<ViolationWithContext> {
     let instantiated_rules = config.get_instantiated_rules();
     let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
-    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, None);
+    let tree_sitter_grep_args = get_tree_sitter_grep_args(&aggregated_queries, config, None);
     let all_violations: DashMap<PathBuf, Vec<ViolationWithContext>> = Default::default();
     let files_with_fixes: AllPendingFixes = Default::default();
 
@@ -110,21 +115,28 @@ pub fn run(
 
     tree_sitter_grep::run_with_single_per_file_callback(
         tree_sitter_grep_args,
-        |dir_entry, language, file_contents, tree, query| {
+        |dir_entry, supported_language_language, file_contents, tree, query| {
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
+            let path = dir_entry.path();
             run_per_file(
                 FileRunContext::new(
-                    dir_entry.path(),
+                    path,
                     file_contents,
                     tree,
                     config,
-                    language,
+                    supported_language_language,
                     &aggregated_queries,
                     query,
                     &instantiated_rules,
                     None,
                     &*from_file_run_context_instance_provider,
+                    if config.fix {
+                        RunKind::CommandLineFixingInitial
+                    } else {
+                        RunKind::CommandLineNonfixing
+                    },
+                    &config.environment,
                 ),
                 |violations| {
                     all_violations
@@ -136,9 +148,9 @@ pub fn run(
                     files_with_fixes.append(
                         dir_entry.path(),
                         file_contents,
-                        &instantiated_rule.meta.name,
+                        &instantiated_rule.meta,
                         fixes,
-                        language,
+                        supported_language_language,
                         tree.clone(),
                     )
                 },
@@ -206,6 +218,7 @@ pub fn run(
                     &instantiated_rules,
                     tree,
                     from_file_run_context_instance_provider_factory,
+                    RunKind::CommandLineFixingInitial,
                 );
                 (path, (file_contents, violations))
             },
@@ -228,7 +241,7 @@ pub fn run(
         .collect()
 }
 
-#[instrument(skip_all, fields(path = ?file_run_context.path, language = ?file_run_context.language))]
+#[instrument(skip_all, fields(path = ?file_run_context.path, language = ?file_run_context.language()))]
 fn run_per_file<'a, 'b>(
     file_run_context: FileRunContext<'a, 'b>,
     mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
@@ -236,16 +249,16 @@ fn run_per_file<'a, 'b>(
 ) {
     let mut instantiated_per_file_rules: HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>> =
         Default::default();
-    let mut node_stack: Vec<Node<'a>> = Default::default();
+    let mut node_stack: Vec<Node<'a>> = Vec::with_capacity(16);
     let mut saw_match = false;
     let wildcard_listener_pattern_index = file_run_context
         .aggregated_queries
-        .get_wildcard_listener_pattern_index(file_run_context.language);
+        .get_wildcard_listener_pattern_index(file_run_context.supported_language_language);
 
     let span = debug_span!("loop through query matches").entered();
 
     get_matches(
-        file_run_context.language.language(),
+        file_run_context.supported_language_language.language(),
         file_run_context.file_contents,
         file_run_context.query,
         Some(file_run_context.tree),
@@ -305,7 +318,7 @@ fn run_match<'a, 'b, 'c>(
         assert!(query_match.captures.len() == 1);
         let node = query_match.captures[0].node;
 
-        while !node_stack.is_empty() && !node.is_descendant_of(*node_stack.last().unwrap()) {
+        while !node_stack.is_empty() && node.end_byte() > node_stack.last().unwrap().end_byte() {
             run_exit_node_listeners(
                 node_stack.pop().unwrap(),
                 file_run_context,
@@ -315,13 +328,20 @@ fn run_match<'a, 'b, 'c>(
             );
         }
         node_stack.push(node);
+        run_enter_node_listeners(
+            node,
+            file_run_context,
+            instantiated_per_file_rules,
+            &mut on_found_violations,
+            &mut on_found_pending_fixes,
+        );
         return;
     }
 
     let (instantiated_rule, rule_listener_index, capture_index_if_per_capture) = file_run_context
         .aggregated_queries
         .get_rule_and_listener_index_and_capture_index(
-            file_run_context.language,
+            file_run_context.supported_language_language,
             query_match.pattern_index,
         );
 
@@ -339,12 +359,32 @@ fn run_match<'a, 'b, 'c>(
                 .into_iter()
                 .filter(|capture| capture.index == capture_index)
                 .for_each(|capture| {
+                    let node = capture.node;
+
+                    // I don't know if this "guarantees" that exit listeners
+                    // will be fired at the "expected" time wrt query listeners
+                    // (what about the "match-oriented" case below?)?
+                    // May be better to just "be symmetrical" and use "enter"
+                    // listeners to correspond to "exit" listeners (vs using
+                    // query listeners as the "enter" listeners)?
+                    while !node_stack.is_empty()
+                        && node.end_byte() > node_stack.last().unwrap().end_byte()
+                    {
+                        run_exit_node_listeners(
+                            node_stack.pop().unwrap(),
+                            file_run_context,
+                            instantiated_per_file_rules,
+                            &mut on_found_violations,
+                            &mut on_found_pending_fixes,
+                        );
+                    }
+
                     run_single_on_query_match_callback(
                         file_run_context,
                         instantiated_rule,
                         instantiated_per_file_rules,
                         rule_listener_index,
-                        capture.node.into(),
+                        node.into(),
                         &mut on_found_violations,
                         |fixes| on_found_pending_fixes(fixes, instantiated_rule),
                     );
@@ -360,7 +400,7 @@ fn run_match<'a, 'b, 'c>(
                     query_match,
                     file_run_context
                         .aggregated_queries
-                        .get_query_for_language(file_run_context.language),
+                        .get_query_for_language(file_run_context.supported_language_language),
                 )
                 .into(),
                 on_found_violations,
@@ -380,7 +420,10 @@ fn run_exit_node_listeners<'a, 'b>(
 ) {
     if let Some(kind_exit_rule_listener_indices) = file_run_context
         .aggregated_queries
-        .get_kind_exit_rule_and_listener_indices(file_run_context.language, exited_node.kind())
+        .get_kind_exit_rule_and_listener_indices(
+            file_run_context.supported_language_language,
+            exited_node.kind(),
+        )
     {
         kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
             run_single_on_query_match_callback(
@@ -389,6 +432,35 @@ fn run_exit_node_listeners<'a, 'b>(
                 instantiated_per_file_rules,
                 rule_listener_index,
                 exited_node.into(),
+                &mut on_found_violations,
+                |fixes| on_found_pending_fixes(fixes, instantiated_rule),
+            );
+        });
+    }
+}
+
+#[instrument(level = "trace", skip_all)]
+fn run_enter_node_listeners<'a, 'b>(
+    entered_node: Node<'a>,
+    file_run_context: FileRunContext<'a, 'b>,
+    instantiated_per_file_rules: &mut HashMap<RuleName, Box<dyn RuleInstancePerFile<'a> + 'a>>,
+    mut on_found_violations: impl FnMut(Vec<ViolationWithContext>),
+    mut on_found_pending_fixes: impl FnMut(Vec<PendingFix>, &InstantiatedRule),
+) {
+    if let Some(kind_enter_rule_listener_indices) = file_run_context
+        .aggregated_queries
+        .get_kind_enter_rule_and_listener_indices(
+            file_run_context.supported_language_language,
+            entered_node.kind(),
+        )
+    {
+        kind_enter_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
+            run_single_on_query_match_callback(
+                file_run_context,
+                instantiated_rule,
+                instantiated_per_file_rules,
+                rule_listener_index,
+                entered_node.into(),
                 &mut on_found_violations,
                 |fixes| on_found_pending_fixes(fixes, instantiated_rule),
             );
@@ -408,7 +480,7 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
 ) {
     trace!("running single on query match callback");
 
-    let mut query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
+    let query_match_context = QueryMatchContext::new(file_run_context, instantiated_rule);
     instantiated_per_file_rules
         .entry(instantiated_rule.meta.name.clone())
         .or_insert_with(|| {
@@ -434,7 +506,7 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
             rule_instance_per_file.on_query_match(
                 rule_listener_index,
                 node_or_captures,
-                &mut query_match_context,
+                &query_match_context,
             );
         });
 
@@ -448,99 +520,20 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-#[instrument(level = "debug", skip_all, fields(?path))]
-fn run_fixing_loop<'a>(
-    violations: &mut Vec<ViolationWithContext>,
-    file_contents: impl Into<MutRopeOrSlice<'a>>,
-    mut pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
-    aggregated_queries: &AggregatedQueries,
-    path: &Path,
-    config: &Config,
-    language: SupportedLanguage,
-    instantiated_rules: &[InstantiatedRule],
-    tree: Tree,
-    from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) {
-    let mut file_contents = file_contents.into();
-    let mut old_tree = tree;
-    for _ in 0..MAX_FIX_ITERATIONS {
-        let _span = debug_span!("single fixing loop pass").entered();
-
-        let input_edits = apply_fixes(&mut file_contents, pending_fixes);
-        for input_edit in &input_edits {
-            old_tree.edit(input_edit);
-        }
-        pending_fixes = Default::default();
-        if config.report_fixed_violations {
-            *violations = violations
-                .iter()
-                .filter(|violation| violation.had_fixes)
-                .cloned()
-                .collect();
-        } else {
-            violations.clear();
-        }
-
-        let parse_span = debug_span!("tree-sitter parse").entered();
-
-        let tree = RopeOrSlice::<'_>::from(&file_contents)
-            .parse(&mut get_parser(language.language()), Some(&old_tree))
-            .unwrap();
-        let changed_ranges = old_tree.changed_ranges(&tree).collect::<Vec<_>>();
-
-        parse_span.exit();
-
-        let from_file_run_context_instance_provider =
-            from_file_run_context_instance_provider_factory.create();
-        run_per_file(
-            FileRunContext::new(
-                path,
-                &file_contents,
-                &tree,
-                config,
-                language,
-                aggregated_queries,
-                &aggregated_queries
-                    .per_language
-                    .get(&language)
-                    .unwrap()
-                    .query,
-                instantiated_rules,
-                Some(&changed_ranges),
-                &*from_file_run_context_instance_provider,
-            ),
-            |reported_violations| {
-                violations.extend(reported_violations);
-            },
-            |fixes, instantiated_rule| {
-                pending_fixes
-                    .entry(instantiated_rule.meta.name.clone())
-                    .or_default()
-                    .extend(fixes);
-            },
-        );
-        if pending_fixes.is_empty() {
-            debug!("no fixes reported, exiting fixing loop");
-            break;
-        }
-    }
-}
-
 // pub struct RunForSliceStatus {
 //     pub violations: Vec<ViolationWithContext>,
 //     pub from_file_run_context_instance_provider: Box<dyn FromFileRunContextInstanceProvider>,
 // }
 
-#[instrument(skip_all, fields(path = ?path.as_ref(), ?language))]
+#[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]
 pub fn run_for_slice<'a>(
     file_contents: impl Into<RopeOrSlice<'a>>,
     tree: Option<Tree>,
     path: impl AsRef<Path>,
     config: Config,
-    language: SupportedLanguage,
+    supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> Vec<ViolationWithContext> {
+) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if config.fix {
@@ -553,7 +546,10 @@ pub fn run_for_slice<'a>(
         let _span = debug_span!("tree-sitter parse").entered();
 
         file_contents
-            .parse(&mut get_parser(language.language()), None)
+            .parse(
+                &mut get_parser(supported_language_language.language()),
+                None,
+            )
             .unwrap()
     });
     let from_file_run_context_instance_provider =
@@ -564,11 +560,11 @@ pub fn run_for_slice<'a>(
             file_contents,
             &tree,
             &config,
-            language,
+            supported_language_language,
             &aggregated_queries,
             &aggregated_queries
                 .per_language
-                .get(&language)
+                .get(&supported_language_language)
                 .unwrap()
                 .query,
             &instantiated_rules,
@@ -576,6 +572,8 @@ pub fn run_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            RunKind::NonfixingForSlice,
+            &config.environment,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -584,22 +582,24 @@ pub fn run_for_slice<'a>(
             panic!("Expected no fixes");
         },
     );
-    violations.into_inner().unwrap()
+    drop(from_file_run_context_instance_provider);
+    (violations.into_inner().unwrap(), instantiated_rules)
     // RunForSliceStatus {
     //     violations: violations.into_inner().unwrap(),
     //     from_file_run_context_instance_provider,
     // }
 }
 
-#[instrument(skip_all, fields(path = ?path.as_ref(), ?language))]
+#[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]
 pub fn run_fixing_for_slice<'a>(
     file_contents: impl Into<MutRopeOrSlice<'a>>,
     tree: Option<Tree>,
     path: impl AsRef<Path>,
     config: Config,
-    language: SupportedLanguage,
+    supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> Vec<ViolationWithContext> {
+    context: FixingForSliceRunContext,
+) -> FixingForSliceRunStatus {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if !config.fix {
@@ -611,11 +611,16 @@ pub fn run_fixing_for_slice<'a>(
         let _span = debug_span!("tree-sitter parse").entered();
 
         RopeOrSlice::<'_>::from(&file_contents)
-            .parse(&mut get_parser(language.language()), None)
+            .parse(
+                &mut get_parser(supported_language_language.language()),
+                None,
+            )
             .unwrap()
     });
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
-    let pending_fixes: Mutex<HashMap<RuleName, Vec<PendingFix>>> = Default::default();
+    #[allow(clippy::type_complexity)]
+    let pending_fixes: Mutex<HashMap<RuleName, (Vec<PendingFix>, Arc<RuleMeta>)>> =
+        Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
     run_per_file(
@@ -624,11 +629,11 @@ pub fn run_fixing_for_slice<'a>(
             &file_contents,
             &tree,
             &config,
-            language,
+            supported_language_language,
             &aggregated_queries,
             &aggregated_queries
                 .per_language
-                .get(&language)
+                .get(&supported_language_language)
                 .unwrap()
                 .query,
             &instantiated_rules,
@@ -636,6 +641,8 @@ pub fn run_fixing_for_slice<'a>(
             // ranges for LSP server use case?
             None,
             &*from_file_run_context_instance_provider,
+            RunKind::FixingForSliceInitial { context: &context },
+            &config.environment,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -645,33 +652,59 @@ pub fn run_fixing_for_slice<'a>(
                 .lock()
                 .unwrap()
                 .entry(instantiated_rule.meta.name.clone())
-                .or_default()
+                .or_insert_with(|| (Default::default(), instantiated_rule.meta.clone()))
+                .0
                 .extend(fixes);
         },
     );
     let mut violations = violations.into_inner().unwrap();
     let pending_fixes = pending_fixes.into_inner().unwrap();
     if pending_fixes.is_empty() {
-        return violations;
+        drop(from_file_run_context_instance_provider);
+        return FixingForSliceRunStatus {
+            violations,
+            instantiated_rules,
+            edits: Default::default(),
+        };
     }
     drop(from_file_run_context_instance_provider);
-    run_fixing_loop(
+    let accumulated_edits = run_fixing_loop(
         &mut violations,
         file_contents,
         pending_fixes,
         &aggregated_queries,
         path,
         &config,
-        language,
+        supported_language_language,
         &instantiated_rules,
         tree,
         from_file_run_context_instance_provider_factory,
+        RunKind::FixingForSliceInitial { context: &context },
     );
-    violations
+    FixingForSliceRunStatus {
+        violations,
+        instantiated_rules,
+        edits: Some(accumulated_edits),
+    }
+}
+
+pub struct FixingForSliceRunStatus {
+    violations: Vec<ViolationWithContext>,
+    #[allow(dead_code)]
+    instantiated_rules: Vec<InstantiatedRule>,
+    #[allow(dead_code)]
+    edits: Option<AccumulatedEdits>,
+}
+
+#[derive(Debug, Default)]
+pub struct FixingForSliceRunContext {
+    pub last_fixing_run_violations: Option<Vec<ViolationWithContext>>,
+    pub edits_since_last_fixing_run: Option<AccumulatedEdits>,
 }
 
 fn get_tree_sitter_grep_args(
     aggregated_queries: &AggregatedQueries,
+    config: &Config,
     language: Option<SupportedLanguage>,
 ) -> tree_sitter_grep::Args {
     tree_sitter_grep::ArgsBuilder::default()
@@ -682,6 +715,7 @@ fn get_tree_sitter_grep_args(
                 .map(|(&language, aggregated_query)| (language, aggregated_query.query.clone()))
                 .collect::<HashMap<_, _>>(),
         )
+        .paths(config.paths.clone())
         .maybe_language(language)
         .build()
         .unwrap()
@@ -697,146 +731,3 @@ fn write_files<'a>(files_to_write: impl Iterator<Item = (&'a Path, &'a [u8])>) {
 }
 
 type RuleName = String;
-
-#[instrument(level = "debug", skip_all)]
-fn apply_fixes(
-    file_contents: &mut MutRopeOrSlice,
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
-) -> Vec<InputEdit> {
-    let non_conflicting_sorted_pending_fixes =
-        get_sorted_non_conflicting_pending_fixes(pending_fixes);
-    non_conflicting_sorted_pending_fixes
-        .into_iter()
-        .rev()
-        .map(|PendingFix { range, replacement }| {
-            file_contents.splice(range.start_byte..range.end_byte, &replacement);
-            get_input_edit(range, &replacement)
-        })
-        .collect()
-}
-
-fn get_updated_end_point(range: Range, replacement: &str) -> Point {
-    let mut end_point: Point = range.end_point;
-    for ch in replacement.chars() {
-        if ch == '\n' {
-            end_point.row += 1;
-            end_point.column = 0;
-        } else {
-            end_point.column += 1;
-        }
-    }
-    end_point
-}
-
-fn get_input_edit(range: Range, replacement: &str) -> InputEdit {
-    InputEdit {
-        start_byte: range.start_byte,
-        old_end_byte: range.end_byte,
-        new_end_byte: range.start_byte + replacement.len(),
-        start_position: range.start_point,
-        old_end_position: range.end_point,
-        new_end_position: get_updated_end_point(range, replacement),
-    }
-}
-
-fn compare_pending_fixes(a: &PendingFix, b: &PendingFix) -> Ordering {
-    if a.range.start_byte < b.range.start_byte {
-        return Ordering::Less;
-    }
-    if a.range.start_byte > b.range.start_byte {
-        return Ordering::Greater;
-    }
-    if a.range.end_byte < b.range.end_byte {
-        return Ordering::Less;
-    }
-    if a.range.end_byte > b.range.end_byte {
-        return Ordering::Greater;
-    }
-    Ordering::Equal
-}
-
-fn has_overlapping_ranges(sorted_pending_fixes: &[PendingFix]) -> bool {
-    let mut prev_end = None;
-    for pending_fix in sorted_pending_fixes {
-        if let Some(prev_end) = prev_end {
-            if pending_fix.range.start_byte < prev_end {
-                return true;
-            }
-        }
-        prev_end = Some(pending_fix.range.end_byte);
-    }
-    false
-}
-
-fn get_sorted_non_conflicting_pending_fixes(
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
-) -> Vec<PendingFix> {
-    pending_fixes.into_iter().fold(
-        Default::default(),
-        |accumulated_fixes, (rule_name, mut pending_fixes_for_rule)| {
-            pending_fixes_for_rule.sort_by(compare_pending_fixes);
-            if has_overlapping_ranges(&pending_fixes_for_rule) {
-                panic!("Rule {:?} tried to apply self-conflicting fixes", rule_name);
-            }
-            let mut tentative = accumulated_fixes.clone();
-            tentative.extend(pending_fixes_for_rule);
-            if has_overlapping_ranges(&tentative) {
-                accumulated_fixes
-            } else {
-                tentative
-            }
-        },
-    )
-}
-
-#[derive(Default)]
-struct AllPendingFixes(DashMap<PathBuf, PerFilePendingFixes>);
-
-impl AllPendingFixes {
-    pub fn append(
-        &self,
-        path: &Path,
-        file_contents: &[u8],
-        rule_name: &str,
-        fixes: Vec<PendingFix>,
-        language: SupportedLanguage,
-        tree: Tree,
-    ) {
-        self.entry(path.to_owned())
-            .or_insert_with(|| PerFilePendingFixes::new(file_contents.to_owned(), language, tree))
-            .pending_fixes
-            .entry(rule_name.to_owned())
-            .or_default()
-            .extend(fixes);
-    }
-
-    pub fn into_inner(self) -> HashMap<PathBuf, PerFilePendingFixes> {
-        self.0.into_iter().collect()
-    }
-}
-
-impl Deref for AllPendingFixes {
-    type Target = DashMap<PathBuf, PerFilePendingFixes>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-struct PerFilePendingFixes {
-    file_contents: Vec<u8>,
-    pending_fixes: HashMap<RuleName, Vec<PendingFix>>,
-    language: SupportedLanguage,
-    tree: Tree,
-}
-
-impl PerFilePendingFixes {
-    fn new(file_contents: Vec<u8>, language: SupportedLanguage, tree: Tree) -> Self {
-        Self {
-            file_contents,
-            pending_fixes: Default::default(),
-            language,
-            tree,
-        }
-    }
-}

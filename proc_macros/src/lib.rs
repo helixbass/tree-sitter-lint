@@ -2,12 +2,14 @@ use proc_macro::TokenStream;
 
 mod builder_args;
 mod helpers;
+mod instance_provider_factory;
 mod rule;
 mod rule_tests;
 mod shared;
 mod violation;
 
 use helpers::ArrowSeparatedKeyValuePairs;
+use instance_provider_factory::instance_provider_factory_with_crate_name;
 use rule::rule_with_crate_name;
 use violation::violation_with_crate_name;
 
@@ -44,4 +46,14 @@ pub fn violation(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn violation_crate_internal(input: TokenStream) -> TokenStream {
     violation_with_crate_name(input, "crate")
+}
+
+#[proc_macro]
+pub fn instance_provider_factory(input: TokenStream) -> TokenStream {
+    instance_provider_factory_with_crate_name(input, "tree_sitter_lint")
+}
+
+#[proc_macro]
+pub fn instance_provider_factory_crate_internal(input: TokenStream) -> TokenStream {
+    instance_provider_factory_with_crate_name(input, "crate")
 }

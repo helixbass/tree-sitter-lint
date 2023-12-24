@@ -1,7 +1,10 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
 use tracing::{instrument, trace_span};
-use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
+use tree_sitter_grep::{
+    tree_sitter::{QueryError, QueryMatch},
+    SupportedLanguage,
+};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
@@ -16,10 +19,12 @@ pub struct RuleMeta {
     pub fixable: bool,
     pub languages: Vec<SupportedLanguage>,
     pub messages: Option<HashMap<String, String>>,
+    pub allow_self_conflicting_fixes: bool,
+    pub concatenate_adjacent_insert_fixes: bool,
 }
 
 pub trait Rule: Send + Sync {
-    fn meta(&self) -> RuleMeta;
+    fn meta(&self) -> Arc<RuleMeta>;
     fn instantiate(
         self: Arc<Self>,
         config: &Config,
@@ -37,7 +42,7 @@ pub trait RuleInstance: Send + Sync {
 }
 
 pub struct InstantiatedRule {
-    pub meta: RuleMeta,
+    pub meta: Arc<RuleMeta>,
     pub rule: Arc<dyn Rule>,
     pub rule_instance: Arc<dyn RuleInstance>,
     pub plugin_index: Option<PluginIndex>,
@@ -129,7 +134,7 @@ pub trait RuleInstancePerFile<'a> {
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a, '_>,
+        context: &QueryMatchContext<'a, '_>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
@@ -148,10 +153,10 @@ pub struct RuleListenerQuery {
 
 impl RuleListenerQuery {
     #[instrument(level = "trace")]
-    pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
+    pub fn resolve(&self, language: Language) -> Result<ResolvedRuleListenerQuery, QueryError> {
         let span = trace_span!("parse individual rule listener query").entered();
 
-        let query = Query::new(language, &self.query).unwrap();
+        let query = Query::new(language, &self.query)?;
 
         span.exit();
 
@@ -164,7 +169,6 @@ impl RuleListenerQuery {
                         0 => panic!("Expected capture"),
                         _ => query.capture_names()[0].clone(),
                     },
-                    // Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
                     Some(capture_name) => capture_name.clone(),
                 },
             },
@@ -173,11 +177,11 @@ impl RuleListenerQuery {
 
         span.exit();
 
-        ResolvedRuleListenerQuery {
+        Ok(ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
             match_by: resolved_match_by,
-        }
+        })
     }
 }
 

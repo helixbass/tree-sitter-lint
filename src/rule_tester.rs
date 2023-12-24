@@ -1,23 +1,30 @@
-use std::{any::TypeId, cmp::Ordering, iter, marker::PhantomData, sync::Arc};
+use std::{any::TypeId, cell::RefCell, cmp::Ordering, env, iter, marker::PhantomData, sync::Arc};
 
 use better_any::Tid;
 use derive_builder::Builder;
-use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
+use squalid::NonEmpty;
+use tree_sitter_grep::{tree_sitter::Range, SupportedLanguageLanguage};
 
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
     context::FromFileRunContextInstanceProvider,
+    environment::{deep_merged, Environment},
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
-    FileRunContext, FromFileRunContextInstanceProviderFactory, RuleConfiguration,
+    FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
+    RuleConfiguration,
 };
 
 pub struct RuleTester {
     rule: Arc<dyn Rule>,
     rule_tests: RuleTests,
-    language: SupportedLanguage,
+    supported_language_languages: Vec<SupportedLanguageLanguage>,
     from_file_run_context_instance_provider_factory:
         Box<dyn FromFileRunContextInstanceProviderFactory>,
+    plugins: Vec<Plugin>,
+    should_aggregate_results: bool,
+    aggregated_results: RefCell<Vec<TestResult>>,
+    environment: Environment,
 }
 
 impl RuleTester {
@@ -27,6 +34,8 @@ impl RuleTester {
         from_file_run_context_instance_provider_factory: Box<
             dyn FromFileRunContextInstanceProviderFactory,
         >,
+        plugins: Vec<Plugin>,
+        environment: Environment,
     ) -> Self {
         if !rule.meta().fixable
             && rule_tests.invalid_tests.iter().any(|invalid_test| {
@@ -38,16 +47,37 @@ impl RuleTester {
         {
             panic!("Specified 'output' for a non-fixable rule");
         }
-        let languages = rule.meta().languages;
-        if languages.len() != 1 {
-            panic!("Only supporting single-language rules currently");
-        }
         Self {
-            language: languages[0],
+            supported_language_languages: rule
+                .meta()
+                .languages
+                .iter()
+                .flat_map(|language| {
+                    language
+                        .all_supported_language_languages()
+                        .into_iter()
+                        .copied()
+                })
+                .collect(),
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
+            plugins,
+            should_aggregate_results: env::var("RULE_TEST_SUMMARY").ok().is_non_empty(),
+            aggregated_results: Default::default(),
+            environment,
         }
+    }
+
+    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(DummyFromFileRunContextInstanceProviderFactory),
+            Default::default(),
+            Default::default(),
+        )
+        .run_tests()
     }
 
     pub fn run_with_from_file_run_context_instance_provider(
@@ -61,11 +91,77 @@ impl RuleTester {
             rule,
             rule_tests,
             from_file_run_context_instance_provider_factory,
+            Default::default(),
+            Default::default(),
+        )
+        .run_tests()
+    }
+
+    // pub fn run_with_provided_types<
+    //     TProvidedTypes: for<'a> FromFileRunContextProvidedTypes<'a> + Send + Sync + 'static,
+    // >(
+    //     rule: Arc<dyn Rule>,
+    //     rule_tests: RuleTests,
+    // ) {
+    //     Self::new(
+    //         rule,
+    //         rule_tests,
+    //         Box::new(get_instance_provider_factory_for_provided_types::<TProvidedTypes>()),
+    //         Default::default(),
+    //     )
+    //     .run_tests()
+    // }
+
+    pub fn run_with_plugins(rule: Arc<dyn Rule>, rule_tests: RuleTests, plugins: Vec<Plugin>) {
+        Self::new(
+            rule,
+            rule_tests,
+            Box::new(DummyFromFileRunContextInstanceProviderFactory),
+            plugins,
+            Default::default(),
+        )
+        .run_tests()
+    }
+
+    pub fn run_with_instance_provider_and_environment(
+        rule: Arc<dyn Rule>,
+        rule_tests: RuleTests,
+        from_file_run_context_instance_provider_factory: Box<
+            dyn FromFileRunContextInstanceProviderFactory,
+        >,
+        environment: Environment,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            from_file_run_context_instance_provider_factory,
+            Default::default(),
+            environment,
         )
         .run_tests()
     }
 
     fn run_tests(&self) {
+        if let Some(only_valid_test) = self
+            .rule_tests
+            .valid_tests
+            .iter()
+            .find(|valid_test| valid_test.only == Some(true))
+        {
+            self.run_valid_test(only_valid_test);
+            return;
+        }
+
+        if let Some(only_invalid_test) = self
+            .rule_tests
+            .invalid_tests
+            .iter()
+            .find(|invalid_test| invalid_test.only == Some(true))
+        {
+            self.run_invalid_test(only_invalid_test);
+            return;
+        }
+
         for valid_test in &self.rule_tests.valid_tests {
             self.run_valid_test(valid_test);
         }
@@ -73,87 +169,497 @@ impl RuleTester {
         for invalid_test in &self.rule_tests.invalid_tests {
             self.run_invalid_test(invalid_test);
         }
+
+        if self.should_aggregate_results {
+            let mut saw_failure = false;
+            self.aggregated_results
+                .borrow()
+                .iter()
+                .for_each(|test_result| {
+                    use colored::Colorize;
+
+                    match test_result.outcome {
+                        TestOutcome::Passed => {
+                            println!(
+                                "{}{} {} {}",
+                                test_result
+                                    .code
+                                    .trim()
+                                    .chars()
+                                    .take(30)
+                                    .collect::<String>()
+                                    .dimmed(),
+                                if self.supported_language_languages.len() > 1 {
+                                    format!(" ({})", test_result.supported_language_language)
+                                } else {
+                                    "".to_owned()
+                                }
+                                .dimmed(),
+                                if test_result.was_invalid { "i" } else { "v" },
+                                "✔".green()
+                            );
+                        }
+                        TestOutcome::Failed => {
+                            saw_failure = true;
+                            println!(
+                                "{}{} {} {}",
+                                test_result
+                                    .code
+                                    .trim()
+                                    .chars()
+                                    .take(30)
+                                    .collect::<String>()
+                                    .dimmed(),
+                                if self.supported_language_languages.len() > 1 {
+                                    format!(" ({})", test_result.supported_language_language)
+                                } else {
+                                    "".to_owned()
+                                }
+                                .dimmed(),
+                                if test_result.was_invalid { "i" } else { "v" },
+                                "✗".red()
+                            );
+                        }
+                    }
+                });
+
+            if saw_failure {
+                panic!("Rule test failed");
+            }
+        }
     }
 
     fn run_valid_test(&self, valid_test: &RuleTestValid) {
-        let violations = crate::run_for_slice(
-            valid_test.code.as_bytes(),
-            None,
-            "tmp.rs",
-            ConfigBuilder::default()
-                .rule(self.rule.meta().name)
-                .all_standalone_rules([self.rule.clone()])
-                .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name,
-                    level: ErrorLevel::Error,
-                    options: valid_test.options.clone(),
-                }])
-                .build()
-                .unwrap(),
-            self.language,
-            &*self.from_file_run_context_instance_provider_factory,
-        );
-        assert!(
-            violations.is_empty(),
-            "Valid case failed\ntest: {valid_test:#?}\nviolations: {violations:#?}"
-        );
+        if let Some(supported_language_languages) = valid_test.supported_language_languages.as_ref()
+        {
+            for &supported_language_language in supported_language_languages {
+                if !self
+                    .supported_language_languages
+                    .contains(&supported_language_language)
+                {
+                    panic!(
+                        "Invalid supported_language_languages specified: {supported_language_languages:#?}, valid languages are: {:#?}",
+                        self.supported_language_languages
+                    );
+                }
+            }
+        }
+
+        for &supported_language_language in &self.supported_language_languages {
+            if let Some(supported_language_languages) =
+                valid_test.supported_language_languages.as_ref()
+            {
+                if !supported_language_languages.contains(&supported_language_language) {
+                    continue;
+                }
+            }
+
+            let (violations, _) = crate::run_for_slice(
+                valid_test.code.as_bytes(),
+                None,
+                "tmp.rs",
+                ConfigBuilder::default()
+                    .rule(self.rule.meta().name.clone())
+                    .all_standalone_rules([self.rule.clone()])
+                    .rule_configurations([RuleConfiguration {
+                        name: self.rule.meta().name.clone(),
+                        level: ErrorLevel::Error,
+                        options: valid_test.options.clone(),
+                    }])
+                    .all_plugins(self.plugins.clone())
+                    .environment(deep_merged(
+                        &self.environment,
+                        &valid_test.environment.clone().unwrap_or_default(),
+                    ))
+                    .build()
+                    .unwrap(),
+                supported_language_language,
+                &*self.from_file_run_context_instance_provider_factory,
+            );
+
+            if self.should_aggregate_results {
+                self.aggregated_results
+                    .borrow_mut()
+                    .push(if !violations.is_empty() {
+                        TestResult {
+                            outcome: TestOutcome::Failed,
+                            code: valid_test.code.clone(),
+                            was_invalid: false,
+                            supported_language_language,
+                        }
+                    } else {
+                        TestResult {
+                            outcome: TestOutcome::Passed,
+                            code: valid_test.code.clone(),
+                            was_invalid: false,
+                            supported_language_language,
+                        }
+                    });
+                continue;
+            }
+
+            assert!(
+                violations.is_empty(),
+                "Valid case failed\ntest: {valid_test:#?}\nviolations: {violations:#?}"
+            );
+        }
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
-        let mut file_contents = invalid_test.code.clone().into_bytes();
-        let violations = crate::run_fixing_for_slice(
-            &mut file_contents,
-            None,
-            "tmp.rs",
-            ConfigBuilder::default()
-                .rule(self.rule.meta().name)
-                .all_standalone_rules([self.rule.clone()])
-                .rule_configurations([RuleConfiguration {
-                    name: self.rule.meta().name,
-                    level: ErrorLevel::Error,
-                    options: invalid_test.options.clone(),
-                }])
-                .fix(true)
-                .report_fixed_violations(true)
-                .build()
-                .unwrap(),
-            self.language,
-            &*self.from_file_run_context_instance_provider_factory,
-        );
-        assert_that_violations_match_expected(&violations, invalid_test);
-        match invalid_test.output.as_ref() {
-            Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
-                assert_eq!(
-                    std::str::from_utf8(&file_contents).unwrap(),
-                    expected_file_contents,
-                    "Didn't get expected output for code {:#?}, got: {violations:#?}",
-                    invalid_test.code
-                );
+        if let Some(supported_language_languages) =
+            invalid_test.supported_language_languages.as_ref()
+        {
+            for &supported_language_language in supported_language_languages {
+                if !self
+                    .supported_language_languages
+                    .contains(&supported_language_language)
+                {
+                    panic!(
+                        "Invalid supported_language_languages specified: {supported_language_languages:#?}, valid languages are: {:#?}",
+                        self.supported_language_languages
+                    );
+                }
             }
-            Some(RuleTestExpectedOutput::NoOutput) => {
-                assert!(
-                    !violations.iter().any(|violation| violation.had_fixes),
-                    "Unexpected fixing violation was reported for code {:#?}, got: {violations:#?}",
-                    invalid_test.code
-                );
+        }
+
+        for &supported_language_language in &self.supported_language_languages {
+            if let Some(supported_language_languages) =
+                invalid_test.supported_language_languages.as_ref()
+            {
+                if !supported_language_languages.contains(&supported_language_language) {
+                    continue;
+                }
             }
-            _ => (),
+
+            let mut file_contents = invalid_test.code.clone().into_bytes();
+            let FixingForSliceRunStatus { violations, .. } = crate::run_fixing_for_slice(
+                &mut file_contents,
+                None,
+                "tmp.rs",
+                ConfigBuilder::default()
+                    .rule(self.rule.meta().name.clone())
+                    .all_standalone_rules([self.rule.clone()])
+                    .rule_configurations([RuleConfiguration {
+                        name: self.rule.meta().name.clone(),
+                        level: ErrorLevel::Error,
+                        options: invalid_test.options.clone(),
+                    }])
+                    .all_plugins(self.plugins.clone())
+                    .environment(deep_merged(
+                        &self.environment,
+                        &invalid_test.environment.clone().unwrap_or_default(),
+                    ))
+                    .fix(true)
+                    .report_fixed_violations(true)
+                    .single_fixing_pass(true)
+                    .build()
+                    .unwrap(),
+                supported_language_language,
+                &*self.from_file_run_context_instance_provider_factory,
+                Default::default(),
+            );
+
+            if !self.check_that_violations_match_expected(
+                &violations,
+                invalid_test,
+                supported_language_language,
+            ) {
+                if self.should_aggregate_results {
+                    continue;
+                } else {
+                    return;
+                }
+            }
+
+            match invalid_test.output.as_ref() {
+                Some(RuleTestExpectedOutput::Output(expected_file_contents)) => {
+                    if self.should_aggregate_results {
+                        if std::str::from_utf8(&file_contents).unwrap() != expected_file_contents {
+                            self.aggregated_results.borrow_mut().push(TestResult {
+                                outcome: TestOutcome::Failed,
+                                code: invalid_test.code.clone(),
+                                was_invalid: true,
+                                supported_language_language,
+                            });
+                            continue;
+                        }
+                    } else {
+                        assert_eq!(
+                            std::str::from_utf8(&file_contents).unwrap(),
+                            expected_file_contents,
+                            "Didn't get expected output for code {:#?}, got: {violations:#?}",
+                            invalid_test.code
+                        );
+                    }
+                }
+                Some(RuleTestExpectedOutput::NoOutput) => {
+                    if self.should_aggregate_results {
+                        if violations.iter().any(|violation| violation.had_fixes) {
+                            self.aggregated_results.borrow_mut().push(TestResult {
+                                outcome: TestOutcome::Failed,
+                                code: invalid_test.code.clone(),
+                                was_invalid: true,
+                                supported_language_language,
+                            });
+                            continue;
+                        }
+                    } else {
+                        assert!(
+                        !violations.iter().any(|violation| violation.had_fixes),
+                        "Unexpected fixing violation was reported for code {:#?}, got: {violations:#?}",
+                        invalid_test.code
+                    );
+                    }
+                }
+                _ => (),
+            }
+
+            self.aggregated_results.borrow_mut().push(TestResult {
+                outcome: TestOutcome::Passed,
+                code: invalid_test.code.clone(),
+                was_invalid: true,
+                supported_language_language,
+            });
         }
     }
-}
 
-impl RuleTester {
-    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
-        Self::new(
-            rule,
-            rule_tests,
-            Box::new(DummyFromFileRunContextInstanceProviderFactory),
-        )
-        .run_tests()
+    fn check_that_violations_match_expected(
+        &self,
+        violations: &[ViolationWithContext],
+        invalid_test: &RuleTestInvalid,
+        supported_language_language: SupportedLanguageLanguage,
+    ) -> bool {
+        if self.should_aggregate_results {
+            if violations.len()
+                != match &invalid_test.errors {
+                    RuleTestExpectedErrors::NumErrors(num_errors) => *num_errors,
+                    RuleTestExpectedErrors::Errors(errors) => errors.len(),
+                }
+            {
+                self.aggregated_results.borrow_mut().push(TestResult {
+                    outcome: TestOutcome::Failed,
+                    code: invalid_test.code.clone(),
+                    was_invalid: true,
+                    supported_language_language,
+                });
+                return false;
+            }
+        } else {
+            assert_eq!(
+                violations.len(),
+                match &invalid_test.errors {
+                    RuleTestExpectedErrors::NumErrors(num_errors) => *num_errors,
+                    RuleTestExpectedErrors::Errors(errors) => errors.len(),
+                },
+                "Didn't get expected number of violations for code {:#?}, got: {violations:#?}",
+                invalid_test.code
+            );
+        }
+
+        if let RuleTestExpectedErrors::Errors(errors) = &invalid_test.errors {
+            let mut violations = violations.to_owned();
+            violations.sort_by(|a, b| compare_ranges(a.range, b.range));
+            for (violation, expected_violation) in iter::zip(violations, errors) {
+                if !self.check_that_violation_matches_expected(
+                    &violation,
+                    expected_violation,
+                    invalid_test,
+                    supported_language_language,
+                ) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn check_that_violation_matches_expected(
+        &self,
+        violation: &ViolationWithContext,
+        expected_violation: &RuleTestExpectedError,
+        invalid_test: &RuleTestInvalid,
+        supported_language_language: SupportedLanguageLanguage,
+    ) -> bool {
+        if let Some(message) = expected_violation.message.as_ref() {
+            if self.should_aggregate_results {
+                if message != &violation.message() {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    message,
+                    &violation.message(),
+                    "Didn't get expected message for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(line) = expected_violation.line {
+            if self.should_aggregate_results {
+                if line != violation.range.start_point.row + 1 {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    line,
+                    violation.range.start_point.row + 1,
+                    "Didn't get expected line for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(column) = expected_violation.column {
+            if self.should_aggregate_results {
+                if column != violation.range.start_point.column + 1 {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    column,
+                    violation.range.start_point.column + 1,
+                    "Didn't get expected column for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(end_line) = expected_violation.end_line {
+            if self.should_aggregate_results {
+                if end_line != violation.range.end_point.row + 1 {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    end_line,
+                    violation.range.end_point.row + 1,
+                    "Didn't get expected end line for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(end_column) = expected_violation.end_column {
+            if self.should_aggregate_results {
+                if end_column != violation.range.end_point.column + 1 {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    end_column,
+                    violation.range.end_point.column + 1,
+                    "Didn't get expected end column for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(type_) = expected_violation.type_.as_ref() {
+            if self.should_aggregate_results {
+                if type_ != violation.kind {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    type_, violation.kind,
+                    "Didn't get expected type for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        if let Some(message_id) = expected_violation.message_id.as_ref() {
+            if self.should_aggregate_results {
+                if !matches!(
+                    &violation.message_or_message_id,
+                    MessageOrMessageId::MessageId(violation_message_id) if violation_message_id == message_id,
+                ) {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                match &violation.message_or_message_id {
+                    MessageOrMessageId::MessageId(violation_message_id) => {
+                        assert_eq!(
+                            violation_message_id, message_id,
+                            "Didn't get expected message ID for code {:#?}, got: {violation:#?}",
+                            invalid_test.code,
+                        );
+                    }
+                    _ => panic!("Expected violation to use message ID"),
+                }
+            }
+        }
+
+        if let Some(data) = expected_violation.data.as_ref() {
+            if self.should_aggregate_results {
+                if Some(data) != violation.data.as_ref() {
+                    self.aggregated_results.borrow_mut().push(TestResult {
+                        outcome: TestOutcome::Failed,
+                        code: invalid_test.code.clone(),
+                        was_invalid: true,
+                        supported_language_language,
+                    });
+                    return false;
+                }
+            } else {
+                assert_eq!(
+                    Some(data),
+                    violation.data.as_ref(),
+                    "Didn't get expected data for code {:#?}, got: {violation:#?}",
+                    invalid_test.code,
+                );
+            }
+        }
+
+        true
     }
 }
 
-fn compare_ranges(a: Range, b: Range) -> Ordering {
+pub fn compare_ranges(a: Range, b: Range) -> Ordering {
     match a.start_byte.cmp(&b.start_byte) {
         Ordering::Equal => {}
         ord => return ord,
@@ -163,97 +669,6 @@ fn compare_ranges(a: Range, b: Range) -> Ordering {
         Ordering::Equal => Ordering::Equal,
         Ordering::Less => Ordering::Greater,
         Ordering::Greater => Ordering::Less,
-    }
-}
-
-fn assert_that_violations_match_expected(
-    violations: &[ViolationWithContext],
-    invalid_test: &RuleTestInvalid,
-) {
-    assert_eq!(
-        violations.len(),
-        invalid_test.errors.len(),
-        "Didn't get expected number of violations for code {:#?}, got: {violations:#?}",
-        invalid_test.code
-    );
-    let mut violations = violations.to_owned();
-    violations.sort_by(|a, b| compare_ranges(a.range, b.range));
-    for (violation, expected_violation) in iter::zip(violations, &invalid_test.errors) {
-        assert_that_violation_matches_expected(&violation, expected_violation, invalid_test);
-    }
-}
-
-fn assert_that_violation_matches_expected(
-    violation: &ViolationWithContext,
-    expected_violation: &RuleTestExpectedError,
-    invalid_test: &RuleTestInvalid,
-) {
-    if let Some(message) = expected_violation.message.as_ref() {
-        assert_eq!(
-            message,
-            &violation.message(),
-            "Didn't get expected message for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(line) = expected_violation.line {
-        assert_eq!(
-            line,
-            violation.range.start_point.row + 1,
-            "Didn't get expected line for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(column) = expected_violation.column {
-        assert_eq!(
-            column,
-            violation.range.start_point.column + 1,
-            "Didn't get expected column for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(end_line) = expected_violation.end_line {
-        assert_eq!(
-            end_line,
-            violation.range.end_point.row + 1,
-            "Didn't get expected end line for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(end_column) = expected_violation.end_column {
-        assert_eq!(
-            end_column,
-            violation.range.end_point.column + 1,
-            "Didn't get expected end column for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(type_) = expected_violation.type_.as_ref() {
-        assert_eq!(
-            type_, violation.kind,
-            "Didn't get expected type for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
-    }
-    if let Some(message_id) = expected_violation.message_id.as_ref() {
-        match &violation.message_or_message_id {
-            MessageOrMessageId::MessageId(violation_message_id) => {
-                assert_eq!(
-                    violation_message_id, message_id,
-                    "Didn't get expected message ID for code {:#?}, got: {violation:#?}",
-                    invalid_test.code,
-                );
-            }
-            _ => panic!("Expected violation to use message ID"),
-        }
-    }
-    if let Some(data) = expected_violation.data.as_ref() {
-        assert_eq!(
-            Some(data),
-            violation.data.as_ref(),
-            "Didn't get expected data for code {:#?}, got: {violation:#?}",
-            invalid_test.code,
-        );
     }
 }
 
@@ -274,27 +689,90 @@ impl RuleTests {
     }
 }
 
-#[derive(Debug)]
+#[derive(Builder, Debug)]
+#[builder(setter(strip_option, into))]
 pub struct RuleTestValid {
-    code: String,
-    options: Option<RuleOptions>,
+    pub code: String,
+    #[builder(default)]
+    pub options: Option<RuleOptions>,
+    #[builder(default)]
+    pub only: Option<bool>,
+    #[builder(default)]
+    pub environment: Option<Environment>,
+    #[builder(default)]
+    pub supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
 }
 
 impl RuleTestValid {
-    pub fn new(code: impl Into<String>, options: Option<RuleOptions>) -> Self {
+    pub fn new(
+        code: impl Into<String>,
+        options: Option<RuleOptions>,
+        only: Option<bool>,
+        environment: Option<Environment>,
+        supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
+    ) -> Self {
         Self {
             code: code.into(),
             options,
+            only,
+            environment,
+            supported_language_languages,
         }
     }
 }
 
 impl From<&str> for RuleTestValid {
     fn from(value: &str) -> Self {
-        Self::new(value, None)
+        Self::new(value, None, None, None, None)
     }
 }
 
+impl From<String> for RuleTestValid {
+    fn from(value: String) -> Self {
+        Self::new(value, None, None, None, None)
+    }
+}
+
+#[derive(Builder, Clone)]
+#[builder(setter(strip_option, into))]
+pub struct RuleTestInvalid {
+    pub code: String,
+    pub errors: RuleTestExpectedErrors,
+    #[builder(default)]
+    pub output: Option<RuleTestExpectedOutput>,
+    #[builder(default)]
+    pub options: Option<RuleOptions>,
+    #[builder(default)]
+    pub only: Option<bool>,
+    #[builder(default)]
+    pub environment: Option<Environment>,
+    #[builder(default)]
+    pub supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
+}
+
+impl RuleTestInvalid {
+    pub fn new(
+        code: impl Into<String>,
+        errors: impl Into<RuleTestExpectedErrors>,
+        output: Option<impl Into<RuleTestExpectedOutput>>,
+        options: Option<RuleOptions>,
+        only: Option<bool>,
+        environment: Option<Environment>,
+        supported_language_languages: Option<Vec<SupportedLanguageLanguage>>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            errors: errors.into(),
+            output: output.map(Into::into),
+            options,
+            only,
+            environment,
+            supported_language_languages,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum RuleTestExpectedOutput {
     Output(String),
     NoOutput,
@@ -312,39 +790,38 @@ impl From<&str> for RuleTestExpectedOutput {
     }
 }
 
-pub struct RuleTestInvalid {
-    code: String,
-    errors: Vec<RuleTestExpectedError>,
-    output: Option<RuleTestExpectedOutput>,
-    options: Option<RuleOptions>,
+#[derive(Clone)]
+pub enum RuleTestExpectedErrors {
+    NumErrors(usize),
+    Errors(Vec<RuleTestExpectedError>),
 }
 
-impl RuleTestInvalid {
-    pub fn new(
-        code: impl Into<String>,
-        errors: impl IntoIterator<Item = impl Into<RuleTestExpectedError>>,
-        output: Option<impl Into<RuleTestExpectedOutput>>,
-        options: Option<RuleOptions>,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            errors: errors.into_iter().map(Into::into).collect(),
-            output: output.map(Into::into),
-            options,
-        }
+impl From<usize> for RuleTestExpectedErrors {
+    fn from(value: usize) -> Self {
+        Self::NumErrors(value)
+    }
+}
+
+impl From<Vec<RuleTestExpectedError>> for RuleTestExpectedErrors {
+    fn from(value: Vec<RuleTestExpectedError>) -> Self {
+        Self::Errors(value)
     }
 }
 
 #[derive(Builder, Clone, Debug, Default)]
-#[builder(default, setter(strip_option, into))]
+#[builder(default, setter(strip_option))]
 pub struct RuleTestExpectedError {
+    #[builder(setter(into))]
     pub message: Option<String>,
     pub line: Option<usize>,
     pub column: Option<usize>,
     pub end_line: Option<usize>,
     pub end_column: Option<usize>,
+    #[builder(setter(into))]
     pub type_: Option<String>,
+    #[builder(setter(into))]
     pub message_id: Option<String>,
+    #[builder(setter(into))]
     pub data: Option<ViolationData>,
 }
 
@@ -370,6 +847,18 @@ impl From<&RuleTestExpectedError> for RuleTestExpectedError {
     fn from(value: &RuleTestExpectedError) -> Self {
         value.clone()
     }
+}
+
+enum TestOutcome {
+    Passed,
+    Failed,
+}
+
+struct TestResult {
+    outcome: TestOutcome,
+    code: String,
+    was_invalid: bool,
+    supported_language_language: SupportedLanguageLanguage,
 }
 
 #[derive(Clone, Default)]

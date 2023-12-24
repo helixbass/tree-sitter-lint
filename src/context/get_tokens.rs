@@ -39,11 +39,11 @@ macro_rules! loop_done {
     };
 }
 
-pub fn get_tokens(node: Node) -> impl Iterator<Item = Node> {
+pub fn get_tokens(node: Node) -> TokenWalker {
     TokenWalker::new(node)
 }
 
-struct TokenWalker<'a> {
+pub struct TokenWalker<'a> {
     state: TokenWalkerState,
     cursor: TreeCursor<'a>,
     original_node: Node<'a>,
@@ -182,7 +182,7 @@ mod tests {
     fn test_all_tokens_text(text: &str, all_tokens_text: &[&str]) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
@@ -223,7 +223,7 @@ mod tests {
     ) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
@@ -255,7 +255,7 @@ mod tests {
     ) {
         let mut parser = Parser::new();
         parser
-            .set_language(SupportedLanguage::Javascript.language())
+            .set_language(SupportedLanguage::Javascript.language(None))
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(

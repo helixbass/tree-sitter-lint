@@ -3,7 +3,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 
-use crate::RuleTester;
+use crate::{RuleTester, ViolationData};
 
 #[test]
 fn test_rule_messages_non_interpolated() {
@@ -347,7 +347,7 @@ fn test_self_field_in_data() {
         rule! {
             name => "uses-self-in-data",
             state => {
-                [per-run]
+                [per-config]
                 foo: &'static str = "abc",
             },
             listeners => [
@@ -377,6 +377,50 @@ fn test_self_field_in_data() {
                     errors => [
                         {
                             message => "abc",
+                        }
+                    ],
+                },
+            ]
+        },
+    );
+}
+
+#[test]
+fn test_data_variable() {
+    RuleTester::run(
+        rule! {
+            name => "uses-data-as-variable",
+            listeners => [
+                r#"(
+                  (function_item) @c
+                )"# => |node, context| {
+                    let data: ViolationData = [
+                        (
+                            "whee".to_owned(),
+                            "bar".to_owned(),
+                        )
+                    ].into();
+                    context.report(violation! {
+                        node => node,
+                        message => "{{whee}}",
+                        data => data.clone(),
+                    });
+                }
+            ],
+            languages => [Rust],
+        },
+        rule_tests! {
+            valid => [
+                r#"
+                    use foo::bar;
+                "#,
+            ],
+            invalid => [
+                {
+                    code => r#"fn whee() {}"#,
+                    errors => [
+                        {
+                            message => "bar",
                         }
                     ],
                 },

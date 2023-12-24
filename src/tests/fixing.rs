@@ -23,8 +23,9 @@ macro_rules! assert_fixed_content {
                 .fix(true)
                 .build()
                 .unwrap(),
-            $crate::tree_sitter_grep::SupportedLanguage::Rust,
+            $crate::tree_sitter_grep::SupportedLanguageLanguage::Rust,
             &$crate::rule_tester::DummyFromFileRunContextInstanceProviderFactory,
+            Default::default(),
         );
         assert_eq!(
             std::str::from_utf8(&file_contents).unwrap().trim(),

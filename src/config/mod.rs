@@ -10,16 +10,21 @@ use serde::Deserialize;
 use tracing::{instrument, trace_span};
 
 use crate::{
+    environment::Environment,
     rule::{InstantiatedRule, Rule, RuleOptions},
     Plugin,
 };
 
 mod config_file;
-pub use config_file::{find_config_file, load_config_file, ParsedConfigFile};
+pub use config_file::{
+    find_config_file, load_config_file, ParsedConfigFile, TreeSitterLintDependencySpec,
+};
 
 #[derive(Builder, Debug, Default, Parser)]
 #[builder(default, setter(into, strip_option))]
 pub struct Args {
+    pub paths: Vec<PathBuf>,
+
     #[arg(long)]
     pub rule: Option<String>,
 
@@ -48,6 +53,7 @@ impl Args {
             fix,
             report_fixed_violations,
             force_rebuild,
+            paths,
         } = self;
         Config {
             rule,
@@ -55,10 +61,13 @@ impl Args {
             all_plugins,
             fix,
             report_fixed_violations,
+            paths,
             config_file_path: Some(config_file_path),
             rule_configurations: config_file_content.rules().collect(),
             rules_by_plugin_prefixed_name: Default::default(),
             force_rebuild,
+            single_fixing_pass: Default::default(),
+            environment: Default::default(),
         }
     }
 }
@@ -93,6 +102,15 @@ pub struct Config {
 
     #[builder(default)]
     pub force_rebuild: bool,
+
+    #[builder(default)]
+    pub single_fixing_pass: bool,
+
+    #[builder(default)]
+    pub environment: Environment,
+
+    #[builder(default)]
+    pub paths: Vec<PathBuf>,
 }
 
 impl Config {
@@ -120,8 +138,10 @@ impl Config {
                 })
                 .collect();
             for standalone_rule in &self.all_standalone_rules {
-                rules_by_plugin_prefixed_name
-                    .insert(standalone_rule.meta().name, (standalone_rule.clone(), None));
+                rules_by_plugin_prefixed_name.insert(
+                    standalone_rule.meta().name.clone(),
+                    (standalone_rule.clone(), None),
+                );
             }
             rules_by_plugin_prefixed_name
         })
@@ -231,7 +251,7 @@ pub struct RuleConfiguration {
 impl RuleConfiguration {
     pub fn default_for_rule(rule: &Arc<dyn Rule>) -> Self {
         Self {
-            name: rule.meta().name,
+            name: rule.meta().name.clone(),
             level: ErrorLevel::Error,
             options: None,
         }

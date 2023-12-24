@@ -10,15 +10,17 @@ use syn::{
     punctuated::Punctuated,
     token,
     visit_mut::{self, VisitMut},
-    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type,
+    Expr, ExprClosure, ExprField, ExprMacro, Ident, Member, Pat, PathArguments, Token, Type, ImplItem,
 };
 
-use crate::{helpers::ExprOrArrowSeparatedKeyValuePairs, ArrowSeparatedKeyValuePairs};
+use crate::{
+    helpers::ExprOrArrowSeparatedKeyValuePairs, shared::ExprOrIdent, ArrowSeparatedKeyValuePairs,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum RuleStateScope {
     RuleStatic,
-    PerRun,
+    PerConfig,
     PerFileRun,
 }
 
@@ -35,25 +37,25 @@ impl Parse for RuleStateScope {
             "per" => {
                 content.parse::<Token![-]>()?;
                 match &*content.parse::<Ident>()?.to_string() {
-                    "run" => Self::PerRun,
+                    "config" => Self::PerConfig,
                     "file" => {
                         content.parse::<Token![-]>()?;
                         match &*content.parse::<Ident>()?.to_string() {
                             "run" => Self::PerFileRun,
                             _ => {
                                 return Err(
-                                    content.error("Expected rule-static, per-run or per-file-run")
+                                    content.error("Expected rule-static, per-config or per-file-run")
                                 )
                             }
                         }
                     }
-                    _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+                    _ => return Err(content.error("Expected rule-static, per-config or per-file-run")),
                 }
             }
-            _ => return Err(content.error("Expected rule-static, per-run or per-file-run")),
+            _ => return Err(content.error("Expected rule-static, per-config or per-file-run")),
         };
         if !content.is_empty() {
-            return Err(content.error("Expected rule-static, per-run or per-file-run"));
+            return Err(content.error("Expected rule-static, per-config or per-file-run"));
         }
         Ok(found)
     }
@@ -182,6 +184,9 @@ struct Rule {
     are_options_required: bool,
     languages: Vec<Ident>,
     messages: Option<HashMap<Expr, Expr>>,
+    allow_self_conflicting_fixes: Option<Expr>,
+    concatenate_adjacent_insert_fixes: Option<Expr>,
+    methods: Option<Vec<ImplItem>>,
 }
 
 impl Rule {
@@ -219,8 +224,12 @@ impl Parse for Rule {
         let mut languages: Option<Vec<Ident>> = Default::default();
         let mut messages: Option<HashMap<Expr, Expr>> = Default::default();
         let mut are_options_required: bool = Default::default();
+        let mut allow_self_conflicting_fixes: Option<Expr> = Default::default();
+        let mut concatenate_adjacent_insert_fixes: Option<Expr> = Default::default();
+        let mut methods: Option<Vec<ImplItem>> = Default::default();
         while !input.is_empty() {
             let key: Ident = input.parse()?;
+            #[allow(clippy::collapsible_if)]
             if key.to_string() == "options_type" {
                 if input.parse::<Token![!]>().is_ok() {
                     are_options_required = true;
@@ -284,6 +293,33 @@ impl Parse for Rule {
                         }
                     }
                 }
+                "allow_self_conflicting_fixes" => {
+                    assert!(
+                        allow_self_conflicting_fixes.is_none(),
+                        "Already saw 'allow_self_conflicting_fixes' key"
+                    );
+                    allow_self_conflicting_fixes = Some(input.parse()?);
+                }
+                "concatenate_adjacent_insert_fixes" => {
+                    assert!(
+                        concatenate_adjacent_insert_fixes.is_none(),
+                        "Already saw 'concatenate_adjacent_insert_fixes' key"
+                    );
+                    concatenate_adjacent_insert_fixes = Some(input.parse()?);
+                }
+                "methods" => {
+                    assert!(
+                        methods.is_none(),
+                        "Already saw 'methods' key"
+                    );
+                    let mut methods_present: Vec<ImplItem> = Default::default();
+                    let methods_content;
+                    braced!(methods_content in input);
+                    while !methods_content.is_empty() {
+                        methods_present.push(methods_content.parse()?);
+                    }
+                    methods = Some(methods_present);
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !input.is_empty() {
@@ -299,6 +335,9 @@ impl Parse for Rule {
             languages: languages.expect("Expected 'languages'"),
             messages,
             are_options_required,
+            allow_self_conflicting_fixes,
+            concatenate_adjacent_insert_fixes,
+            methods,
         })
     }
 }
@@ -331,7 +370,7 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
             state
                 .scope_sections
                 .iter()
-                .filter(|scope_section| scope_section.scope == RuleStateScope::PerRun)
+                .filter(|scope_section| scope_section.scope == RuleStateScope::PerConfig)
                 .flat_map(|scope_section| scope_section.fields.iter())
                 .collect::<Vec<_>>()
         },
@@ -379,6 +418,12 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
         &rule_instance_per_file_state_fields,
     );
 
+    let rule_instance_per_file_impl =
+        get_rule_instance_per_file_impl(
+            &rule,
+            &rule_instance_per_file_struct_name,
+        );
+
     let rule_instance_per_file_rule_instance_per_file_impl =
         get_rule_instance_per_file_rule_instance_per_file_impl(
             &rule,
@@ -399,6 +444,8 @@ pub fn rule_with_crate_name(input: TokenStream, crate_name: &str) -> TokenStream
             #rule_instance_rule_instance_impl
 
             #rule_instance_per_file_struct_definition
+
+            #rule_instance_per_file_impl
 
             #rule_instance_per_file_rule_instance_per_file_impl
 
@@ -512,15 +559,25 @@ fn get_rule_rule_impl(
         }
         None => quote!(None),
     };
+    let allow_self_conflicting_fixes = match rule.allow_self_conflicting_fixes.as_ref() {
+        Some(allow_self_conflicting_fixes) => quote!(#allow_self_conflicting_fixes),
+        None => quote!(false),
+    };
+    let concatenate_adjacent_insert_fixes = match rule.concatenate_adjacent_insert_fixes.as_ref() {
+        Some(concatenate_adjacent_insert_fixes) => quote!(#concatenate_adjacent_insert_fixes),
+        None => quote!(false),
+    };
     quote! {
         impl #crate_name::Rule for #rule_struct_name {
-            fn meta(&self) -> #crate_name::RuleMeta {
-                #crate_name::RuleMeta {
+            fn meta(&self) -> std::sync::Arc<#crate_name::RuleMeta> {
+                std::sync::Arc::new(#crate_name::RuleMeta {
                     name: #name.into(),
                     fixable: #fixable,
                     languages: vec![#(#crate_name::tree_sitter_grep::SupportedLanguage::#languages),*],
                     messages: #messages,
-                }
+                    allow_self_conflicting_fixes: #allow_self_conflicting_fixes,
+                    concatenate_adjacent_insert_fixes: #concatenate_adjacent_insert_fixes,
+                })
             }
 
             fn instantiate(
@@ -635,7 +692,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                     *node = parse_quote!(self.rule_instance.rule.#self_field_name);
                     return;
                 }
-                Some(RuleStateScope::PerRun) => {
+                Some(RuleStateScope::PerConfig) => {
                     let self_field_name = format_ident!("{}", self_field_name);
                     *node = parse_quote!(self.rule_instance.#self_field_name);
                     return;
@@ -662,7 +719,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
                 }
             }
             _ => match syn::parse2::<
-                ArrowSeparatedKeyValuePairs<Ident, ExprOrArrowSeparatedKeyValuePairs>,
+                ArrowSeparatedKeyValuePairs<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>,
             >(node.mac.tokens.clone())
             {
                 Ok(mut arrow_separated_key_value_pairs) => {
@@ -687,7 +744,7 @@ impl<'a> visit_mut::VisitMut for SelfAccessRewriter<'a> {
 fn rewrite_self_accesses_in_arrow_separated_key_value_pairs(
     mut rewriter: SelfAccessRewriter,
     arrow_separated_key_value_pairs: &mut ArrowSeparatedKeyValuePairs<
-        Ident,
+        ExprOrIdent,
         ExprOrArrowSeparatedKeyValuePairs,
     >,
 ) {
@@ -718,6 +775,28 @@ fn get_self_field_access_name(expr_field: &ExprField) -> Option<String> {
         Member::Named(member) => Some(member.to_string()),
         _ => None,
     }
+}
+
+fn get_rule_instance_per_file_impl(
+    rule: &Rule,
+    rule_instance_per_file_struct_name: &Ident,
+) -> proc_macro2::TokenStream {
+    rule.methods.as_ref().map_or_else(
+        Default::default,
+        |methods| {
+            let methods = methods.into_iter().map(|method| {
+                let mut method = method.clone();
+                SelfAccessRewriter { rule }.visit_impl_item_mut(&mut method);
+                method
+            }).collect::<Vec<_>>();
+
+            quote! {
+                impl<'a> #rule_instance_per_file_struct_name<'a> {
+                    #(#methods)*
+                }
+            }
+        }
+    )
 }
 
 fn get_rule_instance_per_file_rule_instance_per_file_impl(
@@ -763,7 +842,7 @@ fn get_rule_instance_per_file_rule_instance_per_file_impl(
     });
     quote! {
         impl<'a> #crate_name::RuleInstancePerFile<'a> for #rule_instance_per_file_struct_name<'a> {
-            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &mut #crate_name::QueryMatchContext<'a, '_>) {
+            fn on_query_match<'b>(&mut self, listener_index: usize, node_or_captures: #crate_name::NodeOrCaptures<'a, 'b>, context: &#crate_name::QueryMatchContext<'a, '_>) {
                 match listener_index {
                     #(#listener_indices => {
                         #listener_callbacks

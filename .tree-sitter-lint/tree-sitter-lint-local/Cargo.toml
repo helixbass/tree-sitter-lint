@@ -20,3 +20,4 @@ name = "tree-sitter-lint-local"
 [[bin]]
 name = "tree-sitter-lint-local-lsp"
 
+[workspace]

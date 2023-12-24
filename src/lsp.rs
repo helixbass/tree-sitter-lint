@@ -1,7 +1,7 @@
-use std::{borrow::Cow, ops, path::Path};
+use std::{collections::HashMap, ops, path::Path};
 
-use dashmap::DashMap;
-use text_diff::Difference;
+use squalid::EverythingExt;
+use tokio::sync::Mutex;
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
@@ -17,9 +17,11 @@ use tower_lsp::{
 use tree_sitter_grep::{ropey::Rope, RopeOrSlice};
 
 use crate::{
+    fixing::{get_newline_offsets_rope_or_slice, AccumulatedEdits},
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
-    Args, ArgsBuilder, MutRopeOrSlice, ViolationWithContext,
+    Args, ArgsBuilder, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
+    ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -41,14 +43,15 @@ pub trait LocalLinter: Send + Sync {
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
-    ) -> Vec<ViolationWithContext>;
+        context: FixingForSliceRunContext,
+    ) -> FixingForSliceRunStatus;
 }
 
 #[derive(Debug)]
 struct Backend<TLocalLinter> {
     client: Client,
     local_linter: TLocalLinter,
-    per_file: DashMap<Url, PerFileState>,
+    per_file: Mutex<HashMap<Url, PerFileState>>,
 }
 
 impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
@@ -61,10 +64,14 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
     }
 
     async fn run_linting_and_report_diagnostics(&self, uri: &Url) {
-        let per_file_state = self.per_file.get(uri).unwrap();
+        let (file_contents, tree) = {
+            let per_file = self.per_file.lock().await;
+            let per_file_state = per_file.get(uri).unwrap();
+            (per_file_state.contents.clone(), per_file_state.tree.clone())
+        };
         let violations = self.local_linter.run_for_slice(
-            &per_file_state.contents,
-            Some(per_file_state.tree.clone()),
+            &file_contents,
+            Some(tree),
             "dummy_path",
             Default::default(),
             SupportedLanguage::Rust,
@@ -76,12 +83,9 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                     .into_iter()
                     .map(|violation| Diagnostic {
                         message: violation.message().into_owned(),
-                        range: tree_sitter_range_to_lsp_range(
-                            &per_file_state.contents,
-                            violation.range,
-                        ),
+                        range: tree_sitter_range_to_lsp_range(&file_contents, violation.range),
                         severity: Some(DiagnosticSeverity::ERROR),
-                        code: Some(NumberOrString::String(violation.rule.name)),
+                        code: Some(NumberOrString::String(violation.rule.name.clone())),
                         source: Some("tree-sitter-lint".to_owned()),
                         ..Default::default()
                     })
@@ -92,26 +96,60 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
     }
 
     async fn run_fixing_and_report_fixes(&self, uri: &Url) {
-        let per_file_state = self.per_file.get(uri).unwrap();
-        let mut cloned_contents = per_file_state.contents.clone();
-        self.local_linter.run_fixing_for_slice(
+        let (file_contents, tree, edits_since_last_fixing_run, last_fixing_run_violations) = {
+            let per_file = self.per_file.lock().await;
+            let per_file_state = per_file.get(uri).unwrap();
+            (
+                per_file_state.contents.clone(),
+                per_file_state.tree.clone(),
+                match &per_file_state.edits_since_last_fixing_run {
+                    AccumulatedEditsOrEntireFileChanged::AccumulatedEdits(accumulated_edits) => {
+                        Some(accumulated_edits.clone())
+                    }
+                    AccumulatedEditsOrEntireFileChanged::EntireFileChanged => None,
+                },
+                per_file_state.last_fixing_run_violations.clone(),
+            )
+        };
+        let mut cloned_contents = file_contents.clone();
+        let FixingForSliceRunStatus {
+            edits, violations, ..
+        } = self.local_linter.run_fixing_for_slice(
             &mut cloned_contents,
-            Some(per_file_state.tree.clone()),
+            Some(tree),
             "dummy_path",
             ArgsBuilder::default().fix(true).build().unwrap(),
             SupportedLanguage::Rust,
+            FixingForSliceRunContext {
+                last_fixing_run_violations,
+                edits_since_last_fixing_run,
+            },
         );
-        self.client
-            .apply_edit(WorkspaceEdit {
-                document_changes: Some(DocumentChanges::Edits(vec![get_text_document_edits(
-                    &per_file_state.contents,
-                    &cloned_contents,
-                    uri,
-                )])),
-                ..Default::default()
-            })
+        self.per_file
+            .lock()
             .await
-            .unwrap();
+            .get_mut(uri)
+            .unwrap()
+            .thrush(|per_file_state| {
+                per_file_state.last_fixing_run_violations = Some(violations);
+                per_file_state.edits_since_last_fixing_run =
+                    AccumulatedEditsOrEntireFileChanged::AccumulatedEdits(AccumulatedEdits::new(
+                        get_newline_offsets_rope_or_slice(&cloned_contents).collect(),
+                    ));
+            });
+        if let Some(edits) = edits {
+            self.client
+                .apply_edit(WorkspaceEdit {
+                    document_changes: Some(DocumentChanges::Edits(vec![get_text_document_edits(
+                        &edits,
+                        uri,
+                        &cloned_contents,
+                    )])),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -145,11 +183,17 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let contents: Rope = (&*params.text_document.text).into();
-        self.per_file.insert(
-            params.text_document.uri.clone(),
+        let uri = params.text_document.uri.clone();
+        let tree = parse_from_scratch(&contents);
+        self.per_file.lock().await.insert(
+            uri,
             PerFileState {
-                tree: parse_from_scratch(&contents),
+                tree,
+                edits_since_last_fixing_run: AccumulatedEditsOrEntireFileChanged::AccumulatedEdits(
+                    AccumulatedEdits::new(get_newline_offsets_rope_or_slice(&contents).collect()),
+                ),
                 contents,
+                last_fixing_run_violations: Default::default(),
             },
         );
 
@@ -159,8 +203,9 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         {
-            let mut file_state = self
-                .per_file
+            // TODO: refine mutex-holding here?
+            let mut per_file = self.per_file.lock().await;
+            let file_state = per_file
                 .get_mut(&params.text_document.uri)
                 .expect("Changed file wasn't loaded");
             for content_change in &params.content_changes {
@@ -188,10 +233,19 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
                         };
                         file_state.tree.edit(&input_edit);
                         file_state.tree = parse(&file_state.contents, Some(&file_state.tree));
+                        if let AccumulatedEditsOrEntireFileChanged::AccumulatedEdits(
+                            edits_since_last_fixing_run,
+                        ) = &mut file_state.edits_since_last_fixing_run
+                        {
+                            edits_since_last_fixing_run
+                                .add_round_of_edits(&[(input_edit, &content_change.text)]);
+                        };
                     }
                     None => {
                         file_state.contents = (&*content_change.text).into();
                         file_state.tree = parse_from_scratch(&file_state.contents);
+                        file_state.edits_since_last_fixing_run =
+                            AccumulatedEditsOrEntireFileChanged::EntireFileChanged;
                     }
                 }
             }
@@ -221,6 +275,14 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
 struct PerFileState {
     contents: Rope,
     tree: Tree,
+    edits_since_last_fixing_run: AccumulatedEditsOrEntireFileChanged,
+    last_fixing_run_violations: Option<Vec<ViolationWithContext>>,
+}
+
+#[derive(Debug)]
+enum AccumulatedEditsOrEntireFileChanged {
+    AccumulatedEdits(AccumulatedEdits),
+    EntireFileChanged,
 }
 
 fn parse_from_scratch(contents: &Rope) -> Tree {
@@ -230,7 +292,7 @@ fn parse_from_scratch(contents: &Rope) -> Tree {
 fn parse(contents: &Rope, old_tree: Option<&Tree>) -> Tree {
     let mut parser = Parser::new();
     parser
-        .set_language(SupportedLanguage::Rust.language())
+        .set_language(SupportedLanguage::Rust.language(None))
         .unwrap();
     contents.parse(&mut parser, old_tree).unwrap()
 }
@@ -278,71 +340,27 @@ fn tree_sitter_range_to_lsp_range(file_contents: &Rope, range: tree_sitter::Rang
 }
 
 fn get_text_document_edits(
-    old_contents: &Rope,
-    new_contents: &Rope,
+    edits: &AccumulatedEdits,
     uri: &Url,
+    new_contents: &Rope,
 ) -> TextDocumentEdit {
-    let old_contents_as_str: Cow<'_, str> = old_contents.clone().into();
-    let new_contents_as_str: Cow<'_, str> = new_contents.clone().into();
-    let (_, diffs) = text_diff::diff(&old_contents_as_str, &new_contents_as_str, "");
-    let mut old_bytes_seen = 0;
-    let mut just_seen_remove: Option<String> = None;
-    let mut edits: Vec<TextEdit> = Default::default();
-    for diff in diffs {
-        if just_seen_remove.is_some() && !matches!(&diff, Difference::Add(_)) {
-            edits.push(TextEdit {
-                range: byte_offset_range_to_lsp_range(
-                    old_contents,
-                    old_bytes_seen - just_seen_remove.as_ref().unwrap().len()..old_bytes_seen,
-                ),
-                new_text: Default::default(),
-            });
-            just_seen_remove = None;
-        }
-        match diff {
-            Difference::Same(diff) => old_bytes_seen += diff.len(),
-            Difference::Rem(diff) => {
-                old_bytes_seen += diff.len();
-                just_seen_remove = Some(diff);
-            }
-            Difference::Add(diff) => {
-                if just_seen_remove.is_some() {
-                    edits.push(TextEdit {
-                        range: byte_offset_range_to_lsp_range(
-                            old_contents,
-                            old_bytes_seen - just_seen_remove.as_ref().unwrap().len()
-                                ..old_bytes_seen,
-                        ),
-                        new_text: diff,
-                    });
-                    just_seen_remove = None;
-                } else {
-                    edits.push(TextEdit {
-                        range: byte_offset_range_to_lsp_range(
-                            old_contents,
-                            old_bytes_seen..old_bytes_seen,
-                        ),
-                        new_text: diff,
-                    });
-                }
-            }
-        }
-    }
-    if let Some(just_seen_remove) = just_seen_remove.as_ref() {
-        edits.push(TextEdit {
-            range: byte_offset_range_to_lsp_range(
-                old_contents,
-                old_bytes_seen..old_bytes_seen + just_seen_remove.len(),
-            ),
-            new_text: Default::default(),
-        });
-    }
     TextDocumentEdit {
         text_document: OptionalVersionedTextDocumentIdentifier {
             uri: uri.clone(),
             version: None,
         },
-        edits: edits.into_iter().map(OneOf::Left).collect(),
+        edits: edits
+            .get_old_ranges_and_new_byte_ranges()
+            .into_iter()
+            .map(|(old_range, new_byte_range)| TextEdit {
+                range: Range {
+                    start: point_to_position(old_range.start_point),
+                    end: point_to_position(old_range.end_point),
+                },
+                new_text: new_contents.slice(new_byte_range).into(),
+            })
+            .map(OneOf::Left)
+            .collect(),
     }
 }
 

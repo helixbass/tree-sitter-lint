@@ -1,25 +1,22 @@
 #![cfg(test)]
 
-use std::{
-    any::TypeId,
-    sync::{Arc, OnceLock},
-};
+use std::sync::Arc;
 
 use proc_macros::{
     rule_crate_internal as rule, rule_tests_crate_internal as rule_tests,
     violation_crate_internal as violation,
 };
-use tree_sitter_grep::RopeOrSlice;
 
+mod meta;
+mod methods;
 mod options;
+mod provided_types;
+mod rule_tester;
 mod state;
 mod tokens;
 mod violations;
 
-use crate::{
-    rule::Rule, FileRunContext, FromFileRunContext, FromFileRunContextInstanceProvider,
-    FromFileRunContextInstanceProviderFactory, RuleTester,
-};
+use crate::{rule::Rule, RuleTester};
 
 #[test]
 fn test_rule_options() {
@@ -61,7 +58,7 @@ fn no_more_than_n_uses_of_foo_rule() -> Arc<dyn Rule> {
         name => "no_more_than_n_uses_of_foo",
         options_type => usize,
         state => {
-            [per-run]
+            [per-config]
             n: usize = options,
             [per-file-run]
             num_foos: usize
@@ -239,140 +236,5 @@ fn test_root_exit_listener_amid_other_listeners() {
                 },
             ]
         },
-    );
-}
-
-#[test]
-fn test_rule_test_errors_variable() {
-    use crate::RuleTestExpectedErrorBuilder;
-
-    let errors = [RuleTestExpectedErrorBuilder::default()
-        .message("whee")
-        .build()
-        .unwrap()];
-    RuleTester::run(
-        rule! {
-            name => "reports-functions",
-            listeners => [
-                r#"(
-                  (function_item) @c
-                )"# => |node, context| {
-                    context.report(violation! {
-                        node => node,
-                        message => "whee",
-                    });
-                }
-            ],
-            languages => [Rust],
-        },
-        rule_tests! {
-            valid => [
-                r#"
-                    use foo::bar;
-                "#,
-            ],
-            invalid => [
-                {
-                    code => r#"
-                        fn whee() {}
-                    "#,
-                    errors => errors,
-                },
-                {
-                    code => r#"
-                        fn bar() {}
-                    "#,
-                    errors => errors,
-                },
-            ]
-        },
-    );
-}
-
-#[test]
-fn test_retrieve() {
-    use better_any::{tid, Tid};
-
-    #[derive(Clone)]
-    struct Foo<'a> {
-        #[allow(dead_code)]
-        text: &'a str,
-    }
-
-    impl<'a> FromFileRunContext<'a> for Foo<'a> {
-        fn from_file_run_context(file_run_context: FileRunContext<'a, '_>) -> Self {
-            Self {
-                text: match &file_run_context.file_contents {
-                    RopeOrSlice::Slice(file_contents) => {
-                        std::str::from_utf8(&file_contents[..4]).unwrap()
-                    }
-                    _ => unreachable!(),
-                },
-            }
-        }
-    }
-
-    tid! { impl<'a> TidAble<'a> for Foo<'a> }
-
-    #[derive(Default)]
-    struct FooProvider<'a> {
-        foo_instance: OnceLock<Foo<'a>>,
-    }
-
-    impl<'a> FromFileRunContextInstanceProvider<'a> for FooProvider<'a> {
-        fn get(
-            &self,
-            type_id: TypeId,
-            file_run_context: FileRunContext<'a, '_>,
-        ) -> Option<&dyn Tid<'a>> {
-            match type_id {
-                id if id == Foo::<'a>::id() => Some(
-                    self.foo_instance
-                        .get_or_init(|| Foo::from_file_run_context(file_run_context)),
-                ),
-                _ => None,
-            }
-        }
-    }
-
-    struct FooProviderFactory;
-
-    impl FromFileRunContextInstanceProviderFactory for FooProviderFactory {
-        fn create<'a>(&self) -> Box<dyn FromFileRunContextInstanceProvider<'a> + 'a> {
-            Box::new(FooProvider {
-                foo_instance: Default::default(),
-            })
-        }
-    }
-
-    RuleTester::run_with_from_file_run_context_instance_provider(
-        rule! {
-            name => "uses-retrieve",
-            listeners => [
-                r#"(
-                  (use_declaration) @c
-                )"# => |node, context| {
-                    if context.retrieve::<Foo<'a>>().text == "use " {
-                        context.report(violation! {
-                            node => node,
-                            message => "whee",
-                        });
-                    }
-                }
-            ],
-            languages => [Rust],
-        },
-        rule_tests! {
-            valid => [
-                r#"fn whee() {}"#,
-            ],
-            invalid => [
-                {
-                    code => r#"use foo::bar;"#,
-                    errors => [{ message => "whee" }],
-                },
-            ]
-        },
-        Box::new(FooProviderFactory),
     );
 }
