@@ -17,8 +17,8 @@ use crate::{
 
 mod config_file;
 pub use config_file::{
-    find_config_file, load_config_file, ParsedConfigFile, Plugins, Rules,
-    TreeSitterLintDependencySpec, RuleConfigurationValue, RuleConfigurationValueBuilder
+    find_config_file, load_config_file, ParsedConfigFile, Plugins, RuleConfigurationValue,
+    RuleConfigurationValueBuilder, Rules, TreeSitterLintDependencySpec,
 };
 
 use self::config_file::ParsedConfigFileContent;

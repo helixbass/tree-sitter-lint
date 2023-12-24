@@ -9,7 +9,7 @@ use serde::Deserialize;
 use tracing::instrument;
 
 use super::{ErrorLevel, RuleConfiguration};
-use crate::{rule::RuleOptions, configuration::ConfigurationReference};
+use crate::{configuration::ConfigurationReference, rule::RuleOptions};
 
 #[derive(Clone)]
 pub struct ParsedConfigFile {

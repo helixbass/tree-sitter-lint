@@ -1,8 +1,8 @@
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 
 use derive_builder::Builder;
 
-use crate::{Rule, configuration::Configuration};
+use crate::{configuration::Configuration, Rule};
 
 #[non_exhaustive]
 #[derive(Builder, Clone)]

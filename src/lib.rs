@@ -30,7 +30,10 @@ use std::{
 
 use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
-pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration, RuleConfigurationValue, RuleConfigurationValueBuilder};
+pub use config::{
+    Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration,
+    RuleConfigurationValue, RuleConfigurationValueBuilder,
+};
 pub use configuration::{Configuration, ConfigurationBuilder};
 pub use context::{
     get_tokens, CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
