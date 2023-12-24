@@ -4,11 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use derive_builder::Builder;
 use serde::Deserialize;
 use tracing::instrument;
 
 use super::{ErrorLevel, RuleConfiguration};
-use crate::rule::RuleOptions;
+use crate::{configuration::ConfigurationReference, rule::RuleOptions};
 
 #[derive(Clone)]
 pub struct ParsedConfigFile {
@@ -16,21 +17,18 @@ pub struct ParsedConfigFile {
     pub content: ParsedConfigFileContent,
 }
 
+pub type Plugins = HashMap<String, PluginSpecValue>;
+
+pub type Rules = HashMap<String, RuleConfigurationValue>;
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ParsedConfigFileContent {
-    pub plugins: HashMap<String, PluginSpecValue>,
-    #[serde(rename = "rules")]
-    rules_by_name: HashMap<String, RuleConfigurationValue>,
+    pub plugins: Plugins,
+    #[serde(default)]
+    pub rules: Rules,
     pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
-}
-
-impl ParsedConfigFileContent {
-    pub fn rules(&self) -> impl Iterator<Item = RuleConfiguration> + '_ {
-        self.rules_by_name
-            .iter()
-            .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
-    }
+    pub extends: Vec<ConfigurationReference>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -43,9 +41,10 @@ pub struct PluginSpecValue {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Builder, Clone, Deserialize)]
 pub struct RuleConfigurationValue {
     pub level: ErrorLevel,
+    #[builder(default, setter(strip_option))]
     pub options: Option<RuleOptions>,
 }
 

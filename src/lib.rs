@@ -3,6 +3,7 @@
 mod aggregated_queries;
 mod cli;
 mod config;
+mod configuration;
 mod context;
 mod environment;
 mod fixing;
@@ -29,7 +30,11 @@ use std::{
 
 use aggregated_queries::AggregatedQueries;
 pub use cli::bootstrap_cli;
-pub use config::{Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration};
+pub use config::{
+    Args, ArgsBuilder, Config, ConfigBuilder, ErrorLevel, RuleConfiguration,
+    RuleConfigurationValue, RuleConfigurationValueBuilder,
+};
+pub use configuration::{Configuration, ConfigurationBuilder};
 pub use context::{
     get_tokens, CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
     FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
@@ -40,7 +45,7 @@ use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use fixing::{AccumulatedEdits, Fixer};
 pub use node::{compare_nodes, NodeExt, NonCommentChildren};
-pub use plugin::Plugin;
+pub use plugin::{Plugin, PluginBuilder};
 pub use proc_macros::{builder_args, instance_provider_factory, rule, rule_tests, violation};
 use rayon::prelude::*;
 use rule::{Captures, InstantiatedRule};
