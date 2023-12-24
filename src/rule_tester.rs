@@ -246,7 +246,9 @@ impl RuleTester {
         }
 
         for &supported_language_language in &self.supported_language_languages {
-            if let Some(supported_language_languages) = valid_test.supported_language_languages.as_ref() {
+            if let Some(supported_language_languages) =
+                valid_test.supported_language_languages.as_ref()
+            {
                 if !supported_language_languages.contains(&supported_language_language) {
                     continue;
                 }
@@ -304,7 +306,8 @@ impl RuleTester {
     }
 
     fn run_invalid_test(&self, invalid_test: &RuleTestInvalid) {
-        if let Some(supported_language_languages) = invalid_test.supported_language_languages.as_ref()
+        if let Some(supported_language_languages) =
+            invalid_test.supported_language_languages.as_ref()
         {
             for &supported_language_language in supported_language_languages {
                 if !self
@@ -320,7 +323,9 @@ impl RuleTester {
         }
 
         for &supported_language_language in &self.supported_language_languages {
-            if let Some(supported_language_languages) = invalid_test.supported_language_languages.as_ref() {
+            if let Some(supported_language_languages) =
+                invalid_test.supported_language_languages.as_ref()
+            {
                 if !supported_language_languages.contains(&supported_language_language) {
                     continue;
                 }

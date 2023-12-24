@@ -420,7 +420,10 @@ fn run_exit_node_listeners<'a, 'b>(
 ) {
     if let Some(kind_exit_rule_listener_indices) = file_run_context
         .aggregated_queries
-        .get_kind_exit_rule_and_listener_indices(file_run_context.supported_language_language, exited_node.kind())
+        .get_kind_exit_rule_and_listener_indices(
+            file_run_context.supported_language_language,
+            exited_node.kind(),
+        )
     {
         kind_exit_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
             run_single_on_query_match_callback(
@@ -446,7 +449,10 @@ fn run_enter_node_listeners<'a, 'b>(
 ) {
     if let Some(kind_enter_rule_listener_indices) = file_run_context
         .aggregated_queries
-        .get_kind_enter_rule_and_listener_indices(file_run_context.supported_language_language, entered_node.kind())
+        .get_kind_enter_rule_and_listener_indices(
+            file_run_context.supported_language_language,
+            entered_node.kind(),
+        )
     {
         kind_enter_rule_listener_indices.for_each(|(instantiated_rule, rule_listener_index)| {
             run_single_on_query_match_callback(
@@ -540,7 +546,10 @@ pub fn run_for_slice<'a>(
         let _span = debug_span!("tree-sitter parse").entered();
 
         file_contents
-            .parse(&mut get_parser(supported_language_language.language()), None)
+            .parse(
+                &mut get_parser(supported_language_language.language()),
+                None,
+            )
             .unwrap()
     });
     let from_file_run_context_instance_provider =
@@ -602,7 +611,10 @@ pub fn run_fixing_for_slice<'a>(
         let _span = debug_span!("tree-sitter parse").entered();
 
         RopeOrSlice::<'_>::from(&file_contents)
-            .parse(&mut get_parser(supported_language_language.language()), None)
+            .parse(
+                &mut get_parser(supported_language_language.language()),
+                None,
+            )
             .unwrap()
     });
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();

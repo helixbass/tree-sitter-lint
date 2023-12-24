@@ -1,14 +1,14 @@
 use std::{borrow::Cow, cmp::Ordering, collections::HashSet};
 
-use squalid::{return_default_if_false, return_default_if_none, OptionExt, Contains};
+use squalid::{return_default_if_false, return_default_if_none, Contains, OptionExt};
 use tree_sitter_grep::{
     tree_sitter::{Node, TreeCursor},
     SupportedLanguage,
 };
 
 use crate::{
-    rule_tester::compare_ranges, QueryMatchContext, SkipOptions, SkipOptionsBuilder,
-    SourceTextProvider, get_tokens, context::TokenWalker,
+    context::TokenWalker, get_tokens, rule_tester::compare_ranges, QueryMatchContext, SkipOptions,
+    SkipOptionsBuilder, SourceTextProvider,
 };
 
 pub type Kind = &'static str;
@@ -563,7 +563,9 @@ impl<'a> Iterator for Ancestors<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let ret = self.current_node;
-        self.current_node = self.current_node.and_then(|current_node| current_node.parent());
+        self.current_node = self
+            .current_node
+            .and_then(|current_node| current_node.parent());
         ret
     }
 }

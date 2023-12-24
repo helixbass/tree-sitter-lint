@@ -93,21 +93,26 @@ pub struct AggregatedQueries<'a> {
 impl<'a> AggregatedQueries<'a> {
     #[instrument(level = "debug", skip_all)]
     pub fn new(instantiated_rules: &'a [InstantiatedRule]) -> Self {
-        let mut per_language: HashMap<SupportedLanguageLanguage, AggregatedQueriesPerLanguageBuilder> =
-            Default::default();
+        let mut per_language: HashMap<
+            SupportedLanguageLanguage,
+            AggregatedQueriesPerLanguageBuilder,
+        > = Default::default();
 
         let span = trace_span!("resolve individual rule listener queries").entered();
 
         for (rule_index, instantiated_rule) in instantiated_rules.into_iter().enumerate() {
             for &language in &instantiated_rule.meta.languages {
-                let mut has_seen_successful_parsing_for_this_language: HashMap<RuleListenerIndex, bool> = Default::default();
+                let mut has_seen_successful_parsing_for_this_language: HashMap<
+                    RuleListenerIndex,
+                    bool,
+                > = Default::default();
                 for &supported_language_language in language.all_supported_language_languages() {
-                    let per_language_builder = per_language.entry(supported_language_language).or_insert_with(|| {
-                        AggregatedQueriesPerLanguageBuilder {
+                    let per_language_builder = per_language
+                        .entry(supported_language_language)
+                        .or_insert_with(|| AggregatedQueriesPerLanguageBuilder {
                             query_text: "(_) @c\n".to_owned(),
                             ..Default::default()
-                        }
-                    });
+                        });
                     for (rule_listener_index, rule_listener_query) in instantiated_rule
                         .rule_instance
                         .listener_queries()
@@ -116,8 +121,10 @@ impl<'a> AggregatedQueries<'a> {
                         .filter_map(|(rule_listener_index, rule_listener_query)| {
                             if !rule_listener_query.query.contains('(') {
                                 let mut saw_selector = false;
-                                let mut seen_exit_and_enter_kinds: (HashSet<String>, HashSet<&str>) =
-                                    (Default::default(), Default::default());
+                                let mut seen_exit_and_enter_kinds: (
+                                    HashSet<String>,
+                                    HashSet<&str>,
+                                ) = (Default::default(), Default::default());
                                 for selector in
                                     regex!(r#"\s*,\s*"#).split(rule_listener_query.query.trim())
                                 {
@@ -161,7 +168,10 @@ impl<'a> AggregatedQueries<'a> {
                             ))
                         })
                     {
-                        let has_seen_successful_parsing_for_this_language = has_seen_successful_parsing_for_this_language.entry(rule_listener_index).or_default();
+                        let has_seen_successful_parsing_for_this_language =
+                            has_seen_successful_parsing_for_this_language
+                                .entry(rule_listener_index)
+                                .or_default();
                         let Ok(rule_listener_query) = rule_listener_query else {
                             continue;
                         };
@@ -188,7 +198,10 @@ impl<'a> AggregatedQueries<'a> {
                         per_language_builder.query_text.push_str("\n\n");
                     }
                 }
-                if has_seen_successful_parsing_for_this_language.iter().any(|(_, successfully_parsed)| !*successfully_parsed) {
+                if has_seen_successful_parsing_for_this_language
+                    .iter()
+                    .any(|(_, successfully_parsed)| !*successfully_parsed)
+                {
                     panic!("Found a listener query that couldn't be parsed for any language grammar of the supported language");
                 }
             }
@@ -217,11 +230,18 @@ impl<'a> AggregatedQueries<'a> {
         }
     }
 
-    pub fn is_wildcard_listener(&self, language: SupportedLanguageLanguage, pattern_index: usize) -> bool {
+    pub fn is_wildcard_listener(
+        &self,
+        language: SupportedLanguageLanguage,
+        pattern_index: usize,
+    ) -> bool {
         pattern_index == self.get_wildcard_listener_pattern_index(language)
     }
 
-    pub fn get_wildcard_listener_pattern_index(&self, _language: SupportedLanguageLanguage) -> usize {
+    pub fn get_wildcard_listener_pattern_index(
+        &self,
+        _language: SupportedLanguageLanguage,
+    ) -> usize {
         0
     }
 

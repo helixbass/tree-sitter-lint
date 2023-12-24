@@ -10,9 +10,9 @@ use serde::Deserialize;
 use tracing::{instrument, trace_span};
 
 use crate::{
+    environment::Environment,
     rule::{InstantiatedRule, Rule, RuleOptions},
     Plugin,
-    environment::Environment,
 };
 
 mod config_file;

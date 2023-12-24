@@ -28,8 +28,23 @@ mod _sealed {
     impl<'a> Sealed<'a> for () {}
     impl<'a, T1: FromFileRunContext<'a>> Sealed<'a> for (T1,) {}
     impl<'a, T1: FromFileRunContext<'a>, T2: FromFileRunContext<'a>> Sealed<'a> for (T1, T2) {}
-    impl<'a, T1: FromFileRunContext<'a>, T2: FromFileRunContext<'a>, T3: FromFileRunContext<'a>> Sealed<'a> for (T1, T2, T3) {}
-    impl<'a, T1: FromFileRunContext<'a>, T2: FromFileRunContext<'a>, T3: FromFileRunContext<'a>, T4: FromFileRunContext<'a>> Sealed<'a> for (T1, T2, T3, T4) {}
+    impl<
+            'a,
+            T1: FromFileRunContext<'a>,
+            T2: FromFileRunContext<'a>,
+            T3: FromFileRunContext<'a>,
+        > Sealed<'a> for (T1, T2, T3)
+    {
+    }
+    impl<
+            'a,
+            T1: FromFileRunContext<'a>,
+            T2: FromFileRunContext<'a>,
+            T3: FromFileRunContext<'a>,
+            T4: FromFileRunContext<'a>,
+        > Sealed<'a> for (T1, T2, T3, T4)
+    {
+    }
 }
 
 pub trait FromFileRunContextProvidedTypes<'a>: _sealed::Sealed<'a> {
@@ -58,8 +73,13 @@ impl<'a, T1> FromFileRunContextProvidedTypes<'a> for (T1,)
 where
     T1: FromFileRunContext<'a> + TidAble<'a>,
 {
-    type OnceLockStorage =
-        FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1, DummyFromFileRunContext<'a>, DummyFromFileRunContext<'a>, DummyFromFileRunContext<'a>>;
+    type OnceLockStorage = FromFileRunContextProvidedTypesOnceLockStorageEnum<
+        'a,
+        T1,
+        DummyFromFileRunContext<'a>,
+        DummyFromFileRunContext<'a>,
+        DummyFromFileRunContext<'a>,
+    >;
 
     fn once_lock_storage() -> Self::OnceLockStorage {
         FromFileRunContextProvidedTypesOnceLockStorageEnum::One(Default::default(), PhantomData)
@@ -71,7 +91,13 @@ where
     T1: FromFileRunContext<'a> + TidAble<'a>,
     T2: FromFileRunContext<'a> + TidAble<'a>,
 {
-    type OnceLockStorage = FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1, T2, DummyFromFileRunContext<'a>, DummyFromFileRunContext<'a>>;
+    type OnceLockStorage = FromFileRunContextProvidedTypesOnceLockStorageEnum<
+        'a,
+        T1,
+        T2,
+        DummyFromFileRunContext<'a>,
+        DummyFromFileRunContext<'a>,
+    >;
 
     fn once_lock_storage() -> Self::OnceLockStorage {
         FromFileRunContextProvidedTypesOnceLockStorageEnum::Two(
@@ -88,7 +114,13 @@ where
     T2: FromFileRunContext<'a> + TidAble<'a>,
     T3: FromFileRunContext<'a> + TidAble<'a>,
 {
-    type OnceLockStorage = FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1, T2, T3, DummyFromFileRunContext<'a>>;
+    type OnceLockStorage = FromFileRunContextProvidedTypesOnceLockStorageEnum<
+        'a,
+        T1,
+        T2,
+        T3,
+        DummyFromFileRunContext<'a>,
+    >;
 
     fn once_lock_storage() -> Self::OnceLockStorage {
         FromFileRunContextProvidedTypesOnceLockStorageEnum::Three(
@@ -132,8 +164,19 @@ pub enum FromFileRunContextProvidedTypesOnceLockStorageEnum<'a, T1, T2, T3, T4> 
     Zero(PhantomData<&'a ()>),
     One(OnceLock<T1>, PhantomData<&'a ()>),
     Two(OnceLock<T1>, OnceLock<T2>, PhantomData<&'a ()>),
-    Three(OnceLock<T1>, OnceLock<T2>, OnceLock<T3>, PhantomData<&'a ()>),
-    Four(OnceLock<T1>, OnceLock<T2>, OnceLock<T3>, OnceLock<T4>, PhantomData<&'a ()>),
+    Three(
+        OnceLock<T1>,
+        OnceLock<T2>,
+        OnceLock<T3>,
+        PhantomData<&'a ()>,
+    ),
+    Four(
+        OnceLock<T1>,
+        OnceLock<T2>,
+        OnceLock<T3>,
+        OnceLock<T4>,
+        PhantomData<&'a ()>,
+    ),
 }
 
 impl<'a, T1, T2, T3, T4> FromFileRunContextProvidedTypesOnceLockStorage<'a>
@@ -166,33 +209,37 @@ where
                 }
                 _ => None,
             },
-            FromFileRunContextProvidedTypesOnceLockStorageEnum::Three(t1, t2, t3, _) => match type_id {
-                id if id == T1::id() => {
-                    Some(t1.get_or_init(|| T1::from_file_run_context(file_run_context)))
+            FromFileRunContextProvidedTypesOnceLockStorageEnum::Three(t1, t2, t3, _) => {
+                match type_id {
+                    id if id == T1::id() => {
+                        Some(t1.get_or_init(|| T1::from_file_run_context(file_run_context)))
+                    }
+                    id if id == T2::id() => {
+                        Some(t2.get_or_init(|| T2::from_file_run_context(file_run_context)))
+                    }
+                    id if id == T3::id() => {
+                        Some(t3.get_or_init(|| T3::from_file_run_context(file_run_context)))
+                    }
+                    _ => None,
                 }
-                id if id == T2::id() => {
-                    Some(t2.get_or_init(|| T2::from_file_run_context(file_run_context)))
+            }
+            FromFileRunContextProvidedTypesOnceLockStorageEnum::Four(t1, t2, t3, t4, _) => {
+                match type_id {
+                    id if id == T1::id() => {
+                        Some(t1.get_or_init(|| T1::from_file_run_context(file_run_context)))
+                    }
+                    id if id == T2::id() => {
+                        Some(t2.get_or_init(|| T2::from_file_run_context(file_run_context)))
+                    }
+                    id if id == T3::id() => {
+                        Some(t3.get_or_init(|| T3::from_file_run_context(file_run_context)))
+                    }
+                    id if id == T4::id() => {
+                        Some(t4.get_or_init(|| T4::from_file_run_context(file_run_context)))
+                    }
+                    _ => None,
                 }
-                id if id == T3::id() => {
-                    Some(t3.get_or_init(|| T3::from_file_run_context(file_run_context)))
-                }
-                _ => None,
-            },
-            FromFileRunContextProvidedTypesOnceLockStorageEnum::Four(t1, t2, t3, t4, _) => match type_id {
-                id if id == T1::id() => {
-                    Some(t1.get_or_init(|| T1::from_file_run_context(file_run_context)))
-                }
-                id if id == T2::id() => {
-                    Some(t2.get_or_init(|| T2::from_file_run_context(file_run_context)))
-                }
-                id if id == T3::id() => {
-                    Some(t3.get_or_init(|| T3::from_file_run_context(file_run_context)))
-                }
-                id if id == T4::id() => {
-                    Some(t4.get_or_init(|| T4::from_file_run_context(file_run_context)))
-                }
-                _ => None,
-            },
+            }
         }
     }
 }

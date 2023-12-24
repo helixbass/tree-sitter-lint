@@ -1,7 +1,10 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
 use tracing::{instrument, trace_span};
-use tree_sitter_grep::{tree_sitter::{QueryMatch, QueryError}, SupportedLanguage};
+use tree_sitter_grep::{
+    tree_sitter::{QueryError, QueryMatch},
+    SupportedLanguage,
+};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},

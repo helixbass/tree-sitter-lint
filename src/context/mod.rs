@@ -23,8 +23,8 @@ mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use count_options::{CountOptions, CountOptionsBuilder};
-pub use get_tokens::{get_tokens, TokenWalker};
 use get_tokens::get_tokens_after_node;
+pub use get_tokens::{get_tokens, TokenWalker};
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
@@ -33,12 +33,13 @@ pub use provided_types::{
 pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
 use crate::{
+    environment::Environment,
     fixing::PendingFix,
     rule::InstantiatedRule,
     text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider, environment::Environment,
+    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider,
 };
 
 pub struct FileRunContext<'a, 'b> {
