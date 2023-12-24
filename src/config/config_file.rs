@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tracing::instrument;
 
 use super::{ErrorLevel, RuleConfiguration};
-use crate::rule::RuleOptions;
+use crate::{rule::RuleOptions, Configuration};
 
 #[derive(Clone)]
 pub struct ParsedConfigFile {
@@ -16,19 +16,34 @@ pub struct ParsedConfigFile {
     pub content: ParsedConfigFileContent,
 }
 
+pub type Plugins = HashMap<String, PluginSpecValue>;
+
+pub type Rules = HashMap<String, RuleConfigurationValue>;
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ParsedConfigFileContent {
-    pub plugins: HashMap<String, PluginSpecValue>,
+    plugins: Plugins,
     #[serde(rename = "rules")]
-    rules_by_name: HashMap<String, RuleConfigurationValue>,
+    rules_by_name: Rules,
     pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
+    pub extends: Vec<Configuration>,
 }
 
 impl ParsedConfigFileContent {
+    pub fn plugins(&self) -> impl Iterator<Item = (&String, &PluginSpecValue)> {
+        self.extends.iter().flat_map(|extend| extend.plugins.iter())
+            .chain(self.plugins.iter())
+    }
+
     pub fn rules(&self) -> impl Iterator<Item = RuleConfiguration> + '_ {
+        self.extends.iter().flat_map(|extend| extend
+            .rules
+            .iter())
+            .chain(
         self.rules_by_name
             .iter()
+            )
             .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
     }
 }
