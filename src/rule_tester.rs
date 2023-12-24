@@ -1,23 +1,35 @@
-use std::{cmp::Ordering, iter, sync::Arc};
+use std::{cmp::Ordering, iter, marker::PhantomData, sync::Arc};
 
+use better_any::TidAble;
 use derive_builder::Builder;
 use tree_sitter_grep::{tree_sitter::Range, SupportedLanguage};
 
 use crate::{
     config::{ConfigBuilder, ErrorLevel},
+    context::FromFileRunContextInstanceProvider,
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
+    FileRunContext, FromFileRunContext, FromFileRunContextInstanceProviderFactory,
     RuleConfiguration,
 };
 
-pub struct RuleTester {
-    rule: Arc<dyn Rule>,
+pub struct RuleTester<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+> {
+    rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
     rule_tests: RuleTests,
     language: SupportedLanguage,
+    from_file_run_context_instance_provider_factory: TFromFileRunContextInstanceProviderFactory,
 }
 
-impl RuleTester {
-    fn new(rule: Arc<dyn Rule>, rule_tests: RuleTests) -> Self {
+impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
+    RuleTester<TFromFileRunContextInstanceProviderFactory>
+{
+    fn new(
+        rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
+        rule_tests: RuleTests,
+        from_file_run_context_instance_provider_factory: TFromFileRunContextInstanceProviderFactory,
+    ) -> Self {
         if !rule.meta().fixable
             && rule_tests.invalid_tests.iter().any(|invalid_test| {
                 matches!(
@@ -36,11 +48,21 @@ impl RuleTester {
             language: languages[0],
             rule,
             rule_tests,
+            from_file_run_context_instance_provider_factory,
         }
     }
 
-    pub fn run(rule: Arc<dyn Rule>, rule_tests: RuleTests) {
-        Self::new(rule, rule_tests).run_tests()
+    pub fn run_with_from_file_run_context_instance_provider(
+        rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
+        rule_tests: RuleTests,
+        from_file_run_context_instance_provider_factory: TFromFileRunContextInstanceProviderFactory,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            from_file_run_context_instance_provider_factory,
+        )
+        .run_tests()
     }
 
     fn run_tests(&self) {
@@ -59,7 +81,7 @@ impl RuleTester {
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta().name)
+                .rule(self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
                     name: self.rule.meta().name,
@@ -69,6 +91,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
+            &self.from_file_run_context_instance_provider_factory,
         );
         assert!(
             violations.is_empty(),
@@ -83,7 +106,7 @@ impl RuleTester {
             None,
             "tmp.rs",
             ConfigBuilder::default()
-                .rule(&self.rule.meta().name)
+                .rule(self.rule.meta().name)
                 .all_standalone_rules([self.rule.clone()])
                 .rule_configurations([RuleConfiguration {
                     name: self.rule.meta().name,
@@ -95,6 +118,7 @@ impl RuleTester {
                 .build()
                 .unwrap(),
             self.language,
+            &self.from_file_run_context_instance_provider_factory,
         );
         assert_that_violations_match_expected(&violations, invalid_test);
         match invalid_test.output.as_ref() {
@@ -115,6 +139,20 @@ impl RuleTester {
             }
             _ => (),
         }
+    }
+}
+
+impl RuleTester<DummyFromFileRunContextInstanceProviderFactory> {
+    pub fn run(
+        rule: Arc<dyn Rule<DummyFromFileRunContextInstanceProviderFactory>>,
+        rule_tests: RuleTests,
+    ) {
+        Self::new(
+            rule,
+            rule_tests,
+            DummyFromFileRunContextInstanceProviderFactory,
+        )
+        .run_tests()
     }
 }
 
@@ -336,5 +374,31 @@ impl From<&str> for RuleTestExpectedError {
 impl From<&RuleTestExpectedError> for RuleTestExpectedError {
     fn from(value: &RuleTestExpectedError) -> Self {
         value.clone()
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct DummyFromFileRunContextInstanceProvider<'a> {
+    _phantom_data: PhantomData<&'a ()>,
+}
+
+impl<'a> FromFileRunContextInstanceProvider<'a> for DummyFromFileRunContextInstanceProvider<'a> {
+    type Parent = DummyFromFileRunContextInstanceProviderFactory;
+
+    fn get<T: FromFileRunContext<'a> + TidAble<'a>>(
+        &self,
+        _file_run_context: FileRunContext<'a, '_, Self::Parent>,
+    ) -> Option<&T> {
+        unreachable!()
+    }
+}
+
+pub struct DummyFromFileRunContextInstanceProviderFactory;
+
+impl FromFileRunContextInstanceProviderFactory for DummyFromFileRunContextInstanceProviderFactory {
+    type Provider<'a> = DummyFromFileRunContextInstanceProvider<'a>;
+
+    fn create<'a>(&self) -> Self::Provider<'a> {
+        DummyFromFileRunContextInstanceProvider::default()
     }
 }

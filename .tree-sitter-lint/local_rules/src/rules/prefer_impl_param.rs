@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use tree_sitter_lint::{rule, tree_sitter::Node, violation, Rule};
+use tree_sitter_lint::{
+    rule, tree_sitter::Node, violation, FromFileRunContextInstanceProviderFactory, Rule,
+};
 
 #[macro_export]
 macro_rules! assert_node_kind {
@@ -86,7 +88,7 @@ macro_rules! query {
     }};
 }
 
-pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
+pub fn prefer_impl_param_rule<T: FromFileRunContextInstanceProviderFactory>() -> Arc<dyn Rule<T>> {
     rule! {
         name => "prefer-impl-param",
         listeners => [

@@ -7,7 +7,7 @@ use proc_macros::{
     violation_crate_internal as violation,
 };
 
-use crate::{rule::Rule, RuleTester};
+use crate::{rule::Rule, FromFileRunContextInstanceProviderFactory, RuleTester};
 
 #[macro_export]
 macro_rules! assert_fixed_content {
@@ -24,6 +24,7 @@ macro_rules! assert_fixed_content {
                 .build()
                 .unwrap(),
             $crate::tree_sitter_grep::SupportedLanguage::Rust,
+            &$crate::rule_tester::DummyFromFileRunContextInstanceProviderFactory,
         );
         assert_eq!(
             std::str::from_utf8(&file_contents).unwrap().trim(),
@@ -41,7 +42,7 @@ fn test_single_fix() {
         [create_identifier_replacing_rule("foo", "bar")],
         r#"
             fn bar() {}
-        "#
+        "#,
     );
 }
 
@@ -123,10 +124,12 @@ fn test_multiple_nonconflicting_fixes_from_different_rules() {
     );
 }
 
-fn create_identifier_replacing_rule(
+fn create_identifier_replacing_rule<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>(
     name: impl Into<String>,
     replacement: impl Into<String>,
-) -> Arc<dyn Rule> {
+) -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>> {
     rule! {
         name => format!("replace_{}_with_{}", self.name, self.replacement),
         fixable => true,

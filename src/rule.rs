@@ -6,7 +6,7 @@ use crate::{
     config::{PluginIndex, RuleConfiguration},
     context::{FileRunContext, QueryMatchContext},
     tree_sitter::{Language, Node, Query},
-    Config,
+    Config, FromFileRunContextInstanceProviderFactory,
 };
 
 #[derive(Clone, Debug)]
@@ -17,37 +17,47 @@ pub struct RuleMeta {
     pub messages: Option<HashMap<String, String>>,
 }
 
-pub trait Rule: Send + Sync {
+pub trait Rule<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>: Send + Sync
+{
     fn meta(&self) -> RuleMeta;
     fn instantiate(
         self: Arc<Self>,
-        config: &Config,
+        config: &Config<TFromFileRunContextInstanceProviderFactory>,
         rule_configuration: &RuleConfiguration,
-    ) -> Arc<dyn RuleInstance>;
+    ) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
 }
 
-pub trait RuleInstance: Send + Sync {
+pub trait RuleInstance<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>: Send + Sync
+{
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_context: FileRunContext<'a>,
-    ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
-    fn rule(&self) -> Arc<dyn Rule>;
+        file_run_context: FileRunContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
+    ) -> Box<dyn RuleInstancePerFile<'a, TFromFileRunContextInstanceProviderFactory> + 'a>;
+    fn rule(&self) -> Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
 
-pub struct InstantiatedRule {
+pub struct InstantiatedRule<
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+> {
     pub meta: RuleMeta,
-    pub rule: Arc<dyn Rule>,
-    pub rule_instance: Arc<dyn RuleInstance>,
+    pub rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
+    pub rule_instance: Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>,
     pub plugin_index: Option<PluginIndex>,
 }
 
-impl InstantiatedRule {
+impl<TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory>
+    InstantiatedRule<TFromFileRunContextInstanceProviderFactory>
+{
     pub fn new(
-        rule: Arc<dyn Rule>,
+        rule: Arc<dyn Rule<TFromFileRunContextInstanceProviderFactory>>,
         plugin_index: Option<PluginIndex>,
         rule_configuration: &RuleConfiguration,
-        config: &Config,
+        config: &Config<TFromFileRunContextInstanceProviderFactory>,
     ) -> Self {
         Self {
             meta: rule.meta(),
@@ -97,7 +107,7 @@ impl<'a, 'b> Captures<'a, 'b> {
         Some(first_node)
     }
 
-    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
+    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node<'a>> + 'b {
         self.query_match
             .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap())
     }
@@ -123,14 +133,18 @@ impl<'a, 'b> ops::Index<&str> for Captures<'a, 'b> {
     }
 }
 
-pub trait RuleInstancePerFile<'a> {
+pub trait RuleInstancePerFile<
+    'a,
+    TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+>
+{
     fn on_query_match<'b>(
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a>,
+        context: &mut QueryMatchContext<'a, '_, TFromFileRunContextInstanceProviderFactory>,
     );
-    fn rule_instance(&self) -> Arc<dyn RuleInstance>;
+    fn rule_instance(&self) -> Arc<dyn RuleInstance<TFromFileRunContextInstanceProviderFactory>>;
 }
 
 pub enum MatchBy {

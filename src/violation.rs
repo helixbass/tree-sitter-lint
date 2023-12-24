@@ -8,7 +8,7 @@ use crate::{
     context::{Fixer, QueryMatchContext},
     rule::RuleMeta,
     tree_sitter::{self, Node},
-    Config,
+    Config, FromFileRunContextInstanceProviderFactory,
 };
 
 #[derive(Builder)]
@@ -26,9 +26,11 @@ pub struct Violation<'a> {
 }
 
 impl<'a> Violation<'a> {
-    pub fn contextualize(
+    pub fn contextualize<
+        TFromFileRunContextInstanceProviderFactory: FromFileRunContextInstanceProviderFactory,
+    >(
         self,
-        query_match_context: &QueryMatchContext<'a>,
+        query_match_context: &QueryMatchContext<TFromFileRunContextInstanceProviderFactory>,
         had_fixes: bool,
     ) -> ViolationWithContext {
         let Violation {
@@ -91,7 +93,7 @@ pub struct ViolationWithContext {
 }
 
 impl ViolationWithContext {
-    pub fn print(&self, config: &Config) {
+    pub fn print(&self, config: &Config<impl FromFileRunContextInstanceProviderFactory>) {
         println!(
             "{:?}:{}:{} {} {}",
             self.path,
