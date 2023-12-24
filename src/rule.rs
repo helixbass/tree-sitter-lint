@@ -166,7 +166,6 @@ impl RuleListenerQuery {
                         0 => panic!("Expected capture"),
                         _ => query.capture_names()[0].clone(),
                     },
-                    // Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
                     Some(capture_name) => capture_name.clone(),
                 },
             },
