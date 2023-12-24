@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 
 use derive_builder::Builder;
 
@@ -12,5 +12,5 @@ pub struct Plugin {
     #[builder(default)]
     pub rules: Vec<Arc<dyn Rule>>,
     #[builder(default)]
-    pub configs: Vec<Configuration>,
+    pub configs: HashMap<String, Configuration>,
 }

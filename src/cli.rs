@@ -193,7 +193,7 @@ fn get_local_binary_cargo_toml_contents(
             LOCAL_RULES_DIR_NAME
         ));
     }
-    for (plugin, plugin_spec) in parsed_config_file.content.plugins() {
+    for (plugin, plugin_spec) in &parsed_config_file.content.plugins {
         let path = plugin_spec
             .path
             .as_ref()
@@ -284,7 +284,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
         quote!(vec![])
     };
 
-    let plugin_names = parsed_config_file.content.plugins().map(|(key, _)| key).collect_vec();
+    let plugin_names = parsed_config_file.content.plugins.keys().collect_vec();
 
     let plugin_crate_names = plugin_names
         .iter()

@@ -17,9 +17,61 @@ use crate::{
 
 mod config_file;
 pub use config_file::{
-    find_config_file, load_config_file, ParsedConfigFile, TreeSitterLintDependencySpec,
-    Plugins, Rules,
+    find_config_file, load_config_file, ParsedConfigFile, Plugins, Rules,
+    TreeSitterLintDependencySpec, RuleConfigurationValue, RuleConfigurationValueBuilder
 };
+
+use self::config_file::ParsedConfigFileContent;
+
+fn parse_configuration_reference(configuration_reference: &str) -> (&str, &str) {
+    let mut chunks = configuration_reference.split('/');
+    let plugin_name = chunks.next().unwrap();
+    let configuration_name = chunks.next().unwrap();
+    assert!(chunks.next().is_none());
+    (plugin_name, configuration_name)
+}
+
+fn add_rules_from_configuration_reference(
+    all_rules_by_name: &mut Rules,
+    configuration_reference: &str,
+    all_plugins: &[Plugin],
+) {
+    let (plugin_name, configuration_name) = parse_configuration_reference(configuration_reference);
+    let plugin = all_plugins
+        .into_iter()
+        .find(|plugin| plugin.name == plugin_name)
+        .unwrap();
+    let configuration = plugin.configs.get(configuration_name).unwrap();
+    configuration.extends.iter().for_each(|extend| {
+        add_rules_from_configuration_reference(all_rules_by_name, extend, all_plugins);
+    });
+    all_rules_by_name.extend(
+        configuration
+            .rules
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+}
+
+fn resolve_rule_configurations(
+    config_file_content: &ParsedConfigFileContent,
+    all_plugins: &[Plugin],
+) -> Vec<RuleConfiguration> {
+    let mut all_rules_by_name = Rules::default();
+    config_file_content.extends.iter().for_each(|extend| {
+        add_rules_from_configuration_reference(&mut all_rules_by_name, extend, all_plugins);
+    });
+    all_rules_by_name.extend(
+        config_file_content
+            .rules
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    all_rules_by_name
+        .into_iter()
+        .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
+        .collect()
+}
 
 #[derive(Builder, Debug, Default, Parser)]
 #[builder(default, setter(into, strip_option))]
@@ -56,6 +108,7 @@ impl Args {
             force_rebuild,
             paths,
         } = self;
+        let rule_configurations = resolve_rule_configurations(&config_file_content, &all_plugins);
         Config {
             rule,
             all_standalone_rules,
@@ -64,7 +117,7 @@ impl Args {
             report_fixed_violations,
             paths,
             config_file_path: Some(config_file_path),
-            rule_configurations: config_file_content.rules().collect(),
+            rule_configurations,
             rules_by_plugin_prefixed_name: Default::default(),
             force_rebuild,
             single_fixing_pass: Default::default(),
