@@ -258,7 +258,7 @@ impl RuleTester {
                 valid_test.code.as_bytes(),
                 None,
                 "tmp.rs",
-                ConfigBuilder::default()
+                &ConfigBuilder::default()
                     .rule(self.rule.meta().name.clone())
                     .all_standalone_rules([self.rule.clone()])
                     .rule_configurations([RuleConfiguration {

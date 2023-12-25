@@ -8,6 +8,7 @@ use std::{
 
 use better_any::{TidAble, TidExt};
 use itertools::Itertools;
+use maybe_owned::MaybeOwned;
 use tracing::{debug, instrument};
 use tree_sitter_grep::{
     streaming_iterator::StreamingIterator,
@@ -574,33 +575,5 @@ impl<'a> From<&'a Query> for ParsedOrUnparsedQuery<'a> {
 impl<'a> From<&'a str> for ParsedOrUnparsedQuery<'a> {
     fn from(value: &'a str) -> Self {
         Self::Unparsed(value)
-    }
-}
-
-pub enum MaybeOwned<'a, T> {
-    Owned(T),
-    Borrowed(&'a T),
-}
-
-impl<'a, T> ops::Deref for MaybeOwned<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            MaybeOwned::Owned(value) => value,
-            MaybeOwned::Borrowed(value) => value,
-        }
-    }
-}
-
-impl<'a, T> From<T> for MaybeOwned<'a, T> {
-    fn from(value: T) -> Self {
-        Self::Owned(value)
-    }
-}
-
-impl<'a, T> From<&'a T> for MaybeOwned<'a, T> {
-    fn from(value: &'a T) -> Self {
-        Self::Borrowed(value)
     }
 }
