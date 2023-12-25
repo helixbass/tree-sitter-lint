@@ -139,7 +139,8 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
         self.start_new_trace("everything-else");
         let should_initially_populate_per_config_context = per_config_context.is_none();
         if should_initially_populate_per_config_context {
-            let _ = self.per_config_context
+            let _ = self
+                .per_config_context
                 .set(per_config_context_returned.unwrap());
             let _ = self.config.set(config_returned.unwrap());
         }
