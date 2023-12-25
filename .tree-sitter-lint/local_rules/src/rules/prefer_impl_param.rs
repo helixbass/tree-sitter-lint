@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use tracing::{instrument, trace_span};
 use tree_sitter_lint::{rule, tree_sitter::Node, violation, Rule};
 
 #[macro_export]
@@ -10,6 +11,7 @@ macro_rules! assert_node_kind {
     }};
 }
 
+#[instrument(level = "trace")]
 fn get_constrained_type_parameter_name(node: Node) -> Node {
     assert_node_kind!(node, "constrained_type_parameter");
     let name_node = node.child_by_field_name("left").unwrap();
@@ -99,16 +101,29 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
             )"# => |node, context| {
                 let type_parameter_name =
                     context.get_node_text(get_constrained_type_parameter_name(node));
+
+                let span = trace_span!("get type identifier query").entered();
+
                 let type_identifier_query =
                     query!(
                         r#"(type_identifier) @c"#,
-                        context.language().language(),
+                        context.language().language(None),
                     );
+
+                span.exit();
+
+                let span = trace_span!("look for single usage in parameters").entered();
+
                 return_if_none!(context.maybe_get_single_captured_node_for_filtered_query(
                     type_identifier_query,
                     |node| context.get_node_text(node) == type_parameter_name,
                     get_parameters_node_of_enclosing_function(node)
                 ));
+
+                span.exit();
+
+                let span = trace_span!("look for usage in return type").entered();
+
                 if let Some(return_type_node) =
                     maybe_get_return_type_node_of_enclosing_function(node)
                 {
@@ -125,16 +140,28 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                         return;
                     }
                 }
+
+                span.exit();
+
                 let type_parameters_node =
                     assert_node_kind!(node.parent().unwrap(), "type_parameters");
+
+                let span = trace_span!("looking for other usages in type parameters").entered();
+
                 let only_found_the_defining_usage_in_the_type_parameters = context.maybe_get_single_captured_node_for_filtered_query(
                     type_identifier_query,
                     |node| context.get_node_text(node) == type_parameter_name,
                     type_parameters_node
                 ).is_some();
+
+                span.exit();
+
                 if !only_found_the_defining_usage_in_the_type_parameters {
                     return;
                 }
+
+                let span = trace_span!("looking in where clause").entered();
+
                 if let Some(where_clause_node) =
                     maybe_get_where_clause_node_of_enclosing_function(node)
                 {
@@ -146,6 +173,9 @@ pub fn prefer_impl_param_rule() -> Arc<dyn Rule> {
                         return;
                     }
                 }
+
+                span.exit();
+
                 context.report(
                     violation! {
                         message => r#"Prefer using 'param: impl Trait'"#,

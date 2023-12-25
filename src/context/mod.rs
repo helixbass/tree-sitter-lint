@@ -6,50 +6,76 @@ use std::{
     sync::Arc,
 };
 
+use better_any::{TidAble, TidExt};
+use itertools::Itertools;
+use maybe_owned::MaybeOwned;
+use tracing::{debug, instrument};
 use tree_sitter_grep::{
-    streaming_iterator::StreamingIterator, tree_sitter::Tree, RopeOrSlice, SupportedLanguage,
+    streaming_iterator::StreamingIterator,
+    tree_sitter::{InputEdit, Range, Tree},
+    RopeOrSlice, SupportedLanguage, SupportedLanguageLanguage,
 };
 
 mod backward_tokens;
-mod fix;
+mod count_options;
 mod get_tokens;
+mod provided_types;
 mod skip_options;
 
 use backward_tokens::{get_backward_tokens, get_tokens_before_node};
-pub use fix::{Fixer, PendingFix};
-use get_tokens::{get_tokens, get_tokens_after_node};
+pub use count_options::{CountOptions, CountOptionsBuilder};
+use get_tokens::get_tokens_after_node;
+pub use get_tokens::{get_tokens, TokenWalker};
+pub use provided_types::{
+    FromFileRunContext, FromFileRunContextInstanceProvider,
+    FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
+    FromFileRunContextProvidedTypesOnceLockStorage,
+};
 pub use skip_options::{SkipOptions, SkipOptionsBuilder};
 
 use crate::{
+    environment::Environment,
+    fixing::PendingFix,
     rule::InstantiatedRule,
+    text::get_text_slice,
     tree_sitter::{Language, Node, Query},
     violation::{Violation, ViolationWithContext},
-    AggregatedQueries, Config,
+    AggregatedQueries, Config, Fixer, FixingForSliceRunContext, SourceTextProvider,
 };
 
 #[derive(Copy, Clone)]
-pub struct FileRunContext<'a> {
+pub struct FileRunContext<'a, 'b> {
     pub path: &'a Path,
     pub file_contents: RopeOrSlice<'a>,
     pub tree: &'a Tree,
     pub config: &'a Config,
-    pub language: SupportedLanguage,
+    pub supported_language_language: SupportedLanguageLanguage,
     pub(crate) aggregated_queries: &'a AggregatedQueries<'a>,
     pub(crate) query: &'a Arc<Query>,
+    #[allow(dead_code)]
     pub(crate) instantiated_rules: &'a [InstantiatedRule],
+    #[allow(dead_code)]
+    changed_ranges: Option<&'a [Range]>,
+    from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+    pub run_kind: RunKind<'a>,
+    pub environment: &'a Environment,
 }
 
-impl<'a> FileRunContext<'a> {
+impl<'a, 'b> FileRunContext<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: &'a Path,
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: &'a Tree,
         config: &'a Config,
-        language: SupportedLanguage,
+        supported_language_language: SupportedLanguageLanguage,
         aggregated_queries: &'a AggregatedQueries,
         query: &'a Arc<Query>,
         instantiated_rules: &'a [InstantiatedRule],
+        changed_ranges: Option<&'a [Range]>,
+        from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
+        run_kind: RunKind<'a>,
+        environment: &'a Environment,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -57,23 +83,57 @@ impl<'a> FileRunContext<'a> {
             file_contents,
             tree,
             config,
-            language,
+            supported_language_language,
             aggregated_queries,
             query,
             instantiated_rules,
+            changed_ranges,
+            from_file_run_context_instance_provider,
+            run_kind,
+            environment,
         }
+    }
+
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
+        &self,
+    ) -> &TFromFileRunContext {
+        self.from_file_run_context_instance_provider
+            .get(TFromFileRunContext::id(), *self)
+            .unwrap()
+            .downcast_ref::<TFromFileRunContext>()
+            .unwrap()
+    }
+
+    pub fn language(&self) -> SupportedLanguage {
+        self.supported_language_language.supported_language()
     }
 }
 
-pub struct QueryMatchContext<'a> {
-    pub file_run_context: FileRunContext<'a>,
+impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
+    fn node_text(&self, node: Node) -> Cow<'a, str> {
+        self.file_contents.node_text(node)
+    }
+
+    fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        self.file_contents.slice(range)
+    }
+}
+
+impl From<FileRunContext<'_, '_>> for SupportedLanguage {
+    fn from(value: FileRunContext<'_, '_>) -> Self {
+        value.language()
+    }
+}
+
+pub struct QueryMatchContext<'a, 'b> {
+    pub file_run_context: FileRunContext<'a, 'b>,
     pub(crate) rule: &'a InstantiatedRule,
     pending_fixes: RefCell<Option<Vec<PendingFix>>>,
     pub(crate) violations: RefCell<Option<Vec<ViolationWithContext>>>,
 }
 
-impl<'a> QueryMatchContext<'a> {
-    pub fn new(file_run_context: FileRunContext<'a>, rule: &'a InstantiatedRule) -> Self {
+impl<'a, 'b> QueryMatchContext<'a, 'b> {
+    pub fn new(file_run_context: FileRunContext<'a, 'b>, rule: &'a InstantiatedRule) -> Self {
         Self {
             file_run_context,
             rule,
@@ -82,7 +142,10 @@ impl<'a> QueryMatchContext<'a> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn report(&self, violation: Violation) {
+        debug!("reporting violation");
+
         let mut had_fixes = false;
         if self.file_run_context.config.fix {
             if let Some(fix) = violation.fix.as_ref() {
@@ -98,9 +161,6 @@ impl<'a> QueryMatchContext<'a> {
                         .get_or_insert_with(Default::default)
                         .extend(pending_fixes);
                 }
-                if !self.file_run_context.config.report_fixed_violations {
-                    return;
-                }
             }
         }
         let violation = violation.contextualize(self, had_fixes);
@@ -111,7 +171,7 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_node_text(&self, node: Node) -> Cow<'a, str> {
-        get_node_text(node, self.file_run_context.file_contents)
+        self.node_text(node)
     }
 
     pub fn maybe_get_single_captured_node_for_query<'query, 'enclosing_node>(
@@ -130,7 +190,7 @@ impl<'a> QueryMatchContext<'a> {
     ) -> Option<Node<'enclosing_node>> {
         let query = query
             .into()
-            .into_parsed(self.file_run_context.language.language());
+            .into_parsed(self.file_run_context.supported_language_language.language());
         let captures = tree_sitter_grep::get_captures_for_enclosing_node(
             self.file_run_context.file_contents,
             &query,
@@ -163,7 +223,7 @@ impl<'a> QueryMatchContext<'a> {
     ) -> usize {
         let query = query
             .into()
-            .into_parsed(self.file_run_context.language.language());
+            .into_parsed(self.file_run_context.supported_language_language.language());
         tree_sitter_grep::get_captures_for_enclosing_node(
             self.file_run_context.file_contents,
             &query,
@@ -197,7 +257,7 @@ impl<'a> QueryMatchContext<'a> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_tokens(node)
             .skip(skip_options.skip())
             .filter(move |node| {
@@ -229,7 +289,7 @@ impl<'a> QueryMatchContext<'a> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -259,7 +319,7 @@ impl<'a> QueryMatchContext<'a> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -268,7 +328,7 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         let end = end.start_byte();
         get_tokens_after_node(start)
             .take_while(|node| node.start_byte() < end)
@@ -290,7 +350,7 @@ impl<'a> QueryMatchContext<'a> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -313,7 +373,7 @@ impl<'a> QueryMatchContext<'a> {
                     } else {
                         !self
                             .file_run_context
-                            .language
+                            .language()
                             .comment_kinds()
                             .contains(node.kind())
                     }
@@ -336,7 +396,7 @@ impl<'a> QueryMatchContext<'a> {
     ) -> impl Iterator<Item = Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
         let b_start = b.start_byte();
-        let language = self.file_run_context.language;
+        let language = self.file_run_context.language();
         get_tokens_after_node(a)
             .take_while(move |token| token.start_byte() < b_start)
             .skip(skip_options.skip())
@@ -351,15 +411,129 @@ impl<'a> QueryMatchContext<'a> {
     }
 
     pub fn get_comments_after(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
-        let comment_kinds = self.file_run_context.language.comment_kinds();
+        let comment_kinds = self.file_run_context.language().comment_kinds();
         get_tokens_after_node(node).take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn language(&self) -> SupportedLanguage {
-        self.file_run_context.language
+        self.file_run_context.language()
     }
 
-    // pub fn retrieve<TFromFileRunContext: FromFileRunContext>(&self) -> TFromFileRunContext {}
+    pub fn retrieve<TFromFileRunContext: FromFileRunContext<'a> + TidAble<'a>>(
+        &self,
+    ) -> &TFromFileRunContext {
+        self.file_run_context.retrieve::<TFromFileRunContext>()
+    }
+
+    pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+        let comment_kinds = self.file_run_context.language().comment_kinds();
+        get_tokens_before_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+    }
+
+    pub fn get_comments_inside(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+        let comment_kinds = self.file_run_context.language().comment_kinds();
+        get_tokens(node).filter(|node| comment_kinds.contains(node.kind()))
+    }
+
+    pub fn get_first_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        count_options: Option<impl Into<CountOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut count_options = count_options.map(Into::into).unwrap_or_default();
+        let language = self.file_run_context.language();
+        get_tokens(node)
+            .take(count_options.count())
+            .filter(move |node| {
+                count_options.filter().map_or(true, |filter| filter(*node))
+                    && if count_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+    }
+
+    pub fn is_space_between(&self, a: Node<'a>, b: Node<'a>) -> bool {
+        let a_start = a.start_byte();
+        let b_start = b.start_byte();
+        let (start, end_byte) = if a_start < b_start {
+            (a, b_start)
+        } else {
+            (b, a_start)
+        };
+        let mut prev_token = start;
+        get_tokens_after_node(start)
+            .take_while(move |token| token.start_byte() <= end_byte)
+            .any(|token| {
+                let ret = prev_token.end_byte() < token.start_byte();
+                prev_token = token;
+                ret
+            })
+    }
+
+    pub fn get_last_tokens<TFilter: FnMut(Node) -> bool>(
+        &self,
+        node: Node<'a>,
+        count_options: Option<impl Into<CountOptions<TFilter>>>,
+    ) -> impl Iterator<Item = Node<'a>> {
+        let mut count_options = count_options.map(Into::into).unwrap_or_default();
+        let language = self.file_run_context.language();
+        get_backward_tokens(node)
+            .take(count_options.count())
+            .filter(move |node| {
+                count_options.filter().map_or(true, |filter| filter(*node))
+                    && if count_options.include_comments() {
+                        true
+                    } else {
+                        !language.comment_kinds().contains(node.kind())
+                    }
+            })
+            .collect_vec()
+            .into_iter()
+            .rev()
+    }
+
+    pub fn get_first_token_between<TFilter: FnMut(Node) -> bool>(
+        &self,
+        a: Node<'a>,
+        b: Node<'a>,
+        skip_options: Option<impl Into<SkipOptions<TFilter>>>,
+    ) -> Option<Node<'a>> {
+        self.get_tokens_between(a, b, skip_options).next()
+    }
+}
+
+impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
+    fn node_text(&self, node: Node) -> Cow<'a, str> {
+        self.file_run_context.node_text(node)
+    }
+
+    fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
+        self.file_run_context.slice(range)
+    }
+}
+
+impl From<&'_ QueryMatchContext<'_, '_>> for SupportedLanguage {
+    fn from(value: &'_ QueryMatchContext<'_, '_>) -> Self {
+        value.file_run_context.language()
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum RunKind<'a> {
+    CommandLineNonfixing,
+    CommandLineFixingInitial,
+    CommandLineFixingFixingLoop,
+    NonfixingForSlice,
+    FixingForSliceInitial {
+        context: &'a FixingForSliceRunContext,
+    },
+    FixingForSliceFixingLoop {
+        context: &'a FixingForSliceRunContext,
+        all_violations_from_last_pass: &'a [ViolationWithContext],
+        all_fixes_from_last_pass: &'a [(InputEdit, String)],
+    },
 }
 
 pub enum ParsedOrUnparsedQuery<'a> {
@@ -401,44 +575,5 @@ impl<'a> From<&'a Query> for ParsedOrUnparsedQuery<'a> {
 impl<'a> From<&'a str> for ParsedOrUnparsedQuery<'a> {
     fn from(value: &'a str) -> Self {
         Self::Unparsed(value)
-    }
-}
-
-pub enum MaybeOwned<'a, T> {
-    Owned(T),
-    Borrowed(&'a T),
-}
-
-impl<'a, T> ops::Deref for MaybeOwned<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            MaybeOwned::Owned(value) => value,
-            MaybeOwned::Borrowed(value) => value,
-        }
-    }
-}
-
-impl<'a, T> From<T> for MaybeOwned<'a, T> {
-    fn from(value: T) -> Self {
-        Self::Owned(value)
-    }
-}
-
-impl<'a, T> From<&'a T> for MaybeOwned<'a, T> {
-    fn from(value: &'a T) -> Self {
-        Self::Borrowed(value)
-    }
-}
-
-fn get_node_text<'a>(node: Node, file_contents: RopeOrSlice<'a>) -> Cow<'a, str> {
-    get_text_slice(file_contents, node.byte_range())
-}
-
-fn get_text_slice(file_contents: RopeOrSlice, range: ops::Range<usize>) -> Cow<'_, str> {
-    match file_contents {
-        RopeOrSlice::Slice(slice) => std::str::from_utf8(&slice[range]).unwrap().into(),
-        RopeOrSlice::Rope(rope) => rope.byte_slice(range).into(),
     }
 }

@@ -4,10 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use derive_builder::Builder;
 use serde::Deserialize;
+use tracing::instrument;
 
 use super::{ErrorLevel, RuleConfiguration};
-use crate::rule::RuleOptions;
+use crate::{configuration::ConfigurationReference, rule::RuleOptions};
 
 #[derive(Clone)]
 pub struct ParsedConfigFile {
@@ -15,19 +17,24 @@ pub struct ParsedConfigFile {
     pub content: ParsedConfigFileContent,
 }
 
+pub type Plugins = HashMap<String, PluginSpecValue>;
+
+pub type Rules = HashMap<String, RuleConfigurationValue>;
+
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ParsedConfigFileContent {
-    pub plugins: HashMap<String, PluginSpecValue>,
-    #[serde(rename = "rules")]
-    rules_by_name: HashMap<String, RuleConfigurationValue>,
+    pub plugins: Plugins,
+    #[serde(default)]
+    pub rules: Rules,
+    pub tree_sitter_lint_dependency: Option<TreeSitterLintDependencySpec>,
+    #[serde(default)]
+    pub extends: Vec<ConfigurationReference>,
 }
 
-impl ParsedConfigFileContent {
-    pub fn rules(&self) -> impl Iterator<Item = RuleConfiguration> + '_ {
-        self.rules_by_name
-            .iter()
-            .map(|(rule_name, rule_config)| rule_config.to_rule_configuration(rule_name))
-    }
+#[derive(Clone, Deserialize)]
+pub struct TreeSitterLintDependencySpec {
+    pub path: PathBuf,
 }
 
 #[derive(Clone, Deserialize)]
@@ -35,9 +42,10 @@ pub struct PluginSpecValue {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Builder, Clone, Deserialize)]
 pub struct RuleConfigurationValue {
     pub level: ErrorLevel,
+    #[builder(default, setter(strip_option))]
     pub options: Option<RuleOptions>,
 }
 
@@ -66,6 +74,7 @@ pub fn load_config_file() -> ParsedConfigFile {
 
 const CONFIG_FILENAME: &str = ".tree-sitter-lint.yml";
 
+#[instrument]
 pub fn find_config_file() -> PathBuf {
     find_filename_in_ancestor_directory(
         CONFIG_FILENAME,

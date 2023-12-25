@@ -1,6 +1,10 @@
 use std::{collections::HashMap, ops, sync::Arc};
 
-use tree_sitter_grep::{tree_sitter::QueryMatch, SupportedLanguage};
+use tracing::{instrument, trace_span};
+use tree_sitter_grep::{
+    tree_sitter::{QueryError, QueryMatch},
+    SupportedLanguage,
+};
 
 use crate::{
     config::{PluginIndex, RuleConfiguration},
@@ -15,10 +19,12 @@ pub struct RuleMeta {
     pub fixable: bool,
     pub languages: Vec<SupportedLanguage>,
     pub messages: Option<HashMap<String, String>>,
+    pub allow_self_conflicting_fixes: bool,
+    pub concatenate_adjacent_insert_fixes: bool,
 }
 
 pub trait Rule: Send + Sync {
-    fn meta(&self) -> RuleMeta;
+    fn meta(&self) -> Arc<RuleMeta>;
     fn instantiate(
         self: Arc<Self>,
         config: &Config,
@@ -29,14 +35,15 @@ pub trait Rule: Send + Sync {
 pub trait RuleInstance: Send + Sync {
     fn instantiate_per_file<'a>(
         self: Arc<Self>,
-        file_run_context: FileRunContext<'a>,
+        file_run_context: FileRunContext<'a, '_>,
     ) -> Box<dyn RuleInstancePerFile<'a> + 'a>;
     fn rule(&self) -> Arc<dyn Rule>;
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
 
+#[derive(Clone)]
 pub struct InstantiatedRule {
-    pub meta: RuleMeta,
+    pub meta: Arc<RuleMeta>,
     pub rule: Arc<dyn Rule>,
     pub rule_instance: Arc<dyn RuleInstance>,
     pub plugin_index: Option<PluginIndex>,
@@ -97,7 +104,7 @@ impl<'a, 'b> Captures<'a, 'b> {
         Some(first_node)
     }
 
-    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node> {
+    pub fn get_all(&self, capture_name: &str) -> impl Iterator<Item = Node<'a>> + 'b {
         self.query_match
             .nodes_for_capture_index(self.query.capture_index_for_name(capture_name).unwrap())
     }
@@ -128,46 +135,59 @@ pub trait RuleInstancePerFile<'a> {
         &mut self,
         listener_index: usize,
         node_or_captures: NodeOrCaptures<'a, 'b>,
-        context: &mut QueryMatchContext<'a>,
+        context: &QueryMatchContext<'a, '_>,
     );
     fn rule_instance(&self) -> Arc<dyn RuleInstance>;
 }
 
+#[derive(Debug)]
 pub enum MatchBy {
     PerCapture { capture_name: Option<String> },
     PerMatch,
 }
 
+#[derive(Debug)]
 pub struct RuleListenerQuery {
     pub query: String,
     pub match_by: MatchBy,
 }
 
 impl RuleListenerQuery {
-    pub fn resolve(&self, language: Language) -> ResolvedRuleListenerQuery {
-        let query = Query::new(language, &self.query).unwrap();
+    #[instrument(level = "trace")]
+    pub fn resolve(&self, language: Language) -> Result<ResolvedRuleListenerQuery, QueryError> {
+        let span = trace_span!("parse individual rule listener query").entered();
+
+        let query = Query::new(language, &self.query)?;
+
+        span.exit();
+
+        let span = trace_span!("resolve capture name").entered();
+
         let resolved_match_by = match &self.match_by {
             MatchBy::PerCapture { capture_name } => ResolvedMatchBy::PerCapture {
-                capture_index: match capture_name.as_ref() {
+                capture_name: match capture_name.as_ref() {
                     None => match query.capture_names().len() {
                         0 => panic!("Expected capture"),
-                        _ => 0,
+                        _ => query.capture_names()[0].clone(),
                     },
-                    Some(capture_name) => query.capture_index_for_name(capture_name).unwrap(),
+                    Some(capture_name) => capture_name.clone(),
                 },
             },
             MatchBy::PerMatch => ResolvedMatchBy::PerMatch,
         };
-        ResolvedRuleListenerQuery {
+
+        span.exit();
+
+        Ok(ResolvedRuleListenerQuery {
             query,
             query_text: self.query.clone(),
             match_by: resolved_match_by,
-        }
+        })
     }
 }
 
 pub enum ResolvedMatchBy {
-    PerCapture { capture_index: u32 },
+    PerCapture { capture_name: String },
     PerMatch,
 }
 
@@ -177,17 +197,4 @@ pub struct ResolvedRuleListenerQuery {
     pub match_by: ResolvedMatchBy,
 }
 
-impl ResolvedRuleListenerQuery {
-    pub fn capture_name(&self) -> &str {
-        match &self.match_by {
-            ResolvedMatchBy::PerCapture { capture_index } => {
-                &self.query.capture_names()[*capture_index as usize]
-            }
-            _ => panic!("Called capture_name() for PerMatch"),
-        }
-    }
-}
-
 pub type RuleOptions = serde_json::Value;
-
-pub const ROOT_EXIT: &str = "__tree_sitter_lint_program_exit";

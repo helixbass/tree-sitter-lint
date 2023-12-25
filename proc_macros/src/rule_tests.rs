@@ -5,7 +5,9 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, token, Expr, Ident, Token,
+    parse_macro_input,
+    spanned::Spanned,
+    token, Expr, Ident, Token,
 };
 
 use crate::{
@@ -14,7 +16,7 @@ use crate::{
 };
 
 enum RuleOptions {
-    Map(HashMap<ExprOrIdent, Expr>),
+    Map(HashMap<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs>),
     List(Vec<ExprOrArrowSeparatedKeyValuePairs>),
     Expr(Expr),
 }
@@ -33,8 +35,29 @@ impl Parse for RuleOptions {
             }
             Self::List(items)
         } else if input.peek(token::Brace) {
-            let mut map: HashMap<ExprOrIdent, Expr> = Default::default();
-            parse_data(&mut map, input)?;
+            let mut map: HashMap<ExprOrIdent, ExprOrArrowSeparatedKeyValuePairs> =
+                Default::default();
+            let data_content;
+            braced!(data_content in input);
+            while !data_content.is_empty() {
+                let key: Result<Expr, _> = data_content.parse();
+                let key: ExprOrIdent = match key {
+                    Ok(key) => Ok(key.into()),
+                    Err(err) => {
+                        if let Ok(key) = data_content.parse::<Token![type]>() {
+                            Ok(Ident::new("type_", key.span()).into())
+                        } else {
+                            Err(err)
+                        }
+                    }
+                }?;
+                data_content.parse::<Token![=>]>()?;
+                let value: ExprOrArrowSeparatedKeyValuePairs = data_content.parse()?;
+                map.insert(key, value);
+                if !data_content.is_empty() {
+                    data_content.parse::<Token![,]>()?;
+                }
+            }
             Self::Map(map)
         } else {
             let expr: Expr = input.parse()?;
@@ -45,40 +68,97 @@ impl Parse for RuleOptions {
 
 impl ToTokens for RuleOptions {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let yaml = match self {
+        let mut should_jsonify = true;
+        let json = match self {
             RuleOptions::Map(map) => {
-                let keys = map.keys();
-                let values = map.values();
+                let keys = map.keys().map(|key| {
+                    match key {
+                        ExprOrIdent::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
+                            let ident = path.path.get_ident().unwrap();
+                            quote!(stringify!(#ident))
+                        },
+                        ExprOrIdent::Expr(key) => quote!(#key),
+                        ExprOrIdent::Ident(key) => quote!(stringify!(#key)),
+                    }
+                });
+                let values = map.values().map(|value| match value {
+                    ExprOrArrowSeparatedKeyValuePairs::Expr(value) => quote!(#value),
+                    ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(value) => {
+                        value.to_json()
+                    }
+                });
                 quote! {
                     { #(#keys: #values),* }
                 }
             }
             RuleOptions::List(list) => {
-                let items = list.into_iter().map(|item| item.to_yaml());
+                let items = list.into_iter().map(|item| item.to_json());
                 quote! {
                     [ #(#items),* ]
                 }
+            }
+            RuleOptions::Expr(Expr::Path(path)) if path.path.get_ident().is_some() => {
+                should_jsonify = false;
+                let ident = path.path.get_ident().unwrap();
+                quote!(#ident.clone())
             }
             RuleOptions::Expr(expr) => {
                 quote!(#expr)
             }
         };
-        quote! {
-            tree_sitter_lint::serde_yaml::from_str(stringify!(#yaml)).unwrap()
+        if should_jsonify {
+            quote! {
+                tree_sitter_lint::serde_json::json!(#json)
+            }
+        } else {
+            json
         }
         .to_tokens(tokens)
     }
 }
 
-struct ValidRuleTestSpec {
-    code: Expr,
-    options: Option<RuleOptions>,
+enum ValidRuleTestSpec {
+    Single(SingleValidRuleTestSpec),
+    Spread(Expr),
 }
 
 impl Parse for ValidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            Self::Spread(input.parse()?)
+        } else {
+            Self::Single(input.parse()?)
+        })
+    }
+}
+
+impl ToTokens for ValidRuleTestSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Single(value) => value.to_tokens(tokens),
+            Self::Spread(value) => value.to_tokens(tokens),
+        }
+    }
+}
+
+struct SingleValidRuleTestSpec {
+    code: Expr,
+    options: Option<RuleOptions>,
+    only: Option<Expr>,
+    environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
+    supported_language_languages: Option<Vec<Ident>>,
+}
+
+impl Parse for SingleValidRuleTestSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
+        let mut only: Option<Expr> = Default::default();
+        let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
+        let mut supported_language_languages: Option<Vec<Ident>> = Default::default();
         if input.peek(token::Brace) {
             let content;
             braced!(content in input);
@@ -92,6 +172,24 @@ impl Parse for ValidRuleTestSpec {
                     "options" => {
                         options = Some(content.parse()?);
                     }
+                    "only" => {
+                        only = Some(content.parse()?);
+                    }
+                    "environment" => {
+                        environment = Some(content.parse()?);
+                    }
+                    "supported_language_languages" => {
+                        assert!(supported_language_languages.is_none(), "Already saw 'supported_language_languages' key");
+                        let supported_language_languages_content;
+                        bracketed!(supported_language_languages_content in content);
+                        let supported_language_languages = supported_language_languages.get_or_insert_with(|| Default::default());
+                        while !supported_language_languages_content.is_empty() {
+                            supported_language_languages.push(supported_language_languages_content.parse()?);
+                            if !supported_language_languages_content.is_empty() {
+                                supported_language_languages_content.parse::<Token![,]>()?;
+                            }
+                        }
+                    }
                     _ => panic!("didn't expect key '{}'", key),
                 }
                 if !content.is_empty() {
@@ -104,11 +202,14 @@ impl Parse for ValidRuleTestSpec {
         Ok(Self {
             code: code.expect("Expected 'code'"),
             options,
+            only,
+            environment,
+            supported_language_languages,
         })
     }
 }
 
-impl ToTokens for ValidRuleTestSpec {
+impl ToTokens for SingleValidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
         let options = match self.options.as_ref() {
@@ -117,10 +218,38 @@ impl ToTokens for ValidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let only = match self.only.as_ref() {
+            Some(only) => quote! {
+                Some(#only)
+            },
+            None => quote!(None),
+        };
+        let environment = match self.environment.as_ref() {
+            Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
+            Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
+                let environment = environment.to_json();
+                quote! {
+                    Some(match tree_sitter_lint::serde_json::json!(#environment) {
+                        tree_sitter_lint::serde_json::Value::Object(environment) => environment,
+                        _ => unreachable!(),
+                    })
+                }
+            },
+            None => quote!(None),
+        };
+        let supported_language_languages = match self.supported_language_languages.as_ref() {
+            Some(supported_language_languages) => quote! {
+                Some(vec![#(tree_sitter_lint::tree_sitter_grep::SupportedLanguageLanguage::#supported_language_languages),*])
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestValid::new(
                 #code,
-                #options
+                #options,
+                #only,
+                #environment,
+                #supported_language_languages
             )
         }
         .to_tokens(tokens)
@@ -292,7 +421,7 @@ impl ToTokens for InvalidRuleTestErrorSpec {
                 }
             }
             Self::Expr(expr) => {
-                quote!(tree_sitter_lint::RuleTestExpectedError::from(#expr))
+                quote!(tree_sitter_lint::RuleTestExpectedError::from(#expr.clone()))
             }
         }
         .to_tokens(tokens)
@@ -336,6 +465,7 @@ impl Parse for InvalidRuleTestErrorsSpec {
 impl ToTokens for InvalidRuleTestErrorsSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
+            Self::Expr(Expr::Lit(value)) => quote!(#value),
             Self::Expr(value) => quote!(#value.iter().cloned().collect::<Vec<_>>()),
             Self::Vec(value) => {
                 let errors = value.iter().map(|error| quote!(#error));
@@ -348,19 +478,52 @@ impl ToTokens for InvalidRuleTestErrorsSpec {
     }
 }
 
-struct InvalidRuleTestSpec {
+enum InvalidRuleTestSpec {
+    Single(SingleInvalidRuleTestSpec),
+    Spread(Expr),
+}
+
+impl Parse for InvalidRuleTestSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            input.parse::<Token![.]>()?;
+            Self::Spread(input.parse()?)
+        } else {
+            Self::Single(input.parse()?)
+        })
+    }
+}
+
+impl ToTokens for InvalidRuleTestSpec {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Single(value) => value.to_tokens(tokens),
+            Self::Spread(value) => value.to_tokens(tokens),
+        }
+    }
+}
+
+struct SingleInvalidRuleTestSpec {
     code: Expr,
     errors: InvalidRuleTestErrorsSpec,
     output: Option<Expr>,
     options: Option<RuleOptions>,
+    only: Option<Expr>,
+    environment: Option<ExprOrArrowSeparatedKeyValuePairs>,
+    supported_language_languages: Option<Vec<Ident>>,
 }
 
-impl Parse for InvalidRuleTestSpec {
+impl Parse for SingleInvalidRuleTestSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut code: Option<Expr> = Default::default();
         let mut errors: Option<InvalidRuleTestErrorsSpec> = Default::default();
         let mut output: Option<Expr> = Default::default();
         let mut options: Option<RuleOptions> = Default::default();
+        let mut only: Option<Expr> = Default::default();
+        let mut environment: Option<ExprOrArrowSeparatedKeyValuePairs> = Default::default();
+        let mut supported_language_languages: Option<Vec<Ident>> = Default::default();
         let content;
         braced!(content in input);
         while !content.is_empty() {
@@ -379,6 +542,24 @@ impl Parse for InvalidRuleTestSpec {
                 "options" => {
                     options = Some(content.parse()?);
                 }
+                "only" => {
+                    only = Some(content.parse()?);
+                }
+                "environment" => {
+                    environment = Some(content.parse()?);
+                }
+                "supported_language_languages" => {
+                    assert!(supported_language_languages.is_none(), "Already saw 'supported_language_languages' key");
+                    let supported_language_languages_content;
+                    bracketed!(supported_language_languages_content in content);
+                    let supported_language_languages = supported_language_languages.get_or_insert_with(|| Default::default());
+                    while !supported_language_languages_content.is_empty() {
+                        supported_language_languages.push(supported_language_languages_content.parse()?);
+                        if !supported_language_languages_content.is_empty() {
+                            supported_language_languages_content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
                 _ => panic!("didn't expect key '{}'", key),
             }
             if !content.is_empty() {
@@ -390,11 +571,14 @@ impl Parse for InvalidRuleTestSpec {
             errors: errors.expect("Expected 'errors'"),
             output,
             options,
+            only,
+            environment,
+            supported_language_languages,
         })
     }
 }
 
-impl ToTokens for InvalidRuleTestSpec {
+impl ToTokens for SingleInvalidRuleTestSpec {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let code = &self.code;
         let errors = &self.errors;
@@ -413,12 +597,40 @@ impl ToTokens for InvalidRuleTestSpec {
             },
             None => quote!(None),
         };
+        let only = match self.only.as_ref() {
+            Some(only) => quote! {
+                Some(#only)
+            },
+            None => quote!(None),
+        };
+        let environment = match self.environment.as_ref() {
+            Some(ExprOrArrowSeparatedKeyValuePairs::Expr(environment)) => quote!(Some(#environment)),
+            Some(ExprOrArrowSeparatedKeyValuePairs::ArrowSeparatedKeyValuePairs(environment)) => {
+                let environment = environment.to_json();
+                quote! {
+                    Some(match tree_sitter_lint::serde_json::json!(#environment) {
+                        tree_sitter_lint::serde_json::Value::Object(environment) => environment,
+                        _ => unreachable!(),
+                    })
+                }
+            },
+            None => quote!(None),
+        };
+        let supported_language_languages = match self.supported_language_languages.as_ref() {
+            Some(supported_language_languages) => quote! {
+                Some(vec![#(tree_sitter_lint::tree_sitter_grep::SupportedLanguageLanguage::#supported_language_languages),*])
+            },
+            None => quote!(None),
+        };
         quote! {
             tree_sitter_lint::RuleTestInvalid::new(
                 #code,
                 #errors,
                 #output,
-                #options
+                #options,
+                #only,
+                #environment,
+                #supported_language_languages,
             )
         }
         .to_tokens(tokens)
@@ -480,13 +692,69 @@ pub fn rule_tests(input: TokenStream, crate_name: &str) -> TokenStream {
     let crate_name = format_ident!("{}", crate_name);
     let RuleTests { valid, invalid } = parse_macro_input!(input);
 
+    let valid = if valid
+        .iter()
+        .any(|valid_test| matches!(valid_test, ValidRuleTestSpec::Spread(_)))
+    {
+        let add_cases = valid
+            .iter()
+            .map(|valid_test| match valid_test {
+                ValidRuleTestSpec::Single(value) => {
+                    quote! {
+                        cases.push(#value);
+                    }
+                }
+                ValidRuleTestSpec::Spread(value) => {
+                    quote! {
+                        cases.extend(#value.into_iter().map(#crate_name::RuleTestValid::from));
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        quote! {{
+            let mut cases: Vec<#crate_name::RuleTestValid> = vec![];
+            #(#add_cases)*
+            cases
+        }}
+    } else {
+        quote!(vec![#(#valid),*])
+    };
+
+    let invalid = if invalid
+        .iter()
+        .any(|invalid_test| matches!(invalid_test, InvalidRuleTestSpec::Spread(_)))
+    {
+        let add_cases = invalid
+            .iter()
+            .map(|invalid_test| match invalid_test {
+                InvalidRuleTestSpec::Single(value) => {
+                    quote! {
+                        cases.push(#value);
+                    }
+                }
+                InvalidRuleTestSpec::Spread(value) => {
+                    quote! {
+                        cases.extend(#value);
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        quote! {{
+            let mut cases: Vec<#crate_name::RuleTestInvalid> = vec![];
+            #(#add_cases)*
+            cases
+        }}
+    } else {
+        quote!(vec![#(#invalid),*])
+    };
+
     quote! {
         {
             use #crate_name as tree_sitter_lint;
 
             tree_sitter_lint::RuleTests::new(
-                vec![#(#valid),*],
-                vec![#(#invalid),*],
+                #valid,
+                #invalid,
             )
         }
     }

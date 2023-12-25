@@ -1,14 +1,14 @@
-use std::{borrow::Cow, collections::HashMap, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, fmt, path::PathBuf, rc::Rc, sync::Arc};
 
 use derive_builder::Builder;
 use tree_sitter_grep::tree_sitter::Range;
 
 use crate::{
     config::PluginIndex,
-    context::{Fixer, QueryMatchContext},
+    context::QueryMatchContext,
     rule::RuleMeta,
     tree_sitter::{self, Node},
-    Config,
+    Config, Fixer,
 };
 
 #[derive(Builder)]
@@ -25,10 +25,22 @@ pub struct Violation<'a> {
     pub range: Option<Range>,
 }
 
+impl<'a> fmt::Debug for Violation<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Violation")
+            .field("message_or_message_id", &self.message_or_message_id)
+            .field("node", &self.node)
+            .field("has_fix", &self.fix.is_some())
+            .field("data", &self.data)
+            .field("range", &self.range)
+            .finish()
+    }
+}
+
 impl<'a> Violation<'a> {
     pub fn contextualize(
         self,
-        query_match_context: &QueryMatchContext<'a>,
+        query_match_context: &QueryMatchContext,
         had_fixes: bool,
     ) -> ViolationWithContext {
         let Violation {
@@ -83,7 +95,7 @@ pub struct ViolationWithContext {
     pub message_or_message_id: MessageOrMessageId,
     pub range: tree_sitter::Range,
     pub path: PathBuf,
-    pub rule: RuleMeta,
+    pub rule: Arc<RuleMeta>,
     pub plugin_index: Option<PluginIndex>,
     pub had_fixes: bool,
     pub kind: &'static str,

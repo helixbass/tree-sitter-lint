@@ -1,9 +1,16 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::Rule;
+use derive_builder::Builder;
 
-#[derive(Clone)]
+use crate::{configuration::Configuration, Rule};
+
+#[non_exhaustive]
+#[derive(Builder, Clone)]
+#[builder(setter(into))]
 pub struct Plugin {
     pub name: String,
+    #[builder(default)]
     pub rules: Vec<Arc<dyn Rule>>,
+    #[builder(default)]
+    pub configs: HashMap<String, Configuration>,
 }
