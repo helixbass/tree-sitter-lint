@@ -12,7 +12,7 @@ use crate::{
     rule::{Rule, RuleOptions},
     violation::{MessageOrMessageId, ViolationData, ViolationWithContext},
     FileRunContext, FixingForSliceRunStatus, FromFileRunContextInstanceProviderFactory, Plugin,
-    RuleConfiguration,
+    RuleConfiguration, SliceRunStatus,
 };
 
 pub struct RuleTester {
@@ -254,7 +254,7 @@ impl RuleTester {
                 }
             }
 
-            let (violations, _) = crate::run_for_slice(
+            let SliceRunStatus { violations, .. } = crate::run_for_slice(
                 valid_test.code.as_bytes(),
                 None,
                 "tmp.rs",
@@ -275,6 +275,7 @@ impl RuleTester {
                     .unwrap(),
                 supported_language_language,
                 &*self.from_file_run_context_instance_provider_factory,
+                None,
             );
 
             if self.should_aggregate_results {

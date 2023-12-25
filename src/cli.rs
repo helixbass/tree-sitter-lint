@@ -353,7 +353,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
             ViolationWithContext, lsp::{LocalLinter, self}, FixingForSliceRunStatus,
-            FixingForSliceRunContext,
+            FixingForSliceRunContext, PerConfigContext, SliceRunStatus
         };
 
         pub fn run_and_output() {
@@ -369,7 +369,8 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
-        ) -> Vec<ViolationWithContext> {
+            per_config_context: Option<&PerConfigContext>,
+        ) -> SliceRunStatus {
             let path = path.as_ref();
             tree_sitter_lint::run_for_slice(
                 file_contents,
@@ -378,7 +379,8 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 args_to_config(args),
                 language.supported_language_language(Some(path)),
                 &FromFileRunContextInstanceProviderFactoryLocal,
-            ).0
+                per_config_context
+            )
         }
 
         pub fn run_fixing_for_slice<'a>(
@@ -411,8 +413,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
-            ) -> Vec<ViolationWithContext> {
-                run_for_slice(file_contents, tree, path, args, language)
+                per_config_context: Option<&PerConfigContext>,
+            ) -> SliceRunStatus {
+                run_for_slice(file_contents, tree, path, args, language, per_config_context)
             }
 
             fn run_fixing_for_slice<'a>(

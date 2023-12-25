@@ -7,7 +7,7 @@ use std::{
 };
 
 use squalid::EverythingExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
@@ -27,7 +27,7 @@ use crate::{
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
     Args, ArgsBuilder, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
-    ViolationWithContext,
+    ViolationWithContext, PerConfigContext, SliceRunStatus,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -40,7 +40,8 @@ pub trait LocalLinter: Send + Sync {
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
-    ) -> Vec<ViolationWithContext>;
+        per_config_context: Option<&PerConfigContext>,
+    ) -> SliceRunStatus;
 
     fn run_fixing_for_slice<'a>(
         &self,
@@ -59,6 +60,7 @@ struct Backend<TLocalLinter> {
     local_linter: TLocalLinter,
     per_file: Mutex<HashMap<Url, PerFileState>>,
     start_new_trace_sender: Option<Sender<PathBuf>>,
+    per_config_context: RwLock<Option<PerConfigContext>>,
 }
 
 impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
@@ -72,6 +74,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
             local_linter,
             per_file: Default::default(),
             start_new_trace_sender,
+            per_config_context: Default::default(),
         }
     }
 
@@ -85,15 +88,25 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                 per_file_state.supported_language_language,
             )
         };
+        let per_config_context = self.per_config_context.read().await;
         self.start_new_trace("run-for-slice");
-        let violations = self.local_linter.run_for_slice(
+        let SliceRunStatus {
+            violations,
+            per_config_context: per_config_context_returned,
+        } = self.local_linter.run_for_slice(
             &file_contents,
             Some(tree),
             uri.as_str(),
             Default::default(),
             supported_language_language.supported_language(),
+            per_config_context.as_ref(),
         );
         self.start_new_trace("everything-else");
+        let should_initially_populate_per_config_context = per_config_context.is_none();
+        drop(per_config_context);
+        if should_initially_populate_per_config_context {
+            *self.per_config_context.write().await = Some(per_config_context_returned.unwrap());
+        }
         self.client
             .publish_diagnostics(
                 uri.clone(),
