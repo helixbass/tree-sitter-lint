@@ -21,8 +21,9 @@ mod treesitter;
 mod violation;
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
     process,
     sync::{Arc, Mutex},
@@ -45,6 +46,7 @@ use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use fixing::{AccumulatedEdits, Fixer};
 pub use node::{compare_nodes, NodeExt, NonCommentChildren};
+use ouroboros::self_referencing;
 pub use plugin::{Plugin, PluginBuilder};
 pub use proc_macros::{builder_args, instance_provider_factory, rule, rule_tests, violation};
 use rayon::prelude::*;
@@ -525,10 +527,37 @@ fn run_single_on_query_match_callback<'a, 'b, 'c>(
     }
 }
 
-// pub struct RunForSliceStatus {
-//     pub violations: Vec<ViolationWithContext>,
-//     pub from_file_run_context_instance_provider: Box<dyn FromFileRunContextInstanceProvider>,
-// }
+#[self_referencing]
+pub struct PerConfigContext {
+    instantiated_rules: Vec<InstantiatedRule>,
+    #[borrows(instantiated_rules)]
+    #[covariant]
+    aggregated_queries: AggregatedQueries<'this>,
+}
+
+impl Clone for PerConfigContext {
+    fn clone(&self) -> Self {
+        PerConfigContextBuilder {
+            instantiated_rules: self.borrow_instantiated_rules().clone(),
+            aggregated_queries_builder: |instantiated_rules| {
+                AggregatedQueries::new(instantiated_rules)
+            },
+        }
+        .build()
+    }
+}
+
+impl fmt::Debug for PerConfigContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PerConfigContext").finish()
+    }
+}
+
+pub struct SliceRunStatus {
+    pub violations: Vec<ViolationWithContext>,
+    // pub from_file_run_context_instance_provider: Box<dyn FromFileRunContextInstanceProvider>,
+    pub per_config_context: Option<PerConfigContext>,
+}
 
 #[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]
 pub fn run_for_slice<'a>(
@@ -538,14 +567,28 @@ pub fn run_for_slice<'a>(
     config: Config,
     supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) -> (Vec<ViolationWithContext>, Vec<InstantiatedRule>) {
+    per_config_context: Option<&PerConfigContext>,
+) -> SliceRunStatus {
     let file_contents = file_contents.into();
     let path = path.as_ref();
     if config.fix {
         panic!("Use run_fixing_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let aggregated_queries = AggregatedQueries::new(&instantiated_rules);
+    let per_config_context: Cow<'_, PerConfigContext> = per_config_context.map_or_else(
+        || {
+            Cow::Owned(
+                PerConfigContextBuilder {
+                    instantiated_rules,
+                    aggregated_queries_builder: |instantiated_rules| {
+                        AggregatedQueries::new(instantiated_rules)
+                    },
+                }
+                .build(),
+            )
+        },
+        Cow::Borrowed,
+    );
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let tree = tree.unwrap_or_else(|| {
         let _span = debug_span!("tree-sitter parse").entered();
@@ -566,13 +609,14 @@ pub fn run_for_slice<'a>(
             &tree,
             &config,
             supported_language_language,
-            &aggregated_queries,
-            &aggregated_queries
+            per_config_context.borrow_aggregated_queries(),
+            &per_config_context
+                .borrow_aggregated_queries()
                 .per_language
                 .get(&supported_language_language)
                 .unwrap()
                 .query,
-            &instantiated_rules,
+            per_config_context.borrow_instantiated_rules(),
             // TODO: here could wire up "remembered" changed
             // ranges for LSP server use case?
             None,
@@ -588,11 +632,13 @@ pub fn run_for_slice<'a>(
         },
     );
     drop(from_file_run_context_instance_provider);
-    (violations.into_inner().unwrap(), instantiated_rules)
-    // RunForSliceStatus {
-    //     violations: violations.into_inner().unwrap(),
-    //     from_file_run_context_instance_provider,
-    // }
+    SliceRunStatus {
+        violations: violations.into_inner().unwrap(),
+        per_config_context: match per_config_context {
+            Cow::Borrowed(_) => None,
+            Cow::Owned(per_config_context) => Some(per_config_context),
+        }, // from_file_run_context_instance_provider,
+    }
 }
 
 #[instrument(skip_all, fields(path = ?path.as_ref(), ?supported_language_language))]

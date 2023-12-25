@@ -1,7 +1,13 @@
-use std::{collections::HashMap, ops, path::Path};
+use std::{
+    collections::HashMap,
+    ops,
+    path::{Path, PathBuf},
+    sync::mpsc::Sender,
+    time::UNIX_EPOCH,
+};
 
 use squalid::EverythingExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
@@ -14,14 +20,14 @@ use tower_lsp::{
     },
     Client, LanguageServer, LspService, Server,
 };
-use tree_sitter_grep::{ropey::Rope, RopeOrSlice};
+use tree_sitter_grep::{ropey::Rope, RopeOrSlice, SupportedLanguageLanguage};
 
 use crate::{
     fixing::{get_newline_offsets_rope_or_slice, AccumulatedEdits},
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
     Args, ArgsBuilder, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
-    ViolationWithContext,
+    PerConfigContext, SliceRunStatus, ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -34,7 +40,8 @@ pub trait LocalLinter: Send + Sync {
         path: impl AsRef<Path>,
         args: Args,
         language: SupportedLanguage,
-    ) -> Vec<ViolationWithContext>;
+        per_config_context: Option<&PerConfigContext>,
+    ) -> SliceRunStatus;
 
     fn run_fixing_for_slice<'a>(
         &self,
@@ -52,30 +59,54 @@ struct Backend<TLocalLinter> {
     client: Client,
     local_linter: TLocalLinter,
     per_file: Mutex<HashMap<Url, PerFileState>>,
+    start_new_trace_sender: Option<Sender<PathBuf>>,
+    per_config_context: RwLock<Option<PerConfigContext>>,
 }
 
 impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
-    pub fn new(client: Client, local_linter: TLocalLinter) -> Self {
+    pub fn new(
+        client: Client,
+        local_linter: TLocalLinter,
+        start_new_trace_sender: Option<Sender<PathBuf>>,
+    ) -> Self {
         Self {
             client,
             local_linter,
             per_file: Default::default(),
+            start_new_trace_sender,
+            per_config_context: Default::default(),
         }
     }
 
     async fn run_linting_and_report_diagnostics(&self, uri: &Url) {
-        let (file_contents, tree) = {
+        let (file_contents, tree, supported_language_language) = {
             let per_file = self.per_file.lock().await;
             let per_file_state = per_file.get(uri).unwrap();
-            (per_file_state.contents.clone(), per_file_state.tree.clone())
+            (
+                per_file_state.contents.clone(),
+                per_file_state.tree.clone(),
+                per_file_state.supported_language_language,
+            )
         };
-        let violations = self.local_linter.run_for_slice(
+        let per_config_context = self.per_config_context.read().await;
+        self.start_new_trace("run-for-slice");
+        let SliceRunStatus {
+            violations,
+            per_config_context: per_config_context_returned,
+        } = self.local_linter.run_for_slice(
             &file_contents,
             Some(tree),
-            "dummy_path",
+            uri.as_str(),
             Default::default(),
-            SupportedLanguage::Rust,
+            supported_language_language.supported_language(),
+            per_config_context.as_ref(),
         );
+        self.start_new_trace("everything-else");
+        let should_initially_populate_per_config_context = per_config_context.is_none();
+        drop(per_config_context);
+        if should_initially_populate_per_config_context {
+            *self.per_config_context.write().await = Some(per_config_context_returned.unwrap());
+        }
         self.client
             .publish_diagnostics(
                 uri.clone(),
@@ -96,7 +127,13 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
     }
 
     async fn run_fixing_and_report_fixes(&self, uri: &Url) {
-        let (file_contents, tree, edits_since_last_fixing_run, last_fixing_run_violations) = {
+        let (
+            file_contents,
+            tree,
+            edits_since_last_fixing_run,
+            last_fixing_run_violations,
+            supported_language_language,
+        ) = {
             let per_file = self.per_file.lock().await;
             let per_file_state = per_file.get(uri).unwrap();
             (
@@ -109,6 +146,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                     AccumulatedEditsOrEntireFileChanged::EntireFileChanged => None,
                 },
                 per_file_state.last_fixing_run_violations.clone(),
+                per_file_state.supported_language_language,
             )
         };
         let mut cloned_contents = file_contents.clone();
@@ -117,9 +155,9 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
         } = self.local_linter.run_fixing_for_slice(
             &mut cloned_contents,
             Some(tree),
-            "dummy_path",
+            uri.as_str(),
             ArgsBuilder::default().fix(true).build().unwrap(),
-            SupportedLanguage::Rust,
+            supported_language_language.supported_language(),
             FixingForSliceRunContext {
                 last_fixing_run_violations,
                 edits_since_last_fixing_run,
@@ -148,6 +186,20 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                     ..Default::default()
                 })
                 .await
+                .unwrap();
+        }
+    }
+
+    fn start_new_trace(&self, trace_name: &str) {
+        if let Some(start_new_trace_sender) = self.start_new_trace_sender.as_ref() {
+            start_new_trace_sender
+                .send(
+                    format!(
+                        "/Users/jrosse/prj/hello-world/trace-{trace_name}-{}.json",
+                        UNIX_EPOCH.elapsed().unwrap().as_micros()
+                    )
+                    .into(),
+                )
                 .unwrap();
         }
     }
@@ -184,7 +236,8 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let contents: Rope = (&*params.text_document.text).into();
         let uri = params.text_document.uri.clone();
-        let tree = parse_from_scratch(&contents);
+        let supported_language_language = get_supported_language_language(&uri);
+        let tree = parse_from_scratch(&contents, supported_language_language);
         self.per_file.lock().await.insert(
             uri,
             PerFileState {
@@ -194,6 +247,7 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
                 ),
                 contents,
                 last_fixing_run_violations: Default::default(),
+                supported_language_language,
             },
         );
 
@@ -232,7 +286,11 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
                             ),
                         };
                         file_state.tree.edit(&input_edit);
-                        file_state.tree = parse(&file_state.contents, Some(&file_state.tree));
+                        file_state.tree = parse(
+                            &file_state.contents,
+                            Some(&file_state.tree),
+                            file_state.supported_language_language,
+                        );
                         if let AccumulatedEditsOrEntireFileChanged::AccumulatedEdits(
                             edits_since_last_fixing_run,
                         ) = &mut file_state.edits_since_last_fixing_run
@@ -243,7 +301,10 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
                     }
                     None => {
                         file_state.contents = (&*content_change.text).into();
-                        file_state.tree = parse_from_scratch(&file_state.contents);
+                        file_state.tree = parse_from_scratch(
+                            &file_state.contents,
+                            file_state.supported_language_language,
+                        );
                         file_state.edits_since_last_fixing_run =
                             AccumulatedEditsOrEntireFileChanged::EntireFileChanged;
                     }
@@ -277,6 +338,7 @@ struct PerFileState {
     tree: Tree,
     edits_since_last_fixing_run: AccumulatedEditsOrEntireFileChanged,
     last_fixing_run_violations: Option<Vec<ViolationWithContext>>,
+    supported_language_language: SupportedLanguageLanguage,
 }
 
 #[derive(Debug)]
@@ -285,14 +347,21 @@ enum AccumulatedEditsOrEntireFileChanged {
     EntireFileChanged,
 }
 
-fn parse_from_scratch(contents: &Rope) -> Tree {
-    parse(contents, None)
+fn parse_from_scratch(
+    contents: &Rope,
+    supported_language_language: SupportedLanguageLanguage,
+) -> Tree {
+    parse(contents, None, supported_language_language)
 }
 
-fn parse(contents: &Rope, old_tree: Option<&Tree>) -> Tree {
+fn parse(
+    contents: &Rope,
+    old_tree: Option<&Tree>,
+    supported_language_language: SupportedLanguageLanguage,
+) -> Tree {
     let mut parser = Parser::new();
     parser
-        .set_language(SupportedLanguage::Rust.language(None))
+        .set_language(supported_language_language.language())
         .unwrap();
     contents.parse(&mut parser, old_tree).unwrap()
 }
@@ -374,10 +443,30 @@ fn get_uri_from_arguments(arguments: &[serde_json::Value]) -> Url {
     }
 }
 
-pub async fn run<TLocalLinter: LocalLinter + 'static>(local_linter: TLocalLinter) {
+fn get_supported_language_language(uri: &Url) -> SupportedLanguageLanguage {
+    // TODO: how should this actually work?
+    let uri = uri.as_str();
+    if uri.ends_with(".rs") {
+        SupportedLanguageLanguage::Rust
+    } else if uri.ends_with(".ts") {
+        SupportedLanguageLanguage::Typescript
+    } else if uri.ends_with(".tsx") {
+        SupportedLanguageLanguage::Tsx
+    } else if uri.ends_with(".js") || uri.ends_with(".jsx") {
+        SupportedLanguageLanguage::Javascript
+    } else {
+        SupportedLanguageLanguage::Rust
+    }
+}
+
+pub async fn run<TLocalLinter: LocalLinter + 'static>(
+    local_linter: TLocalLinter,
+    start_new_trace_sender: Option<Sender<PathBuf>>,
+) {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend::new(client, local_linter));
+    let (service, socket) =
+        LspService::new(|client| Backend::new(client, local_linter, start_new_trace_sender));
     Server::new(stdin, stdout, socket).serve(service).await;
 }

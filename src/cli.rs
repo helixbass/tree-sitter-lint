@@ -231,12 +231,14 @@ fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str)
         use tree_sitter_lint::squalid::NonEmpty;
 
         fn main() {
-            if env::var("TRACE_CHROME").ok().is_non_empty() {
-                let (chrome_layer, _guard) = ChromeLayerBuilder::new().include_args(true).build();
+            let _guard = if env::var("TRACE_CHROME").ok().is_non_empty() {
+                let (chrome_layer, guard) = ChromeLayerBuilder::new().include_args(true).build();
                 tracing_subscriber::registry().with(chrome_layer).init();
+                Some(guard)
             } else {
                 tracing_subscriber::fmt::init();
-            }
+                None
+            };
 
             #local_binary_crate_name::run_and_output();
         }
@@ -247,7 +249,7 @@ fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str)
 fn get_src_bin_tree_sitter_lint_local_lsp_rs_contents(local_binary_crate_name: &str) -> String {
     let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
     quote! {
-        use std::env;
+        use std::{env, fs::File, path::PathBuf, sync::mpsc, thread};
 
         use tracing_chrome::ChromeLayerBuilder;
         use tracing_subscriber::{prelude::*, EnvFilter};
@@ -255,9 +257,10 @@ fn get_src_bin_tree_sitter_lint_local_lsp_rs_contents(local_binary_crate_name: &
 
         #[tokio::main]
         async fn main() {
-            if env::var("TRACE_CHROME").ok().is_non_empty() {
-                let (chrome_layer, _guard) = ChromeLayerBuilder::new().include_args(true).file("/Users/jrosse/prj/hello-world/trace.json").build();
+            let guard = if env::var("TRACE_CHROME").ok().is_non_empty() {
+                let (chrome_layer, guard) = ChromeLayerBuilder::new().include_args(true).file("/Users/jrosse/prj/hello-world/trace.json").build();
                 tracing_subscriber::registry().with(chrome_layer).init();
+                Some(guard)
             } else if let Some(tracing_log_file_path) = env::var("TRACING_LOG_PATH").ok().non_empty() {
                 let out_log = std::fs::OpenOptions::new()
                     .write(true)
@@ -269,9 +272,25 @@ fn get_src_bin_tree_sitter_lint_local_lsp_rs_contents(local_binary_crate_name: &
                     .with_env_filter(EnvFilter::from_default_env())
                     .with_writer(out_log)
                     .init();
-            }
+                None
+            } else {
+                None
+            };
 
-            #local_binary_crate_name::run_lsp().await;
+            // FlushGuard isn't Sync so can't just pass it
+            // around directly I guess (for being able to end/start
+            // new traces)
+            let sender = guard.map(|guard| {
+                let (sender, receiver) = mpsc::channel::<PathBuf>();
+                thread::spawn(move || {
+                    for message in receiver {
+                        guard.start_new(Some(Box::new(File::create(message).unwrap())));
+                    }
+                });
+                sender
+            });
+
+            #local_binary_crate_name::run_lsp(sender).await;
         }
     }
     .to_string()
@@ -325,7 +344,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
     };
 
     quote! {
-        use std::{any::TypeId, path::Path, sync::Arc};
+        use std::{any::TypeId, path::{Path, PathBuf}, sync::{Arc, mpsc}};
 
         use tree_sitter_lint::{
             better_any::Tid,
@@ -334,7 +353,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
             ViolationWithContext, lsp::{LocalLinter, self}, FixingForSliceRunStatus,
-            FixingForSliceRunContext,
+            FixingForSliceRunContext, PerConfigContext, SliceRunStatus
         };
 
         pub fn run_and_output() {
@@ -350,7 +369,8 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             path: impl AsRef<Path>,
             args: Args,
             language: SupportedLanguage,
-        ) -> Vec<ViolationWithContext> {
+            per_config_context: Option<&PerConfigContext>,
+        ) -> SliceRunStatus {
             let path = path.as_ref();
             tree_sitter_lint::run_for_slice(
                 file_contents,
@@ -359,7 +379,8 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 args_to_config(args),
                 language.supported_language_language(Some(path)),
                 &FromFileRunContextInstanceProviderFactoryLocal,
-            ).0
+                per_config_context
+            )
         }
 
         pub fn run_fixing_for_slice<'a>(
@@ -392,8 +413,9 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 path: impl AsRef<Path>,
                 args: Args,
                 language: SupportedLanguage,
-            ) -> Vec<ViolationWithContext> {
-                run_for_slice(file_contents, tree, path, args, language)
+                per_config_context: Option<&PerConfigContext>,
+            ) -> SliceRunStatus {
+                run_for_slice(file_contents, tree, path, args, language, per_config_context)
             }
 
             fn run_fixing_for_slice<'a>(
@@ -409,8 +431,8 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             }
         }
 
-        pub async fn run_lsp() {
-            lsp::run(LocalLinterConcrete).await;
+        pub async fn run_lsp(start_new_trace_sender: Option<mpsc::Sender<PathBuf>>) {
+            lsp::run(LocalLinterConcrete, start_new_trace_sender).await;
         }
 
         fn args_to_config(args: Args) -> Config {

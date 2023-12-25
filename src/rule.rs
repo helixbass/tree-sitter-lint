@@ -41,6 +41,7 @@ pub trait RuleInstance: Send + Sync {
     fn listener_queries(&self) -> &[RuleListenerQuery];
 }
 
+#[derive(Clone)]
 pub struct InstantiatedRule {
     pub meta: Arc<RuleMeta>,
     pub rule: Arc<dyn Rule>,
