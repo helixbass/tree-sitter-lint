@@ -562,12 +562,11 @@ pub fn run_for_slice<'a>(
     if config.fix {
         panic!("Use run_fixing_for_slice()");
     }
-    let instantiated_rules = config.get_instantiated_rules();
     let per_config_context: MaybeOwned<'_, PerConfigContext> = per_config_context.map_or_else(
         || {
             MaybeOwned::Owned(
                 PerConfigContextBuilder {
-                    instantiated_rules,
+                    instantiated_rules: config.get_instantiated_rules(),
                     aggregated_queries_builder: |instantiated_rules| {
                         AggregatedQueries::new(instantiated_rules)
                     },
