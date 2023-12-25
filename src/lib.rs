@@ -21,7 +21,6 @@ mod treesitter;
 mod violation;
 
 use std::{
-    borrow::Cow,
     collections::HashMap,
     fmt, fs,
     path::{Path, PathBuf},
@@ -45,6 +44,7 @@ pub use context::{
 use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
 pub use fixing::{AccumulatedEdits, Fixer};
+use maybe_owned::MaybeOwned;
 pub use node::{compare_nodes, NodeExt, NonCommentChildren};
 use ouroboros::self_referencing;
 pub use plugin::{Plugin, PluginBuilder};
@@ -535,18 +535,6 @@ pub struct PerConfigContext {
     aggregated_queries: AggregatedQueries<'this>,
 }
 
-impl Clone for PerConfigContext {
-    fn clone(&self) -> Self {
-        PerConfigContextBuilder {
-            instantiated_rules: self.borrow_instantiated_rules().clone(),
-            aggregated_queries_builder: |instantiated_rules| {
-                AggregatedQueries::new(instantiated_rules)
-            },
-        }
-        .build()
-    }
-}
-
 impl fmt::Debug for PerConfigContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PerConfigContext").finish()
@@ -564,7 +552,7 @@ pub fn run_for_slice<'a>(
     file_contents: impl Into<RopeOrSlice<'a>>,
     tree: Option<Tree>,
     path: impl AsRef<Path>,
-    config: Config,
+    config: &Config,
     supported_language_language: SupportedLanguageLanguage,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
     per_config_context: Option<&PerConfigContext>,
@@ -575,9 +563,9 @@ pub fn run_for_slice<'a>(
         panic!("Use run_fixing_for_slice()");
     }
     let instantiated_rules = config.get_instantiated_rules();
-    let per_config_context: Cow<'_, PerConfigContext> = per_config_context.map_or_else(
+    let per_config_context: MaybeOwned<'_, PerConfigContext> = per_config_context.map_or_else(
         || {
-            Cow::Owned(
+            MaybeOwned::Owned(
                 PerConfigContextBuilder {
                     instantiated_rules,
                     aggregated_queries_builder: |instantiated_rules| {
@@ -587,7 +575,7 @@ pub fn run_for_slice<'a>(
                 .build(),
             )
         },
-        Cow::Borrowed,
+        MaybeOwned::Borrowed,
     );
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let tree = tree.unwrap_or_else(|| {
@@ -607,7 +595,7 @@ pub fn run_for_slice<'a>(
             path,
             file_contents,
             &tree,
-            &config,
+            config,
             supported_language_language,
             per_config_context.borrow_aggregated_queries(),
             &per_config_context
@@ -635,8 +623,8 @@ pub fn run_for_slice<'a>(
     SliceRunStatus {
         violations: violations.into_inner().unwrap(),
         per_config_context: match per_config_context {
-            Cow::Borrowed(_) => None,
-            Cow::Owned(per_config_context) => Some(per_config_context),
+            MaybeOwned::Borrowed(_) => None,
+            MaybeOwned::Owned(per_config_context) => Some(per_config_context),
         }, // from_file_run_context_instance_provider,
     }
 }

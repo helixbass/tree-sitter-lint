@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
-    ops,
+    fmt, ops,
     path::{Path, PathBuf},
-    sync::mpsc::Sender,
+    sync::{mpsc::Sender, OnceLock},
     time::UNIX_EPOCH,
 };
 
 use squalid::EverythingExt;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
@@ -26,11 +26,28 @@ use crate::{
     fixing::{get_newline_offsets_rope_or_slice, AccumulatedEdits},
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
-    Args, ArgsBuilder, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
+    Args, ArgsBuilder, Config, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
     PerConfigContext, SliceRunStatus, ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
+
+pub enum ArgsOrConfig<'a> {
+    Args(Args),
+    Config(&'a Config),
+}
+
+impl<'a> From<Args> for ArgsOrConfig<'a> {
+    fn from(value: Args) -> Self {
+        Self::Args(value)
+    }
+}
+
+impl<'a> From<&'a Config> for ArgsOrConfig<'a> {
+    fn from(value: &'a Config) -> Self {
+        Self::Config(value)
+    }
+}
 
 pub trait LocalLinter: Send + Sync {
     fn run_for_slice<'a>(
@@ -38,10 +55,10 @@ pub trait LocalLinter: Send + Sync {
         file_contents: impl Into<RopeOrSlice<'a>>,
         tree: Option<Tree>,
         path: impl AsRef<Path>,
-        args: Args,
+        args_or_config: ArgsOrConfig,
         language: SupportedLanguage,
         per_config_context: Option<&PerConfigContext>,
-    ) -> SliceRunStatus;
+    ) -> (SliceRunStatus, Option<Config>);
 
     fn run_fixing_for_slice<'a>(
         &self,
@@ -54,13 +71,26 @@ pub trait LocalLinter: Send + Sync {
     ) -> FixingForSliceRunStatus;
 }
 
-#[derive(Debug)]
 struct Backend<TLocalLinter> {
     client: Client,
     local_linter: TLocalLinter,
     per_file: Mutex<HashMap<Url, PerFileState>>,
     start_new_trace_sender: Option<Sender<PathBuf>>,
-    per_config_context: RwLock<Option<PerConfigContext>>,
+    per_config_context: OnceLock<PerConfigContext>,
+    config: OnceLock<Config>,
+}
+
+impl<TLocalLinter: fmt::Debug> fmt::Debug for Backend<TLocalLinter> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Backend")
+            .field("client", &self.client)
+            .field("local_linter", &self.local_linter)
+            .field("per_file", &self.per_file)
+            .field("start_new_trace_sender", &self.start_new_trace_sender)
+            .field("per_config_context", &self.per_config_context)
+            // .field("config", &self.config)
+            .finish()
+    }
 }
 
 impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
@@ -75,6 +105,7 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
             per_file: Default::default(),
             start_new_trace_sender,
             per_config_context: Default::default(),
+            config: Default::default(),
         }
     }
 
@@ -88,24 +119,30 @@ impl<TLocalLinter: LocalLinter> Backend<TLocalLinter> {
                 per_file_state.supported_language_language,
             )
         };
-        let per_config_context = self.per_config_context.read().await;
+        let per_config_context = self.per_config_context.get();
+        let config = self.config.get();
         self.start_new_trace("run-for-slice");
-        let SliceRunStatus {
-            violations,
-            per_config_context: per_config_context_returned,
-        } = self.local_linter.run_for_slice(
+        let (
+            SliceRunStatus {
+                violations,
+                per_config_context: per_config_context_returned,
+            },
+            config_returned,
+        ) = self.local_linter.run_for_slice(
             &file_contents,
             Some(tree),
             uri.as_str(),
-            Default::default(),
+            config.map_or_else(|| Args::default().into(), Into::into),
             supported_language_language.supported_language(),
-            per_config_context.as_ref(),
+            per_config_context,
         );
         self.start_new_trace("everything-else");
         let should_initially_populate_per_config_context = per_config_context.is_none();
-        drop(per_config_context);
         if should_initially_populate_per_config_context {
-            *self.per_config_context.write().await = Some(per_config_context_returned.unwrap());
+            let _ = self
+                .per_config_context
+                .set(per_config_context_returned.unwrap());
+            let _ = self.config.set(config_returned.unwrap());
         }
         self.client
             .publish_diagnostics(

@@ -352,7 +352,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             Args, Config, FileRunContext, FromFileRunContextInstanceProvider,
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
-            ViolationWithContext, lsp::{LocalLinter, self}, FixingForSliceRunStatus,
+            lsp::{ArgsOrConfig, LocalLinter, self}, FixingForSliceRunStatus,
             FixingForSliceRunContext, PerConfigContext, SliceRunStatus
         };
 
@@ -367,7 +367,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             file_contents: impl Into<RopeOrSlice<'a>>,
             tree: Option<Tree>,
             path: impl AsRef<Path>,
-            args: Args,
+            config: &Config,
             language: SupportedLanguage,
             per_config_context: Option<&PerConfigContext>,
         ) -> SliceRunStatus {
@@ -376,7 +376,7 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 file_contents,
                 tree,
                 path,
-                args_to_config(args),
+                config,
                 language.supported_language_language(Some(path)),
                 &FromFileRunContextInstanceProviderFactoryLocal,
                 per_config_context
@@ -411,11 +411,29 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
                 file_contents: impl Into<RopeOrSlice<'a>>,
                 tree: Option<Tree>,
                 path: impl AsRef<Path>,
-                args: Args,
+                args_or_config: ArgsOrConfig,
                 language: SupportedLanguage,
                 per_config_context: Option<&PerConfigContext>,
-            ) -> SliceRunStatus {
-                run_for_slice(file_contents, tree, path, args, language, per_config_context)
+            ) -> (SliceRunStatus, Option<Config>) {
+                let passed_config: Option<&'_ Config> = match args_or_config {
+                    ArgsOrConfig::Config(config) => Some(config),
+                    ArgsOrConfig::Args(_) => None,
+                };
+                let newly_created_config: Option<Config> = match args_or_config {
+                    ArgsOrConfig::Args(args) => Some(args_to_config(args)),
+                    ArgsOrConfig::Config(_) => None,
+                };
+                (
+                    run_for_slice(
+                        file_contents,
+                        tree,
+                        path,
+                        passed_config.unwrap_or_else(|| newly_created_config.as_ref().unwrap()),
+                        language,
+                        per_config_context,
+                    ),
+                    newly_created_config
+                )
             }
 
             fn run_fixing_for_slice<'a>(
