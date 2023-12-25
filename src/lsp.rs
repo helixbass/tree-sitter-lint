@@ -27,7 +27,7 @@ use crate::{
     tree_sitter::{self, InputEdit, Parser, Point, Tree},
     tree_sitter_grep::{Parseable, SupportedLanguage},
     Args, ArgsBuilder, FixingForSliceRunContext, FixingForSliceRunStatus, MutRopeOrSlice,
-    ViolationWithContext, PerConfigContext, SliceRunStatus,
+    PerConfigContext, SliceRunStatus, ViolationWithContext,
 };
 
 const APPLY_ALL_FIXES_COMMAND: &str = "tree-sitter-lint.applyAllFixes";
@@ -301,7 +301,10 @@ impl<TLocalLinter: LocalLinter + 'static> LanguageServer for Backend<TLocalLinte
                     }
                     None => {
                         file_state.contents = (&*content_change.text).into();
-                        file_state.tree = parse_from_scratch(&file_state.contents, file_state.supported_language_language);
+                        file_state.tree = parse_from_scratch(
+                            &file_state.contents,
+                            file_state.supported_language_language,
+                        );
                         file_state.edits_since_last_fixing_run =
                             AccumulatedEditsOrEntireFileChanged::EntireFileChanged;
                     }

@@ -21,11 +21,12 @@ mod treesitter;
 mod violation;
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex}, borrow::Cow, fmt,
+    sync::{Arc, Mutex},
 };
 
 use aggregated_queries::AggregatedQueries;
@@ -538,15 +539,17 @@ impl Clone for PerConfigContext {
     fn clone(&self) -> Self {
         PerConfigContextBuilder {
             instantiated_rules: self.borrow_instantiated_rules().clone(),
-            aggregated_queries_builder: |instantiated_rules| AggregatedQueries::new(instantiated_rules),
-        }.build()
+            aggregated_queries_builder: |instantiated_rules| {
+                AggregatedQueries::new(instantiated_rules)
+            },
+        }
+        .build()
     }
 }
 
 impl fmt::Debug for PerConfigContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PerConfigContext")
-            .finish()
+        f.debug_struct("PerConfigContext").finish()
     }
 }
 
@@ -573,11 +576,18 @@ pub fn run_for_slice<'a>(
     }
     let instantiated_rules = config.get_instantiated_rules();
     let per_config_context: Cow<'_, PerConfigContext> = per_config_context.map_or_else(
-        || Cow::Owned(PerConfigContextBuilder {
-            instantiated_rules,
-            aggregated_queries_builder: |instantiated_rules| AggregatedQueries::new(instantiated_rules),
-        }.build()),
-        Cow::Borrowed
+        || {
+            Cow::Owned(
+                PerConfigContextBuilder {
+                    instantiated_rules,
+                    aggregated_queries_builder: |instantiated_rules| {
+                        AggregatedQueries::new(instantiated_rules)
+                    },
+                }
+                .build(),
+            )
+        },
+        Cow::Borrowed,
     );
     let violations: Mutex<Vec<ViolationWithContext>> = Default::default();
     let tree = tree.unwrap_or_else(|| {
@@ -600,7 +610,8 @@ pub fn run_for_slice<'a>(
             &config,
             supported_language_language,
             per_config_context.borrow_aggregated_queries(),
-            &per_config_context.borrow_aggregated_queries()
+            &per_config_context
+                .borrow_aggregated_queries()
                 .per_language
                 .get(&supported_language_language)
                 .unwrap()
@@ -626,8 +637,7 @@ pub fn run_for_slice<'a>(
         per_config_context: match per_config_context {
             Cow::Borrowed(_) => None,
             Cow::Owned(per_config_context) => Some(per_config_context),
-        }
-        // from_file_run_context_instance_provider,
+        }, // from_file_run_context_instance_provider,
     }
 }
 
