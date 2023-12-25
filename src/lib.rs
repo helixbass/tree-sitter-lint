@@ -536,7 +536,10 @@ pub struct PerConfigContext {
 
 impl Clone for PerConfigContext {
     fn clone(&self) -> Self {
-        unreachable!("Not intending to actually promote a borrowed Cow -> owned Cow")
+        PerConfigContextBuilder {
+            instantiated_rules: self.borrow_instantiated_rules().clone(),
+            aggregated_queries_builder: |instantiated_rules| AggregatedQueries::new(instantiated_rules),
+        }.build()
     }
 }
 
