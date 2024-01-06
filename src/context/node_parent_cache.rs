@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use tracing::trace_span;
 use tree_sitter_grep::tree_sitter::{Node, Tree};
 
 use crate::{walk_tree, TreeEnterLeaveVisitor};
@@ -27,6 +28,8 @@ impl<'a> TreeEnterLeaveVisitor<'a> for NodeParentCachePopulator<'a> {
 }
 
 pub fn get_node_parent_cache(tree: &Tree) -> Arc<NodeParentCache> {
+    let _span = trace_span!("get node parent cache").entered();
+
     let mut node_parent_cache_populator = NodeParentCachePopulator::default();
     walk_tree(tree, &mut node_parent_cache_populator);
     Arc::new(node_parent_cache_populator.cache)
