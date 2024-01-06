@@ -16,9 +16,9 @@ use tree_sitter_grep::{
 };
 
 use crate::{
-    aggregated_queries::AggregatedQueries, rule::InstantiatedRule, run_per_file, Config,
-    FileRunContext, FromFileRunContextInstanceProviderFactory, MutRopeOrSlice, RuleMeta, RuleName,
-    RunKind, ViolationWithContext,
+    aggregated_queries::AggregatedQueries, context::get_node_parent_cache, rule::InstantiatedRule,
+    run_per_file, Config, FileRunContext, FromFileRunContextInstanceProviderFactory,
+    MutRopeOrSlice, RuleMeta, RuleName, RunKind, ViolationWithContext,
 };
 
 mod accumulated_edits;
@@ -92,6 +92,7 @@ pub fn run_fixing_loop<'a>(
 
         let from_file_run_context_instance_provider =
             from_file_run_context_instance_provider_factory.create();
+        let node_parent_cache = get_node_parent_cache(&tree);
         run_per_file(
             FileRunContext::new(
                 path,
@@ -119,6 +120,7 @@ pub fn run_fixing_loop<'a>(
                     _ => RunKind::CommandLineFixingFixingLoop,
                 },
                 &config.environment,
+                &node_parent_cache,
             ),
             |reported_violations| {
                 violations.extend(reported_violations);

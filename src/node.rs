@@ -7,18 +7,32 @@ use tree_sitter_grep::{
 };
 
 use crate::{
-    context::TokenWalker, get_tokens, rule_tester::compare_ranges, QueryMatchContext, SkipOptions,
-    SkipOptionsBuilder, SourceTextProvider,
+    context::{NodeParentProvider, TokenWalker},
+    get_tokens,
+    rule_tester::compare_ranges,
+    QueryMatchContext, SkipOptions, SkipOptionsBuilder, SourceTextProvider,
+    StandaloneNodeParentProvider,
 };
 
 pub type Kind = &'static str;
 
 pub trait NodeExt<'a> {
-    fn is_descendant_of(&self, node: Node) -> bool;
-    fn is_same_or_descendant_of(&self, node: Node) -> bool;
+    fn is_descendant_of(
+        &self,
+        node: Node,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool;
+    fn is_same_or_descendant_of(
+        &self,
+        node: Node,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool;
     fn field(&self, field_name: &str) -> Node<'a>;
-    fn root(&self) -> Node<'a>;
-    fn get_cursor_scoped_to_root(&self) -> TreeCursor<'a>;
+    fn root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a>;
+    fn get_cursor_scoped_to_root(
+        &self,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> TreeCursor<'a>;
     fn find_first_matching_descendant(
         &self,
         predicate: impl FnMut(Node) -> bool,
@@ -39,7 +53,11 @@ pub trait NodeExt<'a> {
         &self,
         language: impl Into<SupportedLanguage>,
     ) -> NonCommentChildrenAndFieldNames<'a>;
-    fn is_only_non_comment_named_sibling(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn is_only_non_comment_named_sibling(
+        &self,
+        language: impl Into<SupportedLanguage>,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool;
     fn has_trailing_comments(&self, context: &QueryMatchContext<'a, '_>) -> bool;
     fn maybe_first_non_comment_named_child(
         &self,
@@ -52,15 +70,31 @@ pub trait NodeExt<'a> {
         language: impl Into<SupportedLanguage>,
     ) -> Node<'a>;
     fn skip_nodes_of_type(&self, kind: Kind, language: impl Into<SupportedLanguage>) -> Node<'a>;
-    fn ancestors(&self) -> Ancestors<'a>;
-    fn next_ancestor_not_of_kinds(&self, kinds: &[Kind]) -> Node<'a>;
-    fn next_ancestor_not_of_kind(&self, kind: Kind) -> Node<'a>;
-    fn next_ancestor_of_kind(&self, kind: Kind) -> Node<'a>;
+    fn ancestors(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Ancestors<'a>;
+    fn next_ancestor_not_of_kinds(
+        &self,
+        kinds: &[Kind],
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a>;
+    fn next_ancestor_not_of_kind(
+        &self,
+        kind: Kind,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a>;
+    fn next_ancestor_of_kind(
+        &self,
+        kind: Kind,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a>;
     fn has_child_of_kind(&self, kind: Kind) -> bool;
     fn maybe_first_child_of_kind(&self, kind: Kind) -> Option<Node<'a>>;
     fn has_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> bool;
     fn when_kind(&self, kind: Kind) -> Option<Node<'a>>;
-    fn is_first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
+    fn is_first_non_comment_named_child(
+        &self,
+        language: impl Into<SupportedLanguage>,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool;
     fn is_last_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool;
     fn num_non_comment_named_children(&self, language: impl Into<SupportedLanguage>) -> usize;
     fn first_non_comment_child(&self, language: impl Into<SupportedLanguage>) -> Node<'a>;
@@ -72,10 +106,16 @@ pub trait NodeExt<'a> {
         language: impl Into<SupportedLanguage>,
     ) -> NonCommentNamedChildrenAndFieldNames<'a>;
     fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a>;
+    fn parent_(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a>;
+    fn maybe_parent(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Option<Node<'a>>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
-    fn is_descendant_of(&self, node: Node) -> bool {
+    fn is_descendant_of(
+        &self,
+        node: Node,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool {
         if self.start_byte() < node.start_byte() {
             return false;
         }
@@ -83,19 +123,23 @@ impl<'a> NodeExt<'a> for Node<'a> {
             return false;
         }
         if self.start_byte() == node.start_byte() && self.end_byte() == node.end_byte() {
-            let mut ancestor = return_default_if_none!(self.parent());
+            let mut ancestor = return_default_if_none!(self.maybe_parent(node_parent_provider));
             loop {
                 if ancestor == node {
                     return true;
                 }
-                ancestor = return_default_if_none!(ancestor.parent());
+                ancestor = return_default_if_none!(ancestor.maybe_parent(node_parent_provider));
             }
         }
         true
     }
 
-    fn is_same_or_descendant_of(&self, node: Node) -> bool {
-        *self == node || self.is_descendant_of(node)
+    fn is_same_or_descendant_of(
+        &self,
+        node: Node,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool {
+        *self == node || self.is_descendant_of(node, node_parent_provider)
     }
 
     fn field(&self, field_name: &str) -> Node<'a> {
@@ -104,16 +148,19 @@ impl<'a> NodeExt<'a> for Node<'a> {
         })
     }
 
-    fn root(&self) -> Node<'a> {
+    fn root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a> {
         let mut node = *self;
-        while let Some(parent) = node.parent() {
+        while let Some(parent) = node.maybe_parent(node_parent_provider) {
             node = parent;
         }
         node
     }
 
-    fn get_cursor_scoped_to_root(&self) -> TreeCursor<'a> {
-        let mut cursor = self.root().walk();
+    fn get_cursor_scoped_to_root(
+        &self,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> TreeCursor<'a> {
+        let mut cursor = self.root(node_parent_provider).walk();
         walk_cursor_to_descendant(&mut cursor, *self);
         cursor
     }
@@ -199,9 +246,13 @@ impl<'a> NodeExt<'a> for Node<'a> {
         NonCommentChildrenAndFieldNames::new(*self, language.comment_kinds())
     }
 
-    fn is_only_non_comment_named_sibling(&self, language: impl Into<SupportedLanguage>) -> bool {
+    fn is_only_non_comment_named_sibling(
+        &self,
+        language: impl Into<SupportedLanguage>,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool {
         assert!(self.is_named());
-        let parent = return_default_if_none!(self.parent());
+        let parent = return_default_if_none!(self.maybe_parent(node_parent_provider));
         parent.non_comment_named_children(language).count() == 1
     }
 
@@ -246,30 +297,45 @@ impl<'a> NodeExt<'a> for Node<'a> {
         skip_nodes_of_type(*self, kind, language)
     }
 
-    fn ancestors(&self) -> Ancestors<'a> {
-        Ancestors::new(*self)
+    fn ancestors(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Ancestors<'a> {
+        Ancestors::new(
+            *self,
+            node_parent_provider.standalone_node_parent_provider(),
+        )
     }
 
-    fn next_ancestor_not_of_kinds(&self, kinds: &[Kind]) -> Node<'a> {
-        let mut node = self.parent().unwrap();
+    fn next_ancestor_not_of_kinds(
+        &self,
+        kinds: &[Kind],
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a> {
+        let mut node = self.parent_(node_parent_provider);
         while kinds.contains(&node.kind()) {
-            node = node.parent().unwrap();
+            node = node.parent_(node_parent_provider);
         }
         node
     }
 
-    fn next_ancestor_not_of_kind(&self, kind: Kind) -> Node<'a> {
-        let mut node = self.parent().unwrap();
+    fn next_ancestor_not_of_kind(
+        &self,
+        kind: Kind,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a> {
+        let mut node = self.parent_(node_parent_provider);
         while node.kind() == kind {
-            node = node.parent().unwrap();
+            node = node.parent_(node_parent_provider);
         }
         node
     }
 
-    fn next_ancestor_of_kind(&self, kind: Kind) -> Node<'a> {
-        let mut node = self.parent().unwrap();
+    fn next_ancestor_of_kind(
+        &self,
+        kind: Kind,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Node<'a> {
+        let mut node = self.parent_(node_parent_provider);
         while node.kind() != kind {
-            node = node.parent().unwrap();
+            node = node.parent_(node_parent_provider);
         }
         node
     }
@@ -294,8 +360,12 @@ impl<'a> NodeExt<'a> for Node<'a> {
         (self.kind() == kind).then_some(*self)
     }
 
-    fn is_first_non_comment_named_child(&self, language: impl Into<SupportedLanguage>) -> bool {
-        self.parent()
+    fn is_first_non_comment_named_child(
+        &self,
+        language: impl Into<SupportedLanguage>,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> bool {
+        self.maybe_parent(node_parent_provider)
             .matches(|parent| parent.maybe_first_non_comment_named_child(language) == Some(*self))
     }
 
@@ -348,13 +418,25 @@ impl<'a> NodeExt<'a> for Node<'a> {
     fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a> {
         ChildrenOfKind::new(*self, kind)
     }
+
+    fn parent_(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a> {
+        node_parent_provider.node_parent(*self)
+    }
+
+    fn maybe_parent(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Option<Node<'a>> {
+        node_parent_provider.maybe_node_parent(*self)
+    }
 }
 
-fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
+fn walk_cursor_to_descendant<'a>(cursor: &mut TreeCursor<'a>, node: Node<'a>) {
     while cursor.node() != node {
         // this seems like it should be right but see https://github.com/tree-sitter/tree-sitter/issues/2463
         // cursor.goto_first_child_for_byte(node.start_byte()).unwrap();
-        if node.is_descendant_of(cursor.node()) {
+        fn is_inside(node: Node, cursor_node: Node) -> bool {
+            node.start_byte() >= cursor_node.start_byte()
+                && node.end_byte() <= cursor_node.end_byte()
+        }
+        if is_inside(node, cursor.node()) {
             assert!(cursor.goto_first_child());
         } else {
             assert!(cursor.goto_next_sibling());
@@ -362,7 +444,11 @@ fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
     }
 }
 
-pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
+pub fn compare_nodes<'a>(
+    a: &Node<'a>,
+    b: &Node<'a>,
+    node_parent_provider: &impl NodeParentProvider<'a>,
+) -> Ordering {
     if a == b {
         return Ordering::Equal;
     }
@@ -370,7 +456,7 @@ pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
         Ordering::Less => Ordering::Less,
         Ordering::Greater => Ordering::Greater,
         Ordering::Equal => {
-            if a.is_descendant_of(*b) {
+            if a.is_descendant_of(*b, node_parent_provider) {
                 Ordering::Greater
             } else {
                 Ordering::Less
@@ -548,12 +634,14 @@ impl<'a> Iterator for ChildrenOfKind<'a> {
 
 pub struct Ancestors<'a> {
     current_node: Option<Node<'a>>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
 }
 
 impl<'a> Ancestors<'a> {
-    pub fn new(node: Node<'a>) -> Self {
+    pub fn new(node: Node<'a>, node_parent_provider: StandaloneNodeParentProvider<'a>) -> Self {
         Self {
-            current_node: node.parent(),
+            current_node: node.maybe_parent(&node_parent_provider),
+            node_parent_provider,
         }
     }
 }
@@ -565,7 +653,7 @@ impl<'a> Iterator for Ancestors<'a> {
         let ret = self.current_node;
         self.current_node = self
             .current_node
-            .and_then(|current_node| current_node.parent());
+            .and_then(|current_node| current_node.maybe_parent(&self.node_parent_provider));
         ret
     }
 }

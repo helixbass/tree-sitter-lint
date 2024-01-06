@@ -168,7 +168,7 @@ impl RuleListenerQuery {
                 capture_name: match capture_name.as_ref() {
                     None => match query.capture_names().len() {
                         0 => panic!("Expected capture"),
-                        _ => query.capture_names()[0].clone(),
+                        _ => query.capture_names()[0].to_owned(),
                     },
                     Some(capture_name) => capture_name.clone(),
                 },

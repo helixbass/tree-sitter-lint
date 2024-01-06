@@ -19,6 +19,7 @@ use tree_sitter_grep::{
 mod backward_tokens;
 mod count_options;
 mod get_tokens;
+mod node_parent_cache;
 mod provided_types;
 mod skip_options;
 
@@ -26,6 +27,9 @@ use backward_tokens::{get_backward_tokens, get_tokens_before_node};
 pub use count_options::{CountOptions, CountOptionsBuilder};
 use get_tokens::get_tokens_after_node;
 pub use get_tokens::{get_tokens, TokenWalker};
+pub use node_parent_cache::{
+    get_node_parent_cache, NodeParentCache, NodeParentProvider, StandaloneNodeParentProvider,
+};
 pub use provided_types::{
     FromFileRunContext, FromFileRunContextInstanceProvider,
     FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
@@ -59,6 +63,7 @@ pub struct FileRunContext<'a, 'b> {
     from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
     pub run_kind: RunKind<'a>,
     pub environment: &'a Environment,
+    node_parent_cache: &'b Arc<NodeParentCache<'a>>,
 }
 
 impl<'a, 'b> FileRunContext<'a, 'b> {
@@ -76,6 +81,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
         from_file_run_context_instance_provider: &'b dyn FromFileRunContextInstanceProvider<'a>,
         run_kind: RunKind<'a>,
         environment: &'a Environment,
+        node_parent_cache: &'b Arc<NodeParentCache<'a>>,
     ) -> Self {
         let file_contents = file_contents.into();
         Self {
@@ -91,6 +97,7 @@ impl<'a, 'b> FileRunContext<'a, 'b> {
             from_file_run_context_instance_provider,
             run_kind,
             environment,
+            node_parent_cache,
         }
     }
 
@@ -116,6 +123,16 @@ impl<'a> SourceTextProvider<'a> for FileRunContext<'a, '_> {
 
     fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
         self.file_contents.slice(range)
+    }
+}
+
+impl<'a> NodeParentProvider<'a> for FileRunContext<'a, '_> {
+    fn maybe_node_parent(&self, node: Node<'a>) -> Option<Node<'a>> {
+        self.node_parent_cache.get(&node).copied()
+    }
+
+    fn standalone_node_parent_provider(&self) -> StandaloneNodeParentProvider<'a> {
+        self.node_parent_cache.clone().into()
     }
 }
 
@@ -280,7 +297,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Option<Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        get_tokens_after_node(node)
+        get_tokens_after_node(node, self)
             .skip(skip_options.skip())
             .find(|node| {
                 skip_options.filter().map_or(true, |filter| filter(*node))
@@ -310,7 +327,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Node<'a> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        get_backward_tokens(node)
+        get_backward_tokens(node, self.standalone_node_parent_provider())
             .skip(skip_options.skip())
             .find(|node| {
                 skip_options.filter().map_or(true, |filter| filter(*node))
@@ -330,7 +347,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     pub fn comments_exist_between(&self, start: Node<'a>, end: Node<'a>) -> bool {
         let comment_kinds = self.file_run_context.language().comment_kinds();
         let end = end.start_byte();
-        get_tokens_after_node(start)
+        get_tokens_after_node(start, self)
             .take_while(|node| node.start_byte() < end)
             .any(|node| comment_kinds.contains(node.kind()))
     }
@@ -364,7 +381,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Option<Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        get_tokens_before_node(node)
+        get_tokens_before_node(node, self.standalone_node_parent_provider())
             .skip(skip_options.skip())
             .find(|node| {
                 skip_options.filter().map_or(true, |filter| filter(*node))
@@ -397,7 +414,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
         let b_start = b.start_byte();
         let language = self.file_run_context.language();
-        get_tokens_after_node(a)
+        get_tokens_after_node(a, &self.standalone_node_parent_provider())
             .take_while(move |token| token.start_byte() < b_start)
             .skip(skip_options.skip())
             .filter(move |node| {
@@ -412,7 +429,8 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
 
     pub fn get_comments_after(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
         let comment_kinds = self.file_run_context.language().comment_kinds();
-        get_tokens_after_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+        get_tokens_after_node(node, &self.standalone_node_parent_provider())
+            .take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn language(&self) -> SupportedLanguage {
@@ -427,7 +445,8 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
 
     pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
         let comment_kinds = self.file_run_context.language().comment_kinds();
-        get_tokens_before_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+        get_tokens_before_node(node, self.standalone_node_parent_provider())
+            .take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn get_comments_inside(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
@@ -463,7 +482,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
             (b, a_start)
         };
         let mut prev_token = start;
-        get_tokens_after_node(start)
+        get_tokens_after_node(start, self)
             .take_while(move |token| token.start_byte() <= end_byte)
             .any(|token| {
                 let ret = prev_token.end_byte() < token.start_byte();
@@ -479,7 +498,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     ) -> impl Iterator<Item = Node<'a>> {
         let mut count_options = count_options.map(Into::into).unwrap_or_default();
         let language = self.file_run_context.language();
-        get_backward_tokens(node)
+        get_backward_tokens(node, self.standalone_node_parent_provider())
             .take(count_options.count())
             .filter(move |node| {
                 count_options.filter().map_or(true, |filter| filter(*node))
@@ -511,6 +530,16 @@ impl<'a> SourceTextProvider<'a> for QueryMatchContext<'a, '_> {
 
     fn slice(&self, range: ops::Range<usize>) -> Cow<'a, str> {
         self.file_run_context.slice(range)
+    }
+}
+
+impl<'a> NodeParentProvider<'a> for QueryMatchContext<'a, '_> {
+    fn maybe_node_parent(&self, node: Node<'a>) -> Option<Node<'a>> {
+        self.file_run_context.maybe_node_parent(node)
+    }
+
+    fn standalone_node_parent_provider(&self) -> StandaloneNodeParentProvider<'a> {
+        self.file_run_context.standalone_node_parent_provider()
     }
 }
 

@@ -1,6 +1,6 @@
 use tree_sitter_grep::tree_sitter::{Node, TreeCursor};
 
-use crate::NodeExt;
+use crate::{NodeExt, NodeParentProvider};
 
 macro_rules! move_to_next_sibling_or_go_to_parent_and_loop {
     ($self:expr) => {
@@ -110,12 +110,18 @@ pub enum TokenWalkerState {
 }
 
 #[allow(dead_code)]
-pub fn get_tokens_including_after_node(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalkerUntilEndOfFile::new(node)
+pub fn get_tokens_including_after_node<'a>(
+    node: Node<'a>,
+    node_parent_provider: &impl NodeParentProvider<'a>,
+) -> impl Iterator<Item = Node<'a>> {
+    TokenWalkerUntilEndOfFile::new(node, node_parent_provider)
 }
 
-pub fn get_tokens_after_node(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalkerUntilEndOfFile::for_after_node(node)
+pub fn get_tokens_after_node<'a>(
+    node: Node<'a>,
+    node_parent_provider: &impl NodeParentProvider<'a>,
+) -> impl Iterator<Item = Node<'a>> {
+    TokenWalkerUntilEndOfFile::for_after_node(node, node_parent_provider)
 }
 
 struct TokenWalkerUntilEndOfFile<'a> {
@@ -124,17 +130,20 @@ struct TokenWalkerUntilEndOfFile<'a> {
 }
 
 impl<'a> TokenWalkerUntilEndOfFile<'a> {
-    pub fn new(node: Node<'a>) -> Self {
+    pub fn new(node: Node<'a>, node_parent_provider: &impl NodeParentProvider<'a>) -> Self {
         Self {
             state: TokenWalkerState::Initial,
-            cursor: node.get_cursor_scoped_to_root(),
+            cursor: node.get_cursor_scoped_to_root(node_parent_provider),
         }
     }
 
-    pub fn for_after_node(node: Node<'a>) -> Self {
+    pub fn for_after_node(
+        node: Node<'a>,
+        node_parent_provider: &impl NodeParentProvider<'a>,
+    ) -> Self {
         Self {
             state: TokenWalkerState::JustReturnedToParent,
-            cursor: node.get_cursor_scoped_to_root(),
+            cursor: node.get_cursor_scoped_to_root(node_parent_provider),
         }
     }
 }
@@ -178,6 +187,7 @@ mod tests {
     use tree_sitter_grep::{tree_sitter::Parser, SupportedLanguage};
 
     use super::*;
+    use crate::context::StandaloneNodeParentProvider;
 
     fn test_all_tokens_text(text: &str, all_tokens_text: &[&str]) {
         let mut parser = Parser::new();
@@ -227,9 +237,12 @@ mod tests {
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
-            get_tokens_including_after_node(get_node(tree.root_node()))
-                .map(|node| node.utf8_text(text.as_bytes()).unwrap())
-                .collect::<Vec<_>>(),
+            get_tokens_including_after_node(
+                get_node(tree.root_node()),
+                &StandaloneNodeParentProvider::from(&tree)
+            )
+            .map(|node| node.utf8_text(text.as_bytes()).unwrap())
+            .collect::<Vec<_>>(),
             all_tokens_text
         );
     }
@@ -259,9 +272,12 @@ mod tests {
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
-            get_tokens_after_node(get_node(tree.root_node()))
-                .map(|node| node.utf8_text(text.as_bytes()).unwrap())
-                .collect::<Vec<_>>(),
+            get_tokens_after_node(
+                get_node(tree.root_node()),
+                &StandaloneNodeParentProvider::from(&tree)
+            )
+            .map(|node| node.utf8_text(text.as_bytes()).unwrap())
+            .collect::<Vec<_>>(),
             all_tokens_text
         );
     }
