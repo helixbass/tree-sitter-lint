@@ -1,6 +1,7 @@
 use tree_sitter_grep::tree_sitter::Node;
 
-use super::get_tokens::TokenWalkerState;
+use super::{get_tokens::TokenWalkerState, StandaloneNodeParentProvider};
+use crate::NodeExt;
 
 macro_rules! loop_landed_on_node {
     ($self:expr) => {
@@ -20,7 +21,7 @@ macro_rules! move_to_prev_sibling_or_go_to_parent_and_loop {
     ($self:expr) => {
         match $self.node.prev_sibling() {
             None => {
-                $self.node = $self.node.parent().unwrap();
+                $self.node = $self.node.parent_(&$self.node_parent_provider);
                 $self.state = JustReturnedToParent;
                 continue;
             }
@@ -35,7 +36,7 @@ macro_rules! move_to_prev_sibling_or_try_go_to_parent_and_loop {
     ($self:expr) => {
         match $self.node.prev_sibling() {
             None => {
-                $self.node = match $self.node.parent() {
+                $self.node = match $self.node.maybe_parent(&$self.node_parent_provider) {
                     None => {
                         $self.state = Done;
                         continue;
@@ -52,22 +53,27 @@ macro_rules! move_to_prev_sibling_or_try_go_to_parent_and_loop {
     };
 }
 
-pub fn get_backward_tokens(node: Node) -> impl Iterator<Item = Node> {
-    BackwardTokenWalker::new(node)
+pub fn get_backward_tokens<'a>(
+    node: Node<'a>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
+) -> impl Iterator<Item = Node<'a>> {
+    BackwardTokenWalker::new(node, node_parent_provider)
 }
 
 struct BackwardTokenWalker<'a> {
     state: TokenWalkerState,
     node: Node<'a>,
     original_node: Node<'a>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
 }
 
 impl<'a> BackwardTokenWalker<'a> {
-    pub fn new(node: Node<'a>) -> Self {
+    pub fn new(node: Node<'a>, node_parent_provider: StandaloneNodeParentProvider<'a>) -> Self {
         Self {
             state: TokenWalkerState::Initial,
             node,
             original_node: node,
+            node_parent_provider,
         }
     }
 }
@@ -118,31 +124,43 @@ impl<'a> Iterator for BackwardTokenWalker<'a> {
 }
 
 #[allow(dead_code)]
-pub fn get_tokens_including_before_node(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalkerUntilBeginningOfFile::new(node)
+pub fn get_tokens_including_before_node<'a>(
+    node: Node<'a>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
+) -> impl Iterator<Item = Node<'a>> {
+    TokenWalkerUntilBeginningOfFile::new(node, node_parent_provider)
 }
 
-pub fn get_tokens_before_node(node: Node) -> impl Iterator<Item = Node> {
-    TokenWalkerUntilBeginningOfFile::for_before_node(node)
+pub fn get_tokens_before_node<'a>(
+    node: Node<'a>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
+) -> impl Iterator<Item = Node<'a>> {
+    TokenWalkerUntilBeginningOfFile::for_before_node(node, node_parent_provider)
 }
 
 struct TokenWalkerUntilBeginningOfFile<'a> {
     state: TokenWalkerState,
     node: Node<'a>,
+    node_parent_provider: StandaloneNodeParentProvider<'a>,
 }
 
 impl<'a> TokenWalkerUntilBeginningOfFile<'a> {
-    pub fn new(node: Node<'a>) -> Self {
+    pub fn new(node: Node<'a>, node_parent_provider: StandaloneNodeParentProvider<'a>) -> Self {
         Self {
             state: TokenWalkerState::Initial,
             node,
+            node_parent_provider,
         }
     }
 
-    pub fn for_before_node(node: Node<'a>) -> Self {
+    pub fn for_before_node(
+        node: Node<'a>,
+        node_parent_provider: StandaloneNodeParentProvider<'a>,
+    ) -> Self {
         Self {
             state: TokenWalkerState::JustReturnedToParent,
             node,
+            node_parent_provider,
         }
     }
 }
@@ -196,7 +214,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(text, None).unwrap();
         assert_eq!(
-            get_backward_tokens(tree.root_node())
+            get_backward_tokens(tree.root_node(), StandaloneNodeParentProvider::from(&tree))
                 .map(|node| node.utf8_text(text.as_bytes()).unwrap())
                 .collect::<Vec<_>>(),
             all_tokens_text

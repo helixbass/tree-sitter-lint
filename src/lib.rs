@@ -41,7 +41,7 @@ pub use context::{
     FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
     FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
     NodeParentCache, NodeParentProvider, QueryMatchContext, RunKind, SkipOptions,
-    SkipOptionsBuilder,
+    SkipOptionsBuilder, StandaloneNodeParentProvider,
 };
 use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};

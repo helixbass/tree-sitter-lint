@@ -327,7 +327,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Node<'a> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        get_backward_tokens(node)
+        get_backward_tokens(node, self.standalone_node_parent_provider())
             .skip(skip_options.skip())
             .find(|node| {
                 skip_options.filter().map_or(true, |filter| filter(*node))
@@ -381,7 +381,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
         skip_options: Option<impl Into<SkipOptions<TFilter>>>,
     ) -> Option<Node<'a>> {
         let mut skip_options = skip_options.map(Into::into).unwrap_or_default();
-        get_tokens_before_node(node)
+        get_tokens_before_node(node, self.standalone_node_parent_provider())
             .skip(skip_options.skip())
             .find(|node| {
                 skip_options.filter().map_or(true, |filter| filter(*node))
@@ -445,7 +445,8 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
 
     pub fn get_comments_before(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
         let comment_kinds = self.file_run_context.language().comment_kinds();
-        get_tokens_before_node(node).take_while(|node| comment_kinds.contains(node.kind()))
+        get_tokens_before_node(node, self.standalone_node_parent_provider())
+            .take_while(|node| comment_kinds.contains(node.kind()))
     }
 
     pub fn get_comments_inside(&self, node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
@@ -497,7 +498,7 @@ impl<'a, 'b> QueryMatchContext<'a, 'b> {
     ) -> impl Iterator<Item = Node<'a>> {
         let mut count_options = count_options.map(Into::into).unwrap_or_default();
         let language = self.file_run_context.language();
-        get_backward_tokens(node)
+        get_backward_tokens(node, self.standalone_node_parent_provider())
             .take(count_options.count())
             .filter(move |node| {
                 count_options.filter().map_or(true, |filter| filter(*node))
