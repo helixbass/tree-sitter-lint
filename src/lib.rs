@@ -19,6 +19,7 @@ mod tests;
 mod text;
 mod treesitter;
 mod violation;
+mod visit;
 
 use std::{
     collections::HashMap,
@@ -34,11 +35,13 @@ pub use config::{
     RuleConfigurationValue, RuleConfigurationValueBuilder,
 };
 pub use configuration::{Configuration, ConfigurationBuilder};
+use context::get_node_parent_cache;
 pub use context::{
     get_tokens, CountOptions, CountOptionsBuilder, FileRunContext, FromFileRunContext,
     FromFileRunContextInstanceProvider, FromFileRunContextInstanceProviderFactory,
     FromFileRunContextProvidedTypes, FromFileRunContextProvidedTypesOnceLockStorage,
-    QueryMatchContext, RunKind, SkipOptions, SkipOptionsBuilder,
+    NodeParentCache, NodeParentProvider, QueryMatchContext, RunKind, SkipOptions,
+    SkipOptionsBuilder,
 };
 use dashmap::DashMap;
 use fixing::{run_fixing_loop, AllPendingFixes, PendingFix, PerFilePendingFixes};
@@ -74,6 +77,7 @@ pub use treesitter::{
     range_between_starts,
 };
 pub use violation::{ViolationBuilder, ViolationData, ViolationWithContext};
+pub use visit::{walk_tree, TreeEnterLeaveVisitor};
 
 pub extern crate better_any;
 pub extern crate clap;
@@ -130,6 +134,7 @@ pub fn run(
             let from_file_run_context_instance_provider =
                 from_file_run_context_instance_provider_factory.create();
             let path = dir_entry.path();
+            let node_parent_cache = get_node_parent_cache(tree);
             run_per_file(
                 FileRunContext::new(
                     path,
@@ -148,6 +153,7 @@ pub fn run(
                         RunKind::CommandLineNonfixing
                     },
                     &config.environment,
+                    &node_parent_cache,
                 ),
                 |violations| {
                     all_violations
@@ -593,6 +599,7 @@ pub fn run_for_slice<'a>(
     });
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
+    let node_parent_cache = get_node_parent_cache(&tree);
     run_per_file(
         FileRunContext::new(
             path,
@@ -614,6 +621,7 @@ pub fn run_for_slice<'a>(
             &*from_file_run_context_instance_provider,
             RunKind::NonfixingForSlice,
             &config.environment,
+            &node_parent_cache,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);
@@ -665,6 +673,7 @@ pub fn run_fixing_for_slice<'a>(
         Default::default();
     let from_file_run_context_instance_provider =
         from_file_run_context_instance_provider_factory.create();
+    let node_parent_cache = get_node_parent_cache(&tree);
     run_per_file(
         FileRunContext::new(
             path,
@@ -685,6 +694,7 @@ pub fn run_fixing_for_slice<'a>(
             &*from_file_run_context_instance_provider,
             RunKind::FixingForSliceInitial { context: &context },
             &config.environment,
+            &node_parent_cache,
         ),
         |reported_violations| {
             violations.lock().unwrap().extend(reported_violations);

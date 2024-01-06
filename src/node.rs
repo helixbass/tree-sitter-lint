@@ -7,18 +7,18 @@ use tree_sitter_grep::{
 };
 
 use crate::{
-    context::TokenWalker, get_tokens, rule_tester::compare_ranges, QueryMatchContext, SkipOptions,
+    context::{TokenWalker, NodeParentProvider}, get_tokens, rule_tester::compare_ranges, QueryMatchContext, SkipOptions,
     SkipOptionsBuilder, SourceTextProvider,
 };
 
 pub type Kind = &'static str;
 
 pub trait NodeExt<'a> {
-    fn is_descendant_of(&self, node: Node) -> bool;
-    fn is_same_or_descendant_of(&self, node: Node) -> bool;
+    fn is_descendant_of(&self, node: Node, node_parent_provider: &impl NodeParentProvider<'a>) -> bool;
+    fn is_same_or_descendant_of(&self, node: Node, node_parent_provider: &impl NodeParentProvider<'a>) -> bool;
     fn field(&self, field_name: &str) -> Node<'a>;
-    fn root(&self) -> Node<'a>;
-    fn get_cursor_scoped_to_root(&self) -> TreeCursor<'a>;
+    fn root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a>;
+    fn get_cursor_scoped_to_root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> TreeCursor<'a>;
     fn find_first_matching_descendant(
         &self,
         predicate: impl FnMut(Node) -> bool,
@@ -72,10 +72,12 @@ pub trait NodeExt<'a> {
         language: impl Into<SupportedLanguage>,
     ) -> NonCommentNamedChildrenAndFieldNames<'a>;
     fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a>;
+    fn parent_(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a>;
+    fn maybe_parent(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Option<Node<'a>>;
 }
 
 impl<'a> NodeExt<'a> for Node<'a> {
-    fn is_descendant_of(&self, node: Node) -> bool {
+    fn is_descendant_of(&self, node: Node, node_parent_provider: &impl NodeParentProvider<'a>) -> bool {
         if self.start_byte() < node.start_byte() {
             return false;
         }
@@ -83,19 +85,19 @@ impl<'a> NodeExt<'a> for Node<'a> {
             return false;
         }
         if self.start_byte() == node.start_byte() && self.end_byte() == node.end_byte() {
-            let mut ancestor = return_default_if_none!(self.parent());
+            let mut ancestor = return_default_if_none!(self.maybe_parent(node_parent_provider));
             loop {
                 if ancestor == node {
                     return true;
                 }
-                ancestor = return_default_if_none!(ancestor.parent());
+                ancestor = return_default_if_none!(ancestor.maybe_parent(node_parent_provider));
             }
         }
         true
     }
 
-    fn is_same_or_descendant_of(&self, node: Node) -> bool {
-        *self == node || self.is_descendant_of(node)
+    fn is_same_or_descendant_of(&self, node: Node, node_parent_provider: &impl NodeParentProvider<'a>) -> bool {
+        *self == node || self.is_descendant_of(node, node_parent_provider)
     }
 
     fn field(&self, field_name: &str) -> Node<'a> {
@@ -104,16 +106,16 @@ impl<'a> NodeExt<'a> for Node<'a> {
         })
     }
 
-    fn root(&self) -> Node<'a> {
+    fn root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a> {
         let mut node = *self;
-        while let Some(parent) = node.parent() {
+        while let Some(parent) = node.maybe_parent(node_parent_provider) {
             node = parent;
         }
         node
     }
 
-    fn get_cursor_scoped_to_root(&self) -> TreeCursor<'a> {
-        let mut cursor = self.root().walk();
+    fn get_cursor_scoped_to_root(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> TreeCursor<'a> {
+        let mut cursor = self.root(node_parent_provider).walk();
         walk_cursor_to_descendant(&mut cursor, *self);
         cursor
     }
@@ -348,13 +350,25 @@ impl<'a> NodeExt<'a> for Node<'a> {
     fn children_of_kind(&self, kind: Kind) -> ChildrenOfKind<'a> {
         ChildrenOfKind::new(*self, kind)
     }
+
+    fn parent_(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Node<'a> {
+        node_parent_provider.node_parent(*self)
+    }
+
+    fn maybe_parent(&self, node_parent_provider: &impl NodeParentProvider<'a>) -> Option<Node<'a>> {
+        node_parent_provider.maybe_node_parent(*self)
+    }
 }
 
-fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
+fn walk_cursor_to_descendant<'a>(cursor: &mut TreeCursor<'a>, node: Node<'a>) {
     while cursor.node() != node {
         // this seems like it should be right but see https://github.com/tree-sitter/tree-sitter/issues/2463
         // cursor.goto_first_child_for_byte(node.start_byte()).unwrap();
-        if node.is_descendant_of(cursor.node()) {
+        fn is_inside(node: Node, cursor_node: Node) -> bool {
+            node.start_byte() >= cursor_node.start_byte() &&
+            node.end_byte() <= cursor_node.end_byte()
+        }
+        if is_inside(node, cursor.node()) {
             assert!(cursor.goto_first_child());
         } else {
             assert!(cursor.goto_next_sibling());
@@ -362,7 +376,7 @@ fn walk_cursor_to_descendant(cursor: &mut TreeCursor, node: Node) {
     }
 }
 
-pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
+pub fn compare_nodes<'a>(a: &Node<'a>, b: &Node<'a>, node_parent_provider: &impl NodeParentProvider<'a>) -> Ordering {
     if a == b {
         return Ordering::Equal;
     }
@@ -370,7 +384,7 @@ pub fn compare_nodes(a: &Node, b: &Node) -> Ordering {
         Ordering::Less => Ordering::Less,
         Ordering::Greater => Ordering::Greater,
         Ordering::Equal => {
-            if a.is_descendant_of(*b) {
+            if a.is_descendant_of(*b, node_parent_provider) {
                 Ordering::Greater
             } else {
                 Ordering::Less
