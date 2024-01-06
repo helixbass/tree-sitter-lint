@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use tree_sitter_grep::tree_sitter::{Node, Tree};
 
-use crate::{TreeEnterLeaveVisitor, walk_tree};
+use crate::{walk_tree, TreeEnterLeaveVisitor};
 
 pub type NodeParentCache<'a> = HashMap<Node<'a>, Node<'a>>;
 
@@ -47,9 +47,7 @@ pub struct StandaloneNodeParentProvider<'a> {
 
 impl<'a> From<Arc<NodeParentCache<'a>>> for StandaloneNodeParentProvider<'a> {
     fn from(cache: Arc<NodeParentCache<'a>>) -> Self {
-        Self {
-            cache,
-        }
+        Self { cache }
     }
 }
 

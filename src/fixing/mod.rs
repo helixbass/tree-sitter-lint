@@ -16,9 +16,9 @@ use tree_sitter_grep::{
 };
 
 use crate::{
-    aggregated_queries::AggregatedQueries, rule::InstantiatedRule, run_per_file, Config,
-    FileRunContext, FromFileRunContextInstanceProviderFactory, MutRopeOrSlice, RuleMeta, RuleName,
-    RunKind, ViolationWithContext, context::get_node_parent_cache,
+    aggregated_queries::AggregatedQueries, context::get_node_parent_cache, rule::InstantiatedRule,
+    run_per_file, Config, FileRunContext, FromFileRunContextInstanceProviderFactory,
+    MutRopeOrSlice, RuleMeta, RuleName, RunKind, ViolationWithContext,
 };
 
 mod accumulated_edits;
