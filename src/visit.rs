@@ -1,5 +1,4 @@
 use squalid::OptionExt;
-use tracing::trace;
 use tree_sitter_grep::tree_sitter::{Node, Tree};
 
 pub trait TreeEnterLeaveVisitor<'a> {
@@ -16,11 +15,11 @@ pub fn walk_tree<'a>(tree: &'a Tree, visitor: &mut impl TreeEnterLeaveVisitor<'a
             .last()
             .matches(|&last| node.end_byte() > last.end_byte())
         {
-            trace!(target: "visit", ?node, "leaving node");
+            // trace!(target: "visit", ?node, "leaving node");
 
             visitor.leave_node(node_stack.pop().unwrap());
         }
-        trace!(target: "visit", ?node, "entering node");
+        // trace!(target: "visit", ?node, "entering node");
 
         node_stack.push(node);
         visitor.enter_node(node);
@@ -38,7 +37,7 @@ pub fn walk_tree<'a>(tree: &'a Tree, visitor: &mut impl TreeEnterLeaveVisitor<'a
         }
     }
     while let Some(node) = node_stack.pop() {
-        trace!(target: "visit", ?node, "leaving node");
+        // trace!(target: "visit", ?node, "leaving node");
 
         visitor.leave_node(node);
     }
