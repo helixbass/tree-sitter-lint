@@ -24,7 +24,6 @@ use std::{
     collections::HashMap,
     fmt, fs,
     path::{Path, PathBuf},
-    process,
     sync::{Arc, Mutex},
 };
 
@@ -86,14 +85,19 @@ pub extern crate tokio;
 pub extern crate tree_sitter_grep;
 pub use tree_sitter_grep::{ropey, tree_sitter};
 
+pub enum ExitStatus {
+    Ok,
+    FoundViolations,
+}
+
 #[instrument(skip_all)]
 pub fn run_and_output(
     config: Config,
     from_file_run_context_instance_provider_factory: &dyn FromFileRunContextInstanceProviderFactory,
-) {
+) -> ExitStatus {
     let violations = run(&config, from_file_run_context_instance_provider_factory);
     if violations.is_empty() {
-        process::exit(0);
+        return ExitStatus::Ok;
     }
 
     let span = info_span!("printing violations", num_violations = violations.len()).entered();
@@ -104,7 +108,7 @@ pub fn run_and_output(
 
     span.exit();
 
-    process::exit(1);
+    ExitStatus::FoundViolations
 }
 
 #[instrument(level = "debug", skip_all)]
