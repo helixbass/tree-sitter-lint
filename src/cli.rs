@@ -224,14 +224,15 @@ fn get_local_binary_cargo_toml_contents(
 fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str) -> String {
     let local_binary_crate_name = format_ident!("{}", local_binary_crate_name);
     quote! {
-        use std::env;
+        use std::{env, process};
 
         use tracing_chrome::ChromeLayerBuilder;
         use tracing_subscriber::prelude::*;
         use tree_sitter_lint::squalid::NonEmpty;
+        use tree_sitter_lint::ExitStatus;
 
         fn main() {
-            let _guard = if env::var("TRACE_CHROME").ok().is_non_empty() {
+            let guard = if env::var("TRACE_CHROME").ok().is_non_empty() {
                 let (chrome_layer, guard) = ChromeLayerBuilder::new().include_args(true).build();
                 tracing_subscriber::registry().with(chrome_layer).init();
                 Some(guard)
@@ -240,7 +241,16 @@ fn get_src_bin_tree_sitter_lint_local_rs_contents(local_binary_crate_name: &str)
                 None
             };
 
-            #local_binary_crate_name::run_and_output();
+            let exit_status = #local_binary_crate_name::run_and_output();
+
+            if let Some(guard) = guard {
+                drop(guard);
+            }
+
+            process::exit(match exit_status {
+                ExitStatus::Ok => 0,
+                ExitStatus::FoundViolations => 1,
+            });
         }
     }
     .to_string()
@@ -353,14 +363,14 @@ fn get_src_lib_rs_contents(parsed_config_file: &ParsedConfigFile, has_local_rule
             FromFileRunContextInstanceProviderFactory, FromFileRunContextProvidedTypes,
             FromFileRunContextProvidedTypesOnceLockStorage, MutRopeOrSlice, Plugin, Rule,
             lsp::{ArgsOrConfig, LocalLinter, self}, FixingForSliceRunStatus,
-            FixingForSliceRunContext, PerConfigContext, SliceRunStatus
+            FixingForSliceRunContext, PerConfigContext, SliceRunStatus, ExitStatus
         };
 
-        pub fn run_and_output() {
+        pub fn run_and_output() -> ExitStatus {
             tree_sitter_lint::run_and_output(
                 args_to_config(Args::parse()),
                 &FromFileRunContextInstanceProviderFactoryLocal,
-            );
+            )
         }
 
         pub fn run_for_slice<'a>(
